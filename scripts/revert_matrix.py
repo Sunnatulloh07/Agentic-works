@@ -75,6 +75,32 @@ def run_tests(pattern, python):
     return proc.returncode, last.strip()
 
 
+def verify(target, mutations):
+    """Report whether every mutation pattern matches its target exactly once.
+
+    ``main`` already reports a pattern that matched zero times as PATTERN-MISSING, but
+    only after the control run and a full pass over the list -- minutes for a large
+    matrix. Checking the patterns first costs milliseconds and answers the same
+    question, so a typo is found before the wait rather than after it. This exists
+    because the same typo was paid for twice.
+    """
+    path = os.path.join(API, target) if not os.path.isabs(target) else target
+    source = open(path, 'rb').read()
+    print(f'target: {os.path.relpath(path, ROOT)}  ({len(source)} bytes)')
+    bad = 0
+    for label, old, _ in mutations:
+        count = source.count(old)
+        if count == 1:
+            print(f'  OK         {label}')
+            continue
+        bad += 1
+        verdict = MISSING if count == 0 else 'AMBIGUOUS'
+        print(f'  {verdict:<15} {label}  count={count}')
+        print(f'              {old!r}')
+    print(f'\n{len(mutations)} mutations, {len(mutations) - bad} usable, {bad} unusable')
+    return 1 if bad else 0
+
+
 def main(target, pattern, mutations):
     path = os.path.join(API, target) if not os.path.isabs(target) else target
     sidecar = path + '.matrix-baseline'

@@ -5615,3 +5615,259 @@ FAILED (failures=1, errors=11, skipped=1)
 | Matritsa | 15 → **17 mutatsiya**, **17/17 qizil**, 0 yashil, 0 o'lchanmagan |
 | Probe | **66 xossa, 66 pass** |
 | Yagona `failure` / 11 `error` | **oldindan mavjud** (Windows-only / POSIX-only) |
+
+## §150. Fazza qirq beshinchi — `secret_vault.py` chegaralari va **uchta o'lgan chegara**
+
+**Sirt:** `platform_runtime/secret_vault.py`, **99 satr**, 11 test
+(`test_secret_vault.py`). Bu — **har bir credential saqlanadigan** modul: OAuth
+tokenlari shu yerdan o'tadi, ya'ni bu yerdagi har bir chegara yo "nimani
+shifrlash mumkin" yoki "nimani shifrmatn deb qabul qilinadi" degan savolga javob
+beradi.
+
+### §150.1. Nega aynan bu modul tanlandi
+
+Skan **mexanik**, taassurot emas: modulda **6 ta katta sonli literal** va **bitta
+ham nomlangan konstanta yo'q** — §148 dagi `oauth.py` va §149 dagi `tools.py`
+bilan **aynan bir xil sabab**, uchinchi nusxa.
+
+Farqi shundaki, bu modulda **rad etish xabarlarining o'zi ham chegara**: `seal` va
+`open` `except Exception` bilan **hamma** sababni bitta matnga aylantiradi. Ya'ni
+bu yerda "ikki sabab bitta xabar" naqshi **ataylab** bo'lishi ham mumkin —
+o'lchash kerak, taxmin qilish emas.
+
+### §150.2. Chegaralar, va ularni kim tekshirardi
+
+| Chegara | Qiymat | Joy |
+|---|---|---|
+| kalit halqasi qavati | 1 | `SecretVault.__init__` |
+| kalit halqasi shifti | 8 | `SecretVault.__init__` |
+| kalit id shakli | `[A-Za-z0-9_-]{1,64}` | halqa tekshiruvi |
+| kalit materiali | **aniq** 32 bayt | halqa tekshiruvi |
+| takroriy kalit materiali | rad etiladi | halqa tekshiruvi |
+| shifrlash konteksti | bo'sh emas, 4096 bayt | `_aad` |
+| muhrlangan yuk | 64 000 bayt | `seal` |
+| ochilgan yuk | 64 000 bayt | `open` |
+| konvert | 90 000 belgi | `open` |
+| konvert maydonlari | **aniq** to'rtta, `v == 1` | `open` |
+| nonce | **aniq** 12 bayt | `open` |
+| kodlangan maydon | 150 000 belgi | `_unb64` |
+
+### §150.3. O'lchov — birinchi matritsa, **13 mutatsiyadan 8 tasi YASHIL**
+
+```
+CONTROL                     GREEN    OK
+base64 field 150000         GREEN    OK
+key ring upper 8            GREEN    OK
+key id ceiling 64           GREEN    OK
+key material 32 bytes       RED      FAILED (errors=63)
+duplicate key material      RED      FAILED (failures=1)
+context ceiling 4096        GREEN    OK
+context must be non-empty   GREEN    OK
+seal payload 64000          RED      FAILED (failures=1)
+envelope 90000              GREEN    OK
+envelope field set          GREEN    OK
+envelope version 1          RED      FAILED (errors=41)
+nonce 12 bytes              RED      FAILED (errors=41)
+opened payload 64000        GREEN    OK
+```
+
+**Sakkizta yashil** — lekin ularning hammasi bir xil turdagi emas. Ular **uch
+guruhga** bo'lindi, va guruhni aniqlash uchun **o'lchash** kerak bo'ldi:
+
+| Guruh | Chegaralar | Nima uchun yashil |
+|---|---|---|
+| **Qadalmagan** | halqa 8, kalit id 64, kontekst 4096, kontekst bo'sh emas, konvert maydonlari | Kod **bajaradi**, lekin **hech bir test qadamaydi** |
+| **Qo'riqchi ko'rinmas** | konvert 90 000 | `test_invalid_envelope_shapes` `'x'*90001` ni **sinaydi**, lekin u **boshqa sababdan** rad etiladi |
+| **Yetib borilmaydigan** | kodlangan maydon 150 000, ochilgan yuk 64 000 | Bu chegaralarga **hech bir yo'l** yetib bormaydi |
+
+Uchinchi guruh — §149.5 dagi "enkoder 2998" darsining **yangi nusxasi**: yashil
+rang "qadalmagan" degani emas, **"o'lchab bo'lmaydi"** degani ham bo'lishi mumkin.
+
+Eng nozik joyi — **konvert 90 000**: `test_invalid_envelope_shapes` da
+`'x'*90001` **bor**, ya'ni test **qadagandek ko'rinadi**. Lekin mutatsiya yashil
+chiqdi, chunki shift olib tashlanganda ham o'sha satr `json.loads` da yiqilib
+**baribir** `VaultError` beradi. Ya'ni test **rad etishni** o'lchagan, **sababini**
+emas — §148 va §149 naqshlarining **test tomonidagi** nusxasi.
+
+### §150.4. Haqiqiy nuqson — **chaqiruvchining o'z xatosi kripto xatosi bo'lib xabar qilinardi**
+
+`seal` ning `except Exception` i `_aad` ning **o'z** `VaultError` ini ham yutardi:
+chaqiruvchi **o'z argumentini** noto'g'ri bergan bo'lsa ham "shifrlash
+muvaffaqiyatsiz" degan xabar olardi.
+
+| Holat | Tuzatishdan **oldin** | Tuzatishdan **keyin** |
+|---|---|---|
+| `seal` + kontekst 4097 bayt | `Secret encryption failed` | `Bounded encryption context required` |
+| `seal` + bo'sh kontekst `{}` | `Secret encryption failed` | `Bounded encryption context required` |
+| `seal` + kontekst `None` | `Secret encryption failed` | `Bounded encryption context required` |
+
+Bu — §148 ("beshta rad etish bitta xabar") va §149 ("ikki sabab bitta xabar")
+naqshining **uchinchi nusxasi**. Farqi: bu yerda sabab **chaqiruvchining o'z
+argumenti**, ya'ni uni **tuzatish mumkin**, va kripto shaklidagi xabar
+chaqiruvchini **noto'g'ri joydan** qidirtiradi.
+
+**Tuzatish:** tor istisno keng istisnodan **oldin** turadi —
+`except VaultError: raise`, keyin `except Exception`.
+
+**Va `open` da bu ataylab TESKARI qoldirildi.** Sabab o'lchandi: `open` da `_aad`
+**kalit id tekshiruvidan keyin** chaqiriladi. Agar kontekst xatosi alohida
+nomlansa, u "kalit id noma'lum" dan **ajralib qolardi** — ya'ni hujumchi **qaysi
+kalit id lar sozlanganini** bilib olardi. Bu **oracle**:
+
+```
+open(konvert, {})              -> Secret authentication failed
+open(konvert, {boshqa ctx})    -> Secret authentication failed
+open(konvert, juda katta ctx)  -> Secret authentication failed
+open(konvert, kid='nope')      -> Secret authentication failed
+```
+
+To'rttasi ham **bir xil**. Asimmetriya **ataylab**, va endi **qadalgan**
+(`test_open_does_not_reveal_key_id_membership`) — chunki aks holda keyingi
+dasturchi uni "izchillik uchun" tuzatib, oracle'ni **qaytarib qo'yadi**.
+
+### §150.5. Uch chegara **yetib borilmaydi** — o'lchandi, tuzatilmadi
+
+1. **Konvert 90 000.** Eng katta **to'g'ri shaklli** konvert o'lchandi: maksimal
+   yuk (64 000 bayt) + eng uzun kalit id (64 belgi) = **85 479 belgi**, ya'ni
+   **85 479 < 90 000**. Demak bu shiftga **hech qachon** yetib borilmaydi, va
+   uning rad etishi **parse xatosidan ajralmaydi** (ikkalasi ham `VaultError`).
+   Uning vazifasi — `json.loads` ni katta satrdan **uzoq tutish**. Shuning uchun
+   **natija emas, mexanizm** qadaldi: `json.loads` **umuman chaqirilmasligi**
+   assert qilinadi. Probe bu sonni **har yurishda qayta o'lchaydi**.
+
+2. **Kodlangan maydon 150 000.** `open` ichida konvert shifti **birinchi** uradi
+   (90 000 < 150 000). `from_environment` orqali ham yetib bo'lmaydi: probe **shu
+   hostning** muhit o'zgaruvchisi shiftini bisection bilan o'lchadi — **32 747
+   belgi**, ya'ni **32 747 < 150 000** (Linux'da 131 072). Ya'ni bu chegara
+   **chaqiruvchi tomonidan hech qayerdan yetib borilmaydi**; to'g'ridan-to'g'ri
+   chaqiruv sifatida qadaldi.
+
+3. **Ochilgan yuk 64 000.** Bunga faqat **shu modul ishlab chiqarmagan** konvert
+   yetib boradi, chunki `seal` ayni shu sonni **birinchi** rad etadi. Ya'ni bu —
+   "bizning chegaramizni baham ko'rmaydigan tengdosh" dan himoya. Qo'lda qurilgan
+   konvert bilan qadaldi.
+
+**Uchtasi ham tuzatilmadi** — tuzatish uchun **nuqson** kerak, bu yerda esa
+**o'lchangan fakt** bor.
+
+### §150.6. Uch chegarani **xulq-atvor umuman qaday olmaydi**
+
+`NONCE_BYTES`, `ENVELOPE_VERSION` va `AAD_FORMAT` **ham yozuvchi, ham o'quvchi**
+tomonidan o'qiladi. Shuning uchun ularni kengaytirish **ikkala tomonni birga**
+suradi va round-trip **baribir o'tadi**. Probe buni o'lchadi:
+
+```
+RECORDED: a widened nonce size still round-trips
+RECORDED: a widened envelope version still round-trips
+RECORDED: a widened aad format still round-trips
+```
+
+Ya'ni bu uchtasi uchun **yagona pin — literal assertion**. Va bu **nazariy emas**:
+ikkinchi matritsa **1/17 yashil** chiqdi va aynan `AAD_FORMAT` edi — men uni
+literal tekshiruviga qo'shishni **unutilgan edim**. Ya'ni "xulq-atvor qadaydi"
+degan taxmin **bir marta** allaqachon xato bo'ldi.
+
+`AAD_FORMAT` ning tikdagi narxi **haqiqiy**: uni productionda o'zgartirish
+**saqlangan har bir credentialni ochilmaydigan** qiladi, chunki AAD o'zgaradi.
+
+### §150.7. Qaytarish matritsasi — **17/17 qizil**
+
+Konstantalar nomlangach mutatsiya nishonlari ham **konstanta qiymati** bo'ldi.
+
+```
+key ring floor 1           RED   6.8s  FAILED (failures=1)
+key ring ceiling 8         RED   6.9s  FAILED (failures=2)
+key id ceiling 64          RED   7.9s  FAILED (failures=1)
+key material 32 bytes      RED   2.3s  FAILED (failures=2, errors=67)
+duplicate key material     RED   7.2s  FAILED (failures=1)
+context ceiling 4096       RED   7.1s  FAILED (failures=1)
+context must be non-empty  RED   7.1s  FAILED (failures=2)
+sealed payload 64000       RED   7.0s  FAILED (failures=3)
+opened payload check       RED   7.9s  FAILED (failures=1)
+envelope 90000             RED   7.2s  FAILED (failures=1)
+encoded field 150000       RED   7.1s  FAILED (failures=1)
+envelope field set         RED   7.1s  FAILED (failures=1)
+envelope version 1         RED   7.2s  FAILED (failures=1)
+aad format 1               RED   8.9s  FAILED (failures=1)
+nonce 12 bytes             RED   8.4s  FAILED (failures=1)
+seal names caller error    RED   9.7s  FAILED (failures=1)
+open stays generic         RED   8.5s  FAILED (failures=1)
+restore verified: YES
+```
+
+Ikki mutatsiya **konstanta emas**, balki shu fazada tuzatilgan **ikki xulq**:
+`seal` ning o'z xatosini nomlashi va `open` ning **nomlamasligi**. Qadalmasa,
+ikkala tuzatish ham **jimgina qaytarilishi** mumkin edi.
+
+### §150.8. Asbob yaxshilandi — `--check` rejimi
+
+Naqsh xatosini **ikki marta** to'lashga to'g'ri keldi. Endi `revert_matrix.py` da
+`verify()` bor va fazza skriptlari `--check` ni qabul qiladi:
+
+```
+$ python scripts/audit_vault_bounds.py --check
+target: api-python\platform_runtime\secret_vault.py  (6194 bytes)
+  OK         key ring floor 1
+  ...
+17 mutations, 17 usable, 0 unusable
+```
+
+Matritsa **~2 daqiqa** oladi; naqsh tekshiruvi **millisekund**. Xato endi
+kutishdan **oldin** topiladi.
+
+### §150.9. Qo'shilgan sinov va probe
+
+- `test_secret_vault.py`: yangi `DeclaredBoundTests` — **11 sinov**, 11 → **22**.
+  Har biri chegarani **ikki tomondan** yuradi va **literalni** qadaydi.
+- `scripts/probe_vault_boundaries.py` — **99 xossa, 99 pass**, 9 bo'lim.
+- Modul: 99 → **147 satr**; nomlangan konstanta **0 → 12**.
+
+### §150.10. O'zim qilgan xatolar (yashirilmadi)
+
+1. **`AAD_FORMAT` ni literal tekshiruviga qo'shmadim.** Ikkinchi matritsa
+   **1/17 yashil** chiqdi va aynan shu bo'ldi. Ya'ni "qadadim" degan ishonch
+   **matritsa bilan** tekshirilishi kerak — matritsa **ushlab qoldi**.
+2. **Muhit o'zgaruvchisi shiftini bilmasdim.** 150 001 belgili qiymatni
+   `os.environ` ga yozdim va `ValueError: the environment variable is longer than
+   32767 characters` oldim. Ya'ni chegara **yetib borilmaydigan** ekanini
+   **xato orqali** bildim — o'lchov kerak edi.
+3. **`AESGCM.encrypt` ga `str` berdim** — `bytes` kerak. Qo'lda qurilgan konvert
+   yordamchisida `.encode('utf-8')` tushib qolgan edi.
+4. **Eng katta konvertni xato hisobladim** — 85 478 dedim, **85 479** chiqdi.
+   Probe o'lchadi; hisobim bir belgi xato edi.
+
+### §150.11. Saboqlar
+
+1. **Yashil rang uch xil ma'no beradi:** qadalmagan, qo'riqchi ko'rinmas, yetib
+   borilmaydigan. Uchtasini **ajratish** — ishning o'zi.
+2. **Rad etish xabari ham chegara.** Repo §148 va §149 da "hamma sabab bitta
+   xabar" ni **ikki marta** nuqson deb topdi. Bu yerda esa **aynan o'sha naqsh
+   to'g'ri** bo'lib chiqdi — `open` uchun. Naqshni **ko'r-ko'rona** qo'llash
+   xato bo'lardi; **o'lchash** kerak.
+3. **Asimmetriya niyat bo'lsa, u ham qadalishi kerak.** Aks holda keyingi
+   dasturchi uni "izchillik" deb tuzatadi va **oracle'ni qaytaradi**.
+4. **Bir son ikki tomonda o'qilsa, xulq-atvor uni qaday olmaydi.** `NONCE_BYTES`,
+   `ENVELOPE_VERSION`, `AAD_FORMAT` — yagona pin **literal**.
+5. **Test "rad etildi" ni o'lchab, "nima uchun" ni o'lchamasa, chegara qadalmagan
+   bo'lib qoladi.** `'x'*90001` aynan shu holat edi.
+6. **Naqsh xatosini ikki marta to'lash — asbobni tuzatish signali.** `--check`
+   shundan tug'ildi.
+
+### §150.12. Yakuniy baseline — o'lchandi
+
+```
+Ran 2814 tests in 576.803s
+
+FAILED (failures=1, errors=11, skipped=1)
+```
+
+Imzo (`failures=1, errors=11, skipped=1`) **o'zgarmadi**. Devor vaqti yukka
+bog'liq: §149 da 270.9 s edi, bu yurishda 576.8 s — test soni va imzo bir xil.
+
+| Ko'rsatkich | Qiymat |
+|---|---|
+| Testlar | **2803 → 2814** = **+11** (`DeclaredBoundTests`), boshqa o'zgarish yo'q |
+| Imzo | `failures=1, errors=11, skipped=1` — **o'zgarmadi** |
+| `secret_vault.py` | 99 → **147 satr**; nomlangan konstanta **0 → 12** |
+| Matritsa | 13 → **17 mutatsiya**, **17/17 qizil**, 0 yashil, 0 o'lchanmagan |
+| Probe | **99 xossa, 99 pass** |

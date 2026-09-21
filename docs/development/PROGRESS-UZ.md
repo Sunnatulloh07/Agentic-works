@@ -1500,3 +1500,124 @@ qaytargan, lekin `deepest` istisno kutgan** edi. To'rttasi ham **mening** xatoim
 `agent_planner.py`, `google_oauth.py`, `postgres_connector.py`, `speech.py`,
 `mcp.py`, `model_transport.py`, `model_response.py`, `crm/crm_reconcile.py`.
 `production_release` **NO_GO** bo'lib qoladi.
+
+## V05V — `secret_vault.py` chegaralari: **chaqiruvchining xatosi kripto xatosi bo'lib qolgan** (§150)
+
+**Sana:** 2026-09-21. **Holat:** QURILDI VA O'LCHANDI (lokal kontrakt).
+
+Auditning qirq beshinchi fazasi. **Yangi qobiliyat yo'q** — credential
+saqlanadigan modul (`secret_vault.py`) o'lchandi, **bitta haqiqiy nuqson**
+tuzatildi, ikki chegara esa **yetib borilmaydigan** deb **rad etildi**.
+
+**Nega bu modul:** skan mexanik edi — **6 ta katta sonli literal** va **bitta ham
+nomlangan konstanta yo'q** (§148 va §149 bilan bir xil sabab, uchinchi nusxa).
+Farqi shundaki, bu yerda **rad etish xabarlarining o'zi ham chegara**: `seal` va
+`open` `except Exception` bilan hamma sababni bitta matnga aylantiradi — ya'ni
+"ikki sabab bitta xabar" bu yerda **ataylab** bo'lishi ham mumkin.
+
+### Birinchi matritsa: **13 mutatsiyadan 8 tasi YASHIL**
+
+Sakkizta yashil **uch guruhga** bo'lindi, va guruhni aniqlash uchun **o'lchash**
+kerak bo'ldi:
+
+| Guruh | Chegaralar | Nima uchun yashil |
+|---|---|---|
+| **Qadalmagan** | halqa 8, kalit id 64, kontekst 4096, kontekst bo'sh emas, konvert maydonlari | Kod bajaradi, lekin **hech bir test qadamaydi** |
+| **Qo'riqchi ko'rinmas** | konvert 90 000 | Test bor, lekin u **boshqa sababdan** rad etiladi |
+| **Yetib borilmaydigan** | kodlangan maydon 150 000, ochilgan yuk 64 000 | **Hech bir yo'l** yetib bormaydi |
+
+Eng nozik joyi — **konvert 90 000**: `test_invalid_envelope_shapes` da `'x'*90001`
+**bor**, ya'ni test **qadagandek ko'rinadi**. Lekin shift olib tashlanganda ham
+o'sha satr `json.loads` da yiqilib **baribir** `VaultError` beradi — ya'ni test
+**rad etishni** o'lchagan, **sababini** emas.
+
+### Nuqson — **chaqiruvchining o'z xatosi kripto xatosi bo'lib xabar qilinardi**
+
+| Holat | Oldin | Keyin |
+|---|---|---|
+| `seal` + kontekst 4097 bayt | `Secret encryption failed` | `Bounded encryption context required` |
+| `seal` + bo'sh kontekst `{}` | `Secret encryption failed` | `Bounded encryption context required` |
+| `seal` + kontekst `None` | `Secret encryption failed` | `Bounded encryption context required` |
+
+`seal` ning `except Exception` i `_aad` ning **o'z** `VaultError` ini ham yutardi.
+Sabab esa **chaqiruvchining o'z argumenti** — ya'ni uni **tuzatish mumkin**, va
+kripto shaklidagi xabar chaqiruvchini noto'g'ri joydan qidirtiradi. Tuzatish:
+`except VaultError: raise` — tor istisno keng istisnodan **oldin**.
+
+### `open` da bu **ataylab TESKARI** — va endi qadalgan
+
+`open` da `_aad` **kalit id tekshiruvidan keyin** chaqiriladi. Agar kontekst xatosi
+alohida nomlansa, u "kalit id noma'lum" dan **ajralib qolardi** — ya'ni hujumchi
+**qaysi kalit id lar sozlanganini** bilib olardi (**oracle**). Shuning uchun
+to'rttasi ham **bir xil** xabar beradi:
+
+```
+open(konvert, {})              -> Secret authentication failed
+open(konvert, {boshqa ctx})    -> Secret authentication failed
+open(konvert, juda katta ctx)  -> Secret authentication failed
+open(konvert, kid='nope')      -> Secret authentication failed
+```
+
+Bu asimmetriya endi **test bilan qadalgan** — aks holda keyingi dasturchi uni
+"izchillik uchun" tuzatib, oracle'ni **qaytarib qo'yadi**.
+
+### Ikki chegara **yetib borilmaydi** — o'lchandi, tuzatilmadi
+
+- **Konvert 90 000:** eng katta **to'g'ri shaklli** konvert **85 479 belgi**
+  (maksimal yuk 64 000 bayt + eng uzun kalit id 64 belgi) — ya'ni
+  **85 479 < 90 000**. Uning vazifasi `json.loads` ni katta satrdan uzoq tutish;
+  shuning uchun **natija emas, mexanizm** qadaldi: `json.loads` umuman
+  chaqirilmasligi assert qilinadi.
+- **Kodlangan maydon 150 000:** `open` ichida konvert shifti birinchi uradi
+  (90 000 < 150 000); `from_environment` orqali ham yetib bo'lmaydi — probe **shu
+  hostning** muhit o'zgaruvchisi shiftini bisection bilan o'lchadi: **32 747
+  belgi** (Linux'da 131 072). Ya'ni **hech qayerdan** yetib borilmaydi.
+
+### Uch chegarani **xulq-atvor qaday olmaydi**
+
+`NONCE_BYTES`, `ENVELOPE_VERSION` va `AAD_FORMAT` **ham yozuvchi, ham o'quvchi**
+tomonidan o'qiladi — kengaytirilsa ikkala tomon birga suriladi va round-trip
+**baribir o'tadi**. Probe buni o'lchadi. Yagona pin — **literal assertion**, va bu
+nazariy emas: ikkinchi matritsa **1/17 yashil** chiqdi va aynan `AAD_FORMAT` edi
+(uni literal tekshiruviga qo'shishni unutgan edim). `AAD_FORMAT` productionda
+o'zgarsa — **saqlangan har bir credential ochilmaydigan** bo'ladi.
+
+### Qaytarish matritsasi — **17/17 qizil**, restore tasdiqlangan
+
+Ikki mutatsiya **konstanta emas** — shu fazada tuzatilgan ikki xulq (`seal`
+nomlaydi, `open` nomlamaydi). Qadalmasa, ikkala tuzatish ham jimgina
+qaytarilardi.
+
+**Asbob yaxshilandi:** `revert_matrix.py` da `verify()` va fazza skriptlarida
+`--check` rejimi. Matritsa ~2 daqiqa oladi, naqsh tekshiruvi millisekund — naqsh
+xatosi endi kutishdan **oldin** topiladi. (Bu xato **ikki marta** to'langan edi.)
+
+### Qo'shilgan
+
+- `test_secret_vault.py`: `DeclaredBoundTests` — **11 sinov** (11 → **22**), har
+  biri chegarani **ikki tomondan** yuradi va **literalni** qadaydi.
+- `scripts/probe_vault_boundaries.py` — **99 xossa, 99 pass**, 9 bo'lim.
+- `scripts/audit_vault_bounds.py` — **17 mutatsiya**, 17/17 qizil, 0 yashil.
+- `secret_vault.py`: nomlangan konstanta **0 → 12**; 99 → **147 satr**.
+
+### O'z xatolarim
+
+**`AAD_FORMAT` ni literal tekshiruviga qo'shmadim** — ikkinchi matritsa shu sababdan
+**1/17 yashil** chiqdi, ya'ni "qadadim" degan ishonchni **matritsa ushlab qoldi**.
+**Muhit o'zgaruvchisi shiftini bilmasdim** — 150 001 belgili qiymat `os.environ` da
+`ValueError` berdi, ya'ni chegara yetib borilmaydigan ekanini **xato orqali**
+bildim. **`AESGCM.encrypt` ga `str` berdim** (`.encode('utf-8')` tushib qolgan).
+**Eng katta konvertni bir belgi xato hisobladim** — 85 478 dedim, **85 479** chiqdi;
+probe o'lchadi.
+
+**Baseline (o'n yettinchi marta aynan):** **2814 test**,
+`failures=1, errors=11, skipped=1` — imzo **o'zgarmadi**.
+2803 → 2814 = **+11**, boshqa o'zgarish yo'q.
+
+**Hujjatlar:** `ULTRA-AUDIT-ASCII-CELL-UZ.md` §150,
+`BACKLOG.json` (`offline_tests` **2814**), `README.md` (2814), shu fayl.
+
+**Keyingi nomzodlar:** `app/` qatlami (40 modul / 4 479 satr),
+`agent_planner.py`, `google_oauth.py`, `postgres_connector.py`, `speech.py`,
+`mcp.py`, `model_transport.py`, `model_response.py`, `crm/crm_reconcile.py`.
+`production_release` **NO_GO** bo'lib qoladi.
