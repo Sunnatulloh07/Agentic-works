@@ -5245,3 +5245,169 @@ Probe: **1555 → 1683** xossa.
 > Takrorlanishning oldini olish uchun darslar endi `boundary-audit` skill'ining
 > `references/` fayllarida **mavzu bo'yicha** saqlanadi va yangi dars qo'shishdan
 > oldin o'sha yerda qidiriladi.
+
+## §148. Fazza qirq uchinchi — OAuth chegaralari va **beshta rad etish bitta xabar bo'lib qolgan**
+
+**Sirt:** `platform_runtime/oauth.py`, 378 satr, 49 test. Skan paytida e'tibor
+tortdi: modulda **birorta ham nomlangan konstanta yo'q**, lekin **to'qqizta**
+sonli chegara bor — hammasi **inline literal**.
+
+### §148.1. Chegaralar, va ularni kim tekshirardi
+
+| Chegara | Qiymat | Joy |
+|---|---|---|
+| `bounded` standart | 256 | umumiy maydon darvozasi |
+| talab qilinadigan scope soni | 40 | provayder nechta e'lon qila oladi |
+| berilgan scope qatori | 10 000 | provayderning o'z javobi |
+| token umri | 60 .. 86 400 | `expires_in` |
+| PKCE verifier | 43 .. 128 | RFC 7636 |
+| identifikator | 1 .. 128 | ulanish va provayder nomlari |
+| authorization code | 4 096 | callback parametri |
+| access / refresh token | 16 000 | provayder bergan credential |
+
+### §148.2. O'lchov — revert matritsasi, **9/9 yashil**
+
+Yangi asbob: `scripts/revert_matrix.py` (qayta ishlatiladigan; faza skripti
+`scripts/audit_oauth_bounds.py`). Nazorat yashil, keyin **to'qqizta mutatsiya
+hammasi yashil**:
+
+```
+CONTROL                GREEN   OK
+bounded default 256    GREEN   9.6s  OK
+required scopes 40     GREEN   8.6s  OK
+granted scope 10000    GREEN   9.1s  OK
+expiry ceiling 86400   GREEN   7.5s  OK
+expiry floor 60        GREEN   7.9s  OK
+PKCE floor 43          GREEN   9.5s  OK
+identifier ceiling 128 GREEN   9.3s  OK
+authorization code 4096 GREEN  9.8s  OK
+access token 16000     GREEN   9.4s  OK
+```
+
+**Qirq to'qqizta test butun oqimni uchidan-uchiga yurardi va bittasi ham
+chegarani o'lchamagan edi.** Oqim testi oqim ishlashini isbotlaydi; u shift
+**256** ekanini **257** dan ajratmaydi.
+
+### §148.3. Haqiqiy nuqson — **beshta aniq rad etish bitta umumiy xabarga aylanardi**
+
+Chegaralarni qadash uchun sinov yozayotganda ma'lum bo'ldi: `complete()` da
+`_tokens()` **keng `except Exception`** ichida chaqiriladi, va u **hamma narsani**
+`OAuthError('Authorization outcome unavailable; authorize again')` ga o'raydi.
+`OAuthError` — `RuntimeError` avlodi, ya'ni **o'z xatosi ham o'sha handler'ga
+tushadi**.
+
+O'lchandi (tuzatishdan **oldin**), beshta **butunlay boshqa** rad etish:
+
+| Provayder javobi | Operator ko'rgan xabar |
+|---|---|
+| `expires_in = 59` | Authorization outcome **unavailable** |
+| `expires_in = 86401` | Authorization outcome **unavailable** |
+| `expires_in = "3600"` | Authorization outcome **unavailable** |
+| `scope` = 10 001 belgi | Authorization outcome **unavailable** |
+| `access_token` = 16 001 belgi | Authorization outcome **unavailable** |
+
+Ya'ni **javob to'liq o'qilgan va tushunilgan**, lekin operator **tarmoq
+nosozligini** qidirishga yuboriladi, va auditga `uncertain` yoziladi. Bu
+skill'ning "qo'riqchi o'z `try`'ining keng handler'i tomonidan ushlanadi"
+darsining aynan o'zi — to'rt transportda topilgan naqshning uchinchi nusxasi.
+
+**Tuzatish ikki qavatli:**
+
+1. `_tokens` ichida `credential()` yordamchisi — `bounded` ning `ValueError` ini
+   **`OAuthError`** ga o'giradi, ya'ni metodning shartnomasi bir xil bo'ladi
+   (boshqa hamma chegara allaqachon `OAuthError` ko'tarardi).
+2. `complete`/`access` da **`except (OAuthError, Forbidden)`** shoxi **keng
+   handler'dan oldin** — sabab saqlanadi. `Forbidden` (`PermissionError`) bu
+   yerda **provayder tomonidagi** rad etish, shuning uchun u chaqiruvchining
+   shartnomasiga (`OAuthError`) o'tkaziladi, lekin **matni saqlanadi**.
+
+**Holat mashinasi o'zgarmadi:** `_failure(..., 'uncertain')` va
+`_cleanup_issued(...)` baribir ishlaydi, chunki **ishlatib bo'lmaydigan
+credential baribir bekor qilinishi kerak**. Faqat **sabab** tiklandi.
+
+Tuzatishdan keyin: **5 xil xabar** (7 rad etishdan; uchta expiry varianti bitta
+to'g'ri xabarni bo'lishadi).
+
+### §148.4. Revert matritsasi — **9/9 qizil**
+
+```
+bounded default 256    RED  18.3s
+required scopes 40     RED  19.8s
+granted scope 10000    RED  19.4s
+expiry ceiling 86400   RED  18.2s
+expiry floor 60        RED  18.5s
+PKCE floor 43          RED  20.0s
+identifier ceiling 128 RED  19.4s
+authorization code 4096 RED 19.8s
+token ceiling 16000    RED  19.5s
+restore verified: YES
+```
+
+### §148.5. Qo'shilgan sinov va probe
+
+- `test_oauth.py`: yangi `DeclaredBoundTests` — **8 sinov**, `test_oauth.py`
+  49 → **57**. Har biri literalni **aniq satr** bilan qadaydi (oxiridagi `\n`
+  bilan: `b'maximum=256'` ni `maximum=2560` ham qanoatlantiradi) **va** chegarani
+  **ikki tomondan** yuradi. Sinf **`OAuthTests` dan meros olmaydi** — pastga
+  qarang.
+- `scripts/probe_oauth_boundaries.py` — **48 xossa, 48 pass**, 4 bo'lim: darvozalar,
+  provayder javobi chegaralari, **har rad etish o'z sababini aytadi**, va rad
+  etilgan exchange baribir **fence qilinadi**.
+
+### §148.6. O'zim qilgan xatolar
+
+1. **Probe'da darvozalarga son berdim** (`bounded(256)`) — ular **satr** oladi.
+   Natijada 6 ta "qizil" chiqdi, ular **mening** xatolarim edi, modulning emas.
+   Tuzatildi: uzunlik yuritiladi (`bounded('x' * n)`).
+2. **Matritsani SIGTERM bilan o'ldirdim va bitta mutatsiya faylda qoldi**
+   (`PKCE floor 43` → `42`). Keyingi yurish **mutatsiyani baseline deb o'qidi**
+   va nazorat qizil bo'ldi — bu aynan skill yozgan tuzoq. Ikkalasi ham tuzatildi:
+   `revert_matrix.py` endi **sidecar** saqlaydi, uzilgan yurishni **aniqlaydi**,
+   va `atexit` + `SIGINT`/`SIGTERM` bilan tiklaydi. Mexanizm **sinovdan
+   o'tkazildi** (soxta uzilish yaratildi → aniqlandi → tiklandi).
+
+### §148.7. Saboqlar
+
+1. **"Birorta konstanta yo'q" degani "chegara yo'q" degani emas.** To'qqizta
+   inline literal — nomlangan konstanta bo'lmagani uchun **skanga tushmadi**;
+   ularni qo'lda sanash kerak bo'ldi.
+2. **Oqim testi chegarani o'lchamaydi.** 49 test to'liq oqimni yurardi va
+   to'qqizta chegaradan **bittasini ham** o'lchamagan edi.
+3. **Keng `except` modulning o'z xatosini ham yutadi.** `OAuthError`
+   `RuntimeError` avlodi, shuning uchun "faqat kutilmaganini o'rayman" degan
+   niyat bajarilmaydi — **o'z turini keng handler'dan oldin** qayta ko'tarish
+   kerak.
+4. **Uzilgan matritsa keyingi yurishning baseline'i bo'lib qoladi.** Buni
+   **aniqlaydigan** mexanizm kerak, chunki `atexit` signal bilan o'ldirilganda
+   ishlamaydi.
+5. **Meros — faqat fixture o'zgarganda.** Bu sinfni dastlab `OAuthTests` dan
+   meros qildirdim, natijada **43 ta oqim sinovi behuda ikkinchi marta** yurdi
+   (49 → 101 test, +8s), chunki sinf **fixture'ni o'zgartirmaydi**. Repo'dagi
+   naqsh (`SupervisorBoundaryTests`, `SheetsBoundaryTests`) **fixture'ni
+   o'zgartiradi**, shuning uchun meros o'sha yerda oqlanadi. Meros — qayta
+   ishlatish emas, **qayta yuritish**.
+
+### §148.8. Yakuniy baseline — **o'lchandi, keyin yozildi**
+
+Faza tugagach butun to'plam **qayta yurildi** (boshqariladigan venv,
+`cryptography` bilan):
+
+```
+Ran 2792 tests in 413.324s
+
+FAILED (failures=1, errors=11, skipped=1)
+```
+
+| Ko'rsatkich | Qiymat |
+|---|---|
+| Testlar | **2784 → 2792** = **+8** (`DeclaredBoundTests`), boshqa o'zgarish yo'q |
+| Imzo | `failures=1, errors=11, skipped=1` — **hujjatlashtirilgan baseline bilan aynan** |
+| Vaqt | 413 s (oldingi A/B: 443 s) |
+| Yagona `failure` | Windows-only `test_all_files_private` — **oldindan mavjud** |
+| 11 `error` | POSIX-only xavfsizlik kontrakti — **oldindan mavjud** |
+
+`test_oauth.py` alohida: **57 test, 9.0 s, OK**. `oauth.py` diff: **+53 satr**
+(tuzatish), `test_oauth.py` **+182 satr** (8 qadalgan sinov).
+
+**Muhim:** baseline **kod o'zgarishidan keyin** o'lchandi, ya'ni "imzo
+o'zgarmadi" — **da'vo emas, o'lchov**.

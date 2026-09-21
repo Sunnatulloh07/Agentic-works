@@ -22,8 +22,10 @@ Mutations are given as a list of ``(label, old_bytes, new_bytes)``.
 """
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -63,8 +65,42 @@ def run_tests(pattern, python):
 
 def main(target, pattern, mutations):
     path = os.path.join(API, target) if not os.path.isabs(target) else target
+    sidecar = path + '.matrix-baseline'
+
+    # A previous run that was killed mid-mutation leaves the source mutated, and the
+    # next run would then read the MUTATION as its baseline and "restore" the wrong
+    # bytes. The sidecar makes that detectable: it holds the bytes the last run
+    # started from, so an interrupted run is refused rather than silently adopted.
+    if os.path.exists(sidecar):
+        previous = open(sidecar, 'rb').read()
+        live = open(path, 'rb').read()
+        if previous != live:
+            print(f'INTERRUPTED RUN DETECTED: {os.path.relpath(path, ROOT)} does not match')
+            print(f'the baseline a previous matrix left behind ({len(previous)} vs '
+                  f'{len(live)} bytes).')
+            print('Restoring the recorded baseline; re-run to measure.')
+            open(path, 'wb').write(previous)
+            os.remove(sidecar)
+            return 1
+        os.remove(sidecar)
+
     baseline = open(path, 'rb').read()
     baseline_hash = hashlib.sha256(baseline).hexdigest()
+    open(sidecar, 'wb').write(baseline)
+
+    def restore(*_):
+        # `atexit` does not run when the process is killed by a signal, so both are
+        # registered. The sidecar is deliberately LEFT behind: it is what lets the
+        # next run notice, and it is removed only on a clean finish.
+        open(path, 'wb').write(baseline)
+
+    atexit.register(restore)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, lambda *_: (restore(), sys.exit(130)))
+        except (ValueError, OSError):
+            pass
+
     print(f'target      : {os.path.relpath(path, ROOT)}')
     print(f'baseline    : {len(baseline)} bytes, sha256 {baseline_hash[:16]}')
     python = interpreter()
@@ -110,6 +146,9 @@ def main(target, pattern, mutations):
     print(f'restore verified: {"YES" if live == baseline else "NO"}')
     if residue:
         print(f'RESIDUE: {residue}')
+
+    if os.path.exists(sidecar):
+        os.remove(sidecar)
 
     greens = [label for label, verdict, _, _ in results if verdict == GREEN]
     missing = [label for label, verdict, _, _ in results if verdict == MISSING]

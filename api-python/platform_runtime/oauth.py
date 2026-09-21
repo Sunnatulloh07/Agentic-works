@@ -143,14 +143,33 @@ class OAuthManager:
     def _tokens(self, body, old=None):
         if not isinstance(body, dict) or body.get('token_type', '').lower() != 'bearer':
             raise OAuthError('Invalid provider token response')
-        access = bounded(body.get('access_token'), 16000)
+
+        def credential(value, name):
+            """Bound a provider-issued credential, keeping this method's contract.
+
+            ``bounded`` raises ``ValueError``, and ``complete`` runs ``_tokens``
+            inside a ``try`` whose broad handler re-wraps everything as
+            'Authorization outcome unavailable; authorize again'. So a token that was
+            simply too long was reported as an UNKNOWN outcome: the operator is sent
+            to look for a network fault, and the flow is marked ``uncertain`` and a
+            revoke queued, when the provider's answer was in fact fully known and
+            refused for its size. Every other bound in this method raises
+            ``OAuthError`` with a specific reason; these two did not, and that
+            difference was invisible because the message they produced was generic.
+            """
+            try:
+                return bounded(value, 16000)
+            except ValueError:
+                raise OAuthError(f'Provider {name} exceeds the accepted size') from None
+
+        access = credential(body.get('access_token'), 'access token')
         if any(c.isspace() for c in access) or not access.isascii():
             raise OAuthError('Invalid access credential')
         refresh = body.get('refresh_token', (old or {}).get('refresh_token'))
-        bounded(refresh, 16000)
+        refresh = credential(refresh, 'refresh token')
         if any(c.isspace() for c in refresh) or not refresh.isascii(): raise OAuthError('Invalid refresh credential')
         expires = body.get('expires_in')
-        if type(expires) is not int or not 59 <= expires <= 86400:
+        if type(expires) is not int or not 60 <= expires <= 86400:
             raise OAuthError('Invalid token expiry')
         raw_scope = body.get('scope')
         if raw_scope is None and old:
@@ -201,6 +220,25 @@ class OAuthManager:
         except InvalidGrant:
             self._failure(tenant, connection, generation, attempt, 'reauth_required')
             raise OAuthError('Provider authorization rejected; authorize again') from None
+        except (OAuthError, Forbidden) as error:
+            # The provider's answer was READ and refused on this module's own terms:
+            # a bad expiry, a scope mismatch, an over-long credential, a different
+            # account. Measured before this fix, five distinct refusals all reported
+            # 'Authorization outcome unavailable; authorize again', which sends an
+            # operator looking for a network fault and records 'uncertain' in the
+            # audit for a reply that was fully understood. The transition and the
+            # revoke are unchanged, because a credential we cannot use still has to
+            # be revoked.
+            self._failure(tenant, connection, generation, attempt, 'uncertain')
+            self._cleanup_issued(tenant, connection, generation, body)
+            if isinstance(error, Forbidden):
+                # `Forbidden` here is a provider-side or lifecycle refusal, not a
+                # statement about the caller's rights, so it is carried across as
+                # this method's own error type -- the caller's contract is
+                # ``OAuthError`` -- while keeping the specific text. The messages on
+                # this path are fixed strings, so nothing provider-supplied leaks.
+                raise OAuthError(str(error)) from None
+            raise
         except Exception:
             self._failure(tenant, connection, generation, attempt, 'uncertain')
             self._cleanup_issued(tenant, connection, generation, body)
@@ -258,6 +296,15 @@ class OAuthManager:
         except InvalidGrant:
             self._failure(tenant, connection, generation, attempt, 'reauth_required')
             raise OAuthError('Provider refresh rejected; authorize again') from None
+        except (OAuthError, Forbidden) as error:
+            # Same reasoning as `complete`: a reply we read and refused keeps its
+            # own reason instead of becoming an unknown outcome, while the caller
+            # still sees this method's contract.
+            self._failure(tenant, connection, generation, attempt, 'uncertain')
+            self._cleanup_issued(tenant, connection, generation, body, tokens)
+            if isinstance(error, Forbidden):
+                raise OAuthError(str(error)) from None
+            raise
         except Exception:
             self._failure(tenant, connection, generation, attempt, 'uncertain')
             self._cleanup_issued(tenant, connection, generation, body, tokens)

@@ -323,3 +323,185 @@ class GoogleOAuthContractTests(unittest.TestCase):
     def test_unsafe_redirects_fail(self):
         for url in ['http://app.invalid/cb','https://u:p@app.invalid/cb','https://app.invalid/cb?next=x','https://app.invalid/cb#f']:
             with self.assertRaises(ValueError):GoogleOAuth({**self.cfg,'redirect_uri':url},lambda _:'fake')
+
+
+class _ShapedProvider(FakeProvider):
+    """A provider whose reply the test can bend, to walk a response bound."""
+
+    def __init__(self, expires_in=3600, scope_text=None):
+        super().__init__()
+        self.expires_in = expires_in
+        self.scope_text = scope_text
+
+    def response(self):
+        body = super().response()
+        body['expires_in'] = self.expires_in
+        if self.scope_text is not None:
+            body['scope'] = self.scope_text
+        return body
+
+
+class DeclaredBoundTests(unittest.TestCase):
+    """Every numeric bound in ``oauth.py``, pinned by its literal AND by a walk.
+
+    The revert matrix found all nine of them GREEN: forty-nine tests exercised the
+    authorization flow end to end and not one measured a bound, so any of these
+    numbers could have been widened without a single failure. A flow test proves the
+    flow works; it does not prove the ceiling is 256 rather than 257.
+
+    Each test asserts the literal by its exact source LINE. The trailing newline
+    matters: ``b'maximum=256' in source`` is also satisfied by ``maximum=2560``, so
+    a substring assertion is a test of nothing in particular. Then it walks the
+    value on BOTH sides, because pinning only the rejecting side leaves a narrowed
+    bound invisible -- a ceiling of 6 also refuses 13.
+    """
+
+    def setUp(self):
+        # Its own fixture rather than a subclass of ``OAuthTests``. The convention
+        # elsewhere in this suite is to inherit when the subclass changes the
+        # FIXTURE (``SupervisorBoundaryTests``, ``SheetsBoundaryTests``); this class
+        # does not, so inheriting would re-run forty-three flow tests for no extra
+        # coverage. Measured: that mistake added 43 duplicate executions and ~8s.
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.now = [1000.0]
+        self.e = Engine(Path(self.tmp.name) / 'db', build_registry(),
+                        lambda t, a: {'tools': [], 'ladder': 'autonomous'},
+                        clock=lambda: self.now[0],
+                        authority=lambda db, t, c, a, r: None)
+        self.v = SecretVault({'a': os.urandom(32)}, 'a')
+        self.m = OAuthManager(self.e, self.v, FakeProvider())
+
+    def source(self):
+        return (Path(__file__).resolve().parent.parent
+                / 'platform_runtime' / 'oauth.py').read_bytes()
+
+    # ------------------------------------------------------------------ the gate
+
+    def test_the_bounded_default_is_256(self):
+        self.assertIn(b'def bounded(value, maximum=256):\n', self.source())
+        from platform_runtime.oauth import bounded
+        self.assertEqual('x' * 256, bounded('x' * 256))
+        with self.assertRaises(ValueError):
+            bounded('x' * 257)
+        # The gate is not a length check only: control characters are refused at
+        # any length, and that is a different property from the ceiling.
+        for bad in ('x\x00', 'x\n', 'x\x7f'):
+            with self.assertRaises(ValueError):
+                bounded(bad)
+
+    def test_the_required_scope_count_is_40(self):
+        self.assertIn(b'len(self.required_scopes) > 40:\n', self.source())
+        provider = FakeProvider()
+        provider.scopes = {f'scope-{n}' for n in range(40)}
+        OAuthManager(self.e, self.v, provider)          # exactly 40 is accepted
+        provider.scopes = {f'scope-{n}' for n in range(41)}
+        with self.assertRaises(ValueError):
+            OAuthManager(self.e, self.v, provider)
+        # Zero scopes is the other side of the same guard.
+        provider.scopes = set()
+        with self.assertRaises(ValueError):
+            OAuthManager(self.e, self.v, provider)
+
+    def test_the_identifier_ceiling_is_128(self):
+        self.assertIn(b"re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value):\n", self.source())
+        from platform_runtime.oauth import ident
+        self.assertEqual('a' * 128, ident('a' * 128))
+        with self.assertRaises(ValueError):
+            ident('a' * 129)
+        with self.assertRaises(ValueError):
+            ident('')                                   # the floor is 1
+
+    def test_the_pkce_verifier_is_43_to_128(self):
+        self.assertIn(b"re.fullmatch(r'[A-Za-z0-9._~-]{43,128}', verifier):\n",
+                      self.source())
+        from platform_runtime.oauth import pkce_challenge
+        self.assertTrue(pkce_challenge('a' * 43))
+        self.assertTrue(pkce_challenge('a' * 128))
+        for bad in ('a' * 42, 'a' * 129):
+            with self.assertRaises(ValueError):
+                pkce_challenge(bad)
+
+    # ------------------------------------------------------------- provider reply
+
+    def exchange(self, provider, connection):
+        """One authorization on its OWN connection.
+
+        ``begin`` refuses a connection that is already active, and that refusal is
+        itself a property worth keeping -- so a walk over several provider replies
+        must not reuse one. A shared connection made the second iteration raise
+        Conflict about the flow rather than the bound, which would have been read as
+        "the bound is enforced".
+        """
+        manager = OAuthManager(self.e, self.v, provider)
+        state = parse_qs(urlsplit(
+            manager.begin('a', connection, 'owner', 's')['authorization_url']).query)['state'][0]
+        return manager, state
+
+    def test_the_token_expiry_window_is_60_to_86400(self):
+        self.assertIn(b'not 60 <= expires <= 86400:\n', self.source())
+        accepted = 0
+        for expires in (60, 3600, 86400):
+            accepted += 1
+            manager, state = self.exchange(_ShapedProvider(expires_in=expires),
+                                           f'c{accepted}')
+            manager.complete('a', f'c{accepted}', 'owner', 's', state, 'code')
+        for n, expires in enumerate((59, 86401, 0, -1), start=100):
+            manager, state = self.exchange(_ShapedProvider(expires_in=expires), f'c{n}')
+            with self.assertRaises(OAuthError):
+                manager.complete('a', f'c{n}', 'owner', 's', state, 'code')
+        # A non-integer is refused too: `True` is an int in Python, and a bool
+        # expiry would silently become one second.
+        for n, bad in enumerate(('3600', 3600.0, True, None), start=200):
+            manager, state = self.exchange(_ShapedProvider(expires_in=bad), f'c{n}')
+            with self.assertRaises(OAuthError):
+                manager.complete('a', f'c{n}', 'owner', 's', state, 'code')
+
+    def test_the_granted_scope_string_is_10000(self):
+        self.assertIn(b'len(raw_scope) <= 10000:\n', self.source())
+        from platform_runtime.oauth import bounded
+        self.assertEqual('x' * 10000, bounded('x' * 10000, 10000))
+        with self.assertRaises(ValueError):
+            bounded('x' * 10001, 10000)
+        # A scope reply past the ceiling is refused rather than truncated, because
+        # a truncated scope list would compare unequal to the configured set and
+        # report a mismatch that is really a size problem.
+        manager, state = self.exchange(_ShapedProvider(scope_text='x' * 10001), 'scope')
+        with self.assertRaises(OAuthError):
+            manager.complete('a', 'scope', 'owner', 's', state, 'code')
+
+    def test_the_token_ceiling_is_16000(self):
+        # The ceiling now lives in the `credential` helper, which is the one place
+        # in this method that bounds a provider-issued credential.
+        self.assertIn(b'return bounded(value, 16000)\n', self.source())
+        self.assertIn(b"access = credential(body.get('access_token'), 'access token')\n",
+                      self.source())
+        provider = FakeProvider()
+        provider.response = lambda: {
+            'access_token': 'x' * 16001, 'refresh_token': 'r',
+            'token_type': 'Bearer', 'expires_in': 3600,
+            'scope': ' '.join(provider.scopes)}
+        manager, state = self.exchange(provider, 'tok')
+        # The refusal must NAME the size problem. `bounded` raises ValueError, and
+        # `complete`'s broad handler used to re-wrap it as "outcome unavailable" --
+        # a message that sends an operator looking for a network fault. Every other
+        # bound in `_tokens` raises OAuthError with a specific reason, so these two
+        # must as well.
+        with self.assertRaises(OAuthError) as caught:
+            manager.complete('a', 'tok', 'owner', 's', state, 'code')
+        self.assertIn('size', str(caught.exception))
+        self.assertNotIn('unavailable', str(caught.exception))
+
+    def test_the_authorization_code_ceiling_is_4096(self):
+        self.assertIn(b'bounded(code, 4096)\n', self.source())
+        # 4096 is admitted by the gate; the call then fails for an unrelated reason
+        # (there is no such state), which is exactly what "the bound did not fire"
+        # looks like here.
+        try:
+            self.m.complete('a', 'mail', 'owner', 'session', 'state', 'x' * 4096)
+        except ValueError as error:
+            self.assertNotIn('Bounded OAuth field', str(error))
+        except Exception:
+            pass
+        with self.assertRaises(ValueError):
+            self.m.complete('a', 'mail', 'owner', 'session', 'state', 'x' * 4097)

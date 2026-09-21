@@ -55,6 +55,13 @@ Bu `verify_manifest.py` uchun “Unlisted file” bo‘ladi, ya’ni provenance 
 Tuzatish: `TEMP/TMP/TMPDIR` va `USERPROFILE` harness’ning o‘z throwaway katalogiga o‘rnatildi.
 Yangi yurishlarda `api-python/tmp*` paydo bo‘lmaydi.
 
+> **Ataylab saqlanadi (2026-09-21).** Yuqoridagi to‘rt katalog (`.db*` — `.gitignore`da,
+> git kuzatmaydi) **o‘chirilmadi**: ular shu nuqsonning **o‘lchangan dalili**. Ular
+> `verify_manifest.py` uchun “Unlisted file” bo‘lgani aynan shu yerda yozilgan, ya’ni
+> kataloglarni o‘chirish dalilni ham o‘chirardi — va bu audit hujjatining
+> “o‘chirish eslatmasi tuzog‘i” darsining aynan o‘zi (§147.6, §143.5).
+> Bu — **pre-fix yurishlar qoldig‘i**, hozirgi kod emas: yangi yurishlar ularni yasamaydi.
+
 ### 3. Har bir job uchun 90 soniyalik qattiq timeout to‘liq suite’ga yetmasdi
 
 835 test Linux’da ~27 s, Windows’da bir necha barobar sekin. Natijada log

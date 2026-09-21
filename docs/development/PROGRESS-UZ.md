@@ -1315,3 +1315,94 @@ slot boshqaruvi, provayder rate-limit retry, yozuvni haqiqatda o'chirish
 (operator amali), VO-06 budget reservation'ni `usage_budget` ga ulash, STT/TTS
 live sifat (**NOT_RUN** — real provayder audiosi kerak) va live provayder
 acceptance. Audio saqlash **hech qachon**. `production_release` **NO_GO**.
+
+## V05T — OAuth chegaralari: **beshta rad etish bitta xabarga aylangan** (§148)
+
+**Sana:** 2026-09-21. **Holat:** QURILDI VA O'LCHANDI (lokal kontrakt).
+
+Auditning qirq uchinchi fazasi. **Yangi qobiliyat yo'q** — mavjud `oauth.py`
+(378 satr, 49 test) chegaralari o'lchandi va bitta haqiqiy nuqson tuzatildi.
+
+**Nega bu modul tanlandi:** skan paytida e'tibor tortdi — modulda **birorta ham
+nomlangan konstanta yo'q**, lekin **to'qqizta** sonli chegara bor, hammasi
+**inline literal**. Ya'ni "konstanta yo'q" degani "chegara yo'q" degani emas;
+ularni qo'lda sanash kerak bo'ldi.
+
+### O'lchangan nuqson — beshta **butunlay boshqa** rad etish bitta umumiy xabarga aylanardi
+
+`complete()` da `_tokens()` **keng `except Exception`** ichida chaqiriladi va
+**hamma narsani** `OAuthError('Authorization outcome unavailable; authorize
+again')` ga o'raydi. `OAuthError` — `RuntimeError` avlodi, ya'ni **modulning
+o'z xatosi ham o'sha handler'ga tushadi**.
+
+| Provayder javobi | Operator ko'rgan xabar |
+|---|---|
+| `expires_in = 59` | Authorization outcome **unavailable** |
+| `expires_in = 86401` | Authorization outcome **unavailable** |
+| `expires_in = "3600"` | Authorization outcome **unavailable** |
+| `scope` = 10 001 belgi | Authorization outcome **unavailable** |
+| `access_token` = 16 001 belgi | Authorization outcome **unavailable** |
+
+Ya'ni **javob to'liq o'qilgan va tushunilgan**, lekin operator **tarmoq
+nosozligini** qidirishga yuboriladi va auditga `uncertain` yoziladi.
+
+**Tuzatish:** (1) `_tokens` ichida `credential()` yordamchisi — `bounded` ning
+`ValueError` ini `OAuthError` ga o'giradi, ya'ni metod shartnomasi bir xil
+bo'ladi; (2) `complete`/`access` da `except (OAuthError, Forbidden)` shoxi **keng
+handler'dan oldin** — sabab saqlanadi. `Forbidden` bu yerda **provayder
+tomonidagi** rad etish, shuning uchun chaqiruvchi shartnomasiga (`OAuthError`)
+o'tkaziladi, lekin **matni saqlanadi**.
+
+**Holat mashinasi o'zgarmadi:** `_failure(..., 'uncertain')` va
+`_cleanup_issued(...)` baribir ishlaydi — **ishlatib bo'lmaydigan credential
+baribir bekor qilinishi kerak**. Faqat **sabab** tiklandi. Tuzatishdan keyin
+**5 xil xabar** (7 rad etishdan; uchta expiry varianti bitta to'g'ri xabarni
+bo'lishadi).
+
+### Qaytarish matritsasi — **9/9 yashil → 9/9 qizil**
+
+Yangi qayta ishlatiladigan asbob: `scripts/revert_matrix.py`; faza skripti
+`scripts/audit_oauth_bounds.py`. Nazorat yashil, keyin **to'qqizta mutatsiya
+hammasi yashil** — ya'ni **49 test butun oqimni uchidan-uchiga yurardi va
+bittasi ham chegarani o'lchamagan edi**. Oqim testi oqim ishlashini isbotlaydi;
+u shift **256** ekanini **257** dan ajratmaydi. Tuzatishdan keyin **9/9 qizil**,
+tiklash tasdiqlangan.
+
+**Qo'shilgan:** `test_oauth.py` da `DeclaredBoundTests` — **8 sinov** (49 → 57),
+har biri literalni **aniq satr** bilan qadaydi **va** chegarani **ikki tomondan**
+yuradi. Sinf **`OAuthTests` dan meros olmaydi** — pastga qarang.
+`scripts/probe_oauth_boundaries.py` — **48 xossa, 48 pass**, 4 bo'lim.
+
+### O'z xatolarim (yashirilmadi)
+
+1. **Probe'da darvozalarga son berdim** (`bounded(256)`) — ular **satr** oladi.
+   6 ta "qizil" chiqdi, ular **mening** xatolarim edi, modulning emas.
+2. **Matritsani SIGTERM bilan o'ldirdim va bitta mutatsiya faylda qoldi**
+   (`PKCE floor 43` → `42`). Keyingi yurish **mutatsiyani baseline deb o'qidi**
+   va nazorat qizil bo'ldi — bu aynan skill yozgan tuzoq. Tuzatildi:
+   `revert_matrix.py` endi **sidecar** saqlaydi, uzilgan yurishni **aniqlaydi**,
+   va `atexit` + `SIGINT`/`SIGTERM` bilan tiklaydi. Mexanizm **sinovdan
+   o'tkazildi** (soxta uzilish → aniqlandi → tiklandi).
+3. **Meros — qayta ishlash emas, qayta yuritish.** Sinfni dastlab `OAuthTests`
+   dan meros qildirdim: **43 ta oqim sinovi behuda ikkinchi marta** yurdi
+   (49 → 101 test, +8 s), chunki sinf **fixture'ni o'zgartirmaydi**. Repo'dagi
+   naqsh (`SupervisorBoundaryTests`, `SheetsBoundaryTests`) **fixture'ni
+   o'zgartiradi**, shuning uchun meros o'sha yerda oqlanadi. Meros olib
+   tashlandi: **57 test, 10.7 s**.
+
+**Baseline (o'n beshinchi marta aynan):** **2792 test**,
+`failures=1, errors=11, skipped=1`, **413 s** — imzo **o'zgarmadi** (yagona
+failure — Windows-only `test_all_files_private`; 11 error — POSIX-only
+xavfsizlik kontrakti). Test soni 2784 → 2792: **+8** (`DeclaredBoundTests`),
+boshqa hech narsa qo'shilmadi yoki olib tashlanmadi.
+
+**Hujjatlar:** `ULTRA-AUDIT-ASCII-CELL-UZ.md` §148 (yangi faza),
+`BACKLOG.json` (`offline_tests` **2792**, claim'ga oauth chegara hukmi
+qo'shildi), shu fayl.
+
+**Keyingi nomzodlar (o'lchandi, modul × probe):** `tools.py` (303 satr,
+**13 katta literal, 0 nomlangan konstanta**), `secret_vault.py` (99 satr,
+6 literal), `app/` qatlami (40 modul / 4 479 satr), `agent_planner.py`,
+`google_oauth.py`, `postgres_connector.py`, `speech.py`, `mcp.py`,
+`model_transport.py`, `model_response.py`, `crm/crm_reconcile.py`.
+`production_release` **NO_GO** bo'lib qoladi.

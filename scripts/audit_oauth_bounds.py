@@ -51,9 +51,9 @@ MUTATIONS = [
     ('authorization code 4096',
      b'bounded(code, 4096)',
      b'bounded(code, 4097)'),
-    ('access token 16000',
-     b"bounded(body.get('access_token'), 16000)",
-     b"bounded(body.get('access_token'), 16001)"),
+    ('token ceiling 16000',
+     b'return bounded(value, 16000)',
+     b'return bounded(value, 16001)'),
 ]
 
 if __name__ == '__main__':
