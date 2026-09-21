@@ -54,7 +54,7 @@ Quyidagi v0.2 yozuvlari tarixiy kontekst. Joriy test holati va cheklovlar uchun 
 
 Birinchi o‘qing: [Audit](docs/AUDIT-V02-UZ.md), [PRDlar](docs/prd-v02/00-INDEX.md), [Ishga tushirish](docs/V02-RUNBOOK-UZ.md), [test dalili](docs/verification/v02-summary.json).
 
-Lokal runtime: `cd api-python && python -m unittest discover -s runtime_tests -t runtime_tests`. `-t` berilmaganda discovery `Start directory is not importable: 'runtime_tests'` bilan yiqiladi, chunki `runtime_tests` package emas. Runner: `node --test apps/runner/test.js`. Hozirgi offline to‘plam: **2792 test** (`failures=1, errors=11, skipped=1` — hammasi oldindan mavjud, qarang: `docs/development/LOCAL-VERIFICATION-UZ.md`). To‘liq HTTP/UI sinovlari bloklangan, mahalliy muhitda deps yo‘q.
+Lokal runtime: `cd api-python && python -m unittest discover -s runtime_tests -t runtime_tests`. `-t` berilmaganda discovery `Start directory is not importable: 'runtime_tests'` bilan yiqiladi, chunki `runtime_tests` package emas. Runner: `node --test apps/runner/test.js`. Hozirgi offline to‘plam: **2803 test** (`failures=1, errors=11, skipped=1` — hammasi oldindan mavjud, qarang: `docs/development/LOCAL-VERIFICATION-UZ.md`). To‘liq HTTP/UI sinovlari bloklangan, mahalliy muhitda deps yo‘q.
 
 Xavfsizlik o‘zgarishi: `ENV=dev`ning o‘zi anonim adminni ochmaydi. `ALLOW_INSECURE_DEV=true` faqat izolyatsiyalangan test/demo uchun. Oddiy deploy unique secret talab qiladi. MCP chaqiruvida explicit `tool_schemas` majburiy.
 

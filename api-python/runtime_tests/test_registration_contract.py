@@ -12,8 +12,11 @@ disagree with itself without anyone noticing.
 
 Why the no-op is the contract: ``build_registry`` already calls every registrar, so
 a caller that builds a registry and then registers explicitly is a normal pattern.
-If that raised, the message would be ``Invalid tool registration``, which says
-nothing about the real cause.
+If that raised, the caller would have to classify the refusal -- and it could not:
+``Registry.add`` reported a duplicate name, an unknown risk level and both at once
+with one string, ``Invalid tool registration``. That is fixed (ULTRA-AUDIT §149
+names the two causes separately), but a no-op is still the better answer than a
+refusal the caller has to read and interpret.
 """
 import importlib
 import pkgutil

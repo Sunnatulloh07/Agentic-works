@@ -54,10 +54,22 @@ def run_tests(pattern, python):
             env['PYTHONPATH'] = '.%s%s' % (os.pathsep, os.pathsep.join(paths))
     except Exception:
         pass
-    proc = subprocess.run(
-        [python, '-m', 'unittest', 'discover', '-s', 'runtime_tests',
-         '-t', 'runtime_tests', '-p', pattern],
-        cwd=API, capture_output=True, text=True, env=env)
+    # Two modes, and the difference matters for how long a matrix takes.
+    #
+    # ``*.py`` means "discover by filename", the original behaviour: one pattern,
+    # and unittest's ``-p`` accepts only one. A module spec (``runtime_tests.x``)
+    # is passed straight to ``unittest``, so SEVERAL files can be measured in one
+    # run -- which is what a phase needs when its bounds are pinned across more
+    # than one file. Without this the only alternatives were the whole suite
+    # (413 s per mutation) or a single file that would report a bound GREEN
+    # merely because the test that pins it lives next door.
+    if pattern.endswith('.py'):
+        argv = ['-m', 'unittest', 'discover', '-s', 'runtime_tests',
+                '-t', 'runtime_tests', '-p', pattern]
+    else:
+        argv = ['-m', 'unittest'] + pattern.split()
+    proc = subprocess.run([python] + argv, cwd=API, capture_output=True,
+                          text=True, env=env)
     tail = proc.stderr.strip().splitlines()
     last = tail[-1] if tail else ''
     return proc.returncode, last.strip()

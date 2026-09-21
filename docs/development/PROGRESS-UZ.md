@@ -1406,3 +1406,97 @@ qo'shildi), shu fayl.
 `google_oauth.py`, `postgres_connector.py`, `speech.py`, `mcp.py`,
 `model_transport.py`, `model_response.py`, `crm/crm_reconcile.py`.
 `production_release` **NO_GO** bo'lib qoladi.
+
+## V05U — `tools.py` chegaralari: **ikki sabab bitta xabar** va **yiqilgan qo'riqchi** (§149)
+
+**Sana:** 2026-09-21. **Holat:** QURILDI VA O'LCHANDI (lokal kontrakt).
+
+Auditning qirq to'rtinchi fazasi. **Yangi qobiliyat yo'q** — har bir tool
+argumenti o'tadigan darvoza (`tools.py`) o'lchandi va **ikki haqiqiy nuqson**
+tuzatildi.
+
+**Nega bu modul:** skan mexanik edi — **13 ta katta sonli literal** va
+**bitta ham nomlangan konstanta yo'q**, ya'ni chegaralar konstanta bo'yicha
+qidiruvga **ko'rinmas**. Hammasi qo'lda sanaldi.
+
+### Birinchi matritsa: **15 mutatsiyadan 10 tasi YASHIL**
+
+Ya'ni **besh chegara** qadalgan, **o'ntasi yo'q**. Eng qimmati — `string()`
+yordamchisi: bu **har bir tool maydonining** sukut chegarasi, va uni
+kengaytirish **hamma** maydonni jimgina kengaytiradi — **hech narsa sezmadi**.
+
+### Nuqson A — **ikki sabab, bitta xabar**
+
+| Holat | Oldin | Keyin |
+|---|---|---|
+| nom takrorlangan | `Invalid tool registration` | `Tool already registered: x.y` |
+| risk noma'lum | `Invalid tool registration` | `Unknown tool risk level: bogus` |
+
+Bu — §148 dagi "beshta rad etish bitta xabar" naqshining **aynan o'zi**, bir
+qatlam yuqorida. Va eng muhimi: **bu xabarni repo o'zi allaqachon shikoyat
+qilgan** — `register_once` docstring'i (P15) aynan shunday deb yozadi:
+*"a duplicate-name error whose message says nothing about the cause"*. Ya'ni
+**da'vo to'g'ri edi va kod hali ham uni bajarayotgan edi**; `register_once`
+xatoni **chetlab o'tgan**, **nomlamagan**. Rad etish o'zgarmadi (baribir
+`ValueError`) — faqat **sabab** nomlandi.
+
+### Nuqson B — **qo'riqchi rad etish o'rniga yiqilardi**
+
+`validate_schema` sxema bo'ylab har daraja uchun bir marta rekursiya qiladi;
+sxema — **operator konfiguratsiyasi**, ya'ni chuqurligi bu modul nazoratida emas.
+O'lchandi: **1500 daraja → `RecursionError`** (`ValueError` shartnomasi emas).
+**Yetib boriladi:** `mcp.call` chaqiruvchi argumentlarini operator sxemasi
+bo'yicha tekshiradi, `arguments_json` esa **12 000 belgi** oladi — 1500 daraja
+uchun ~10 500 belgi yetarli. Tuzatish: `MAX_SCHEMA_DEPTH = 64` — **o'lchangan**
+raqam, o'ylab topilmagan: 88 tool'ning eng chuqur sxemasi **3 daraja** (21× keng).
+
+**Ikkinchi shift o'lchandi va RAD ETILDI:** `encode()` butun qiymat bo'yicha
+chaqiriladi va JSON enkoderi rekursiv — **2998 darajada ishlaydi, 2999 da
+yiqiladi**; 12 000 belgi esa ko'pi bilan **1999** daraja tashiydi. `1999 < 2998`
+— shift **yetib borilmaydi**, "tuzatish" kerak emas. Probe buni har yurishda
+qayta o'lchaydi.
+
+### Qaytarish matritsasi — **17/17 qizil**, restore tasdiqlangan
+
+Ikki rejim **konstanta emas** — shu fazada tuzatilgan ikki nuqson, chunki
+qadalgan bo'lmasa tuzatish **jimgina qaytarilishi** mumkin edi.
+
+**Asbob yaxshilandi:** `scripts/revert_matrix.py` endi **bir nechta** test
+faylini bitta yurishda o'lchaydi (dotted spec). Bitta fayl bilan chegaralansak,
+**qo'shni fayldagi** sinov qadaydigan chegara **yolg'on YASHIL** chiqardi.
+Eski `*.py` rejimi o'zgarmadi.
+
+### Qo'shilgan
+
+- `test_adapters.py`: `DeclaredBoundTests` — **11 sinov** (18 → **29**), har biri
+  **literalni** qadaydi (konstantani moduldan **qayta o'qimaydi** — §142.5 da
+  oltita chegara aynan shu sababdan yashil chiqqan) va chegarani **ikki tomondan**
+  yuradi.
+- `scripts/probe_tools_boundaries.py` — **66 xossa, 66 pass**, 6 bo'lim.
+- `tools.py`: nomlangan konstanta **0 → 11**; 303 → **343 satr**.
+- `test_registration_contract.py` docstring'i tuzatildi — u endi **eski** xabarni
+  tasvirlab qolgan edi (hujjat kodga zid bo'lsa, foydalanuvchi hujjatga yuradi).
+
+### O'z xatolarim
+
+Probe'da **argumentlar tartibini almashtirdim** (`validate_schema(*nested(n))` —
+`(schema, value)`), **`staticmethod` bilan `self` ni yo'qotdim** (timeout `None`
+bo'lib chiqdi), `_object_of_bytes` **bir baytga xato** edi (`encode` ixcham JSON
+yozadi — `{"a":""}` 9 emas, **8** bayt), va **bisection predikati boolean
+qaytargan, lekin `deepest` istisno kutgan** edi. To'rttasi ham **mening** xatoim;
+`_object_of_bytes` darhol ko'rindi, chunki test **o'z shartini assert qiladi**.
+
+**Baseline (o'n oltinchi marta aynan):** **2803 test**,
+`failures=1, errors=11, skipped=1`, **270.9 s** — imzo **o'zgarmadi**.
+2792 → 2803 = **+11**, boshqa o'zgarish yo'q.
+
+**Hujjatlar:** `ULTRA-AUDIT-ASCII-CELL-UZ.md` §149,
+`BACKLOG.json` (`offline_tests` **2803**, claim'ga tools chegara hukmi),
+`README.md` (2803), shu fayl.
+
+**Keyingi nomzodlar:** `secret_vault.py` (99 satr, 6 literal — **diqqat: unda ham
+"rad etishlar bitta xabarga aylanadi" naqshi bor**, lekin u yerda *ochiq* va
+*ataylab* bo'lishi mumkin, o'lchash kerak), `app/` qatlami (40 modul),
+`agent_planner.py`, `google_oauth.py`, `postgres_connector.py`, `speech.py`,
+`mcp.py`, `model_transport.py`, `model_response.py`, `crm/crm_reconcile.py`.
+`production_release` **NO_GO** bo'lib qoladi.

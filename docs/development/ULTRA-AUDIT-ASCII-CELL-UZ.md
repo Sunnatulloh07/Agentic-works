@@ -5411,3 +5411,207 @@ FAILED (failures=1, errors=11, skipped=1)
 
 **Muhim:** baseline **kod o'zgarishidan keyin** o'lchandi, ya'ni "imzo
 o'zgarmadi" — **da'vo emas, o'lchov**.
+
+---
+
+## §149. Fazza qirq to'rtinchi — `tools.py` chegaralari va **ikki sabab bitta xabar**
+
+**Sirt:** `platform_runtime/tools.py`, **303 satr**, 18 test (`test_adapters.py`).
+Bu — **har bir tool argumenti o'tadigan darvoza** va pack'ga qaysi nomlar
+mavjudligini aytadigan modul.
+
+### §149.1. Nega aynan bu modul tanlandi
+
+Skan **mexanik** edi, taassurot emas: modulda **13 ta katta sonli literal** va
+**bitta ham nomlangan konstanta yo'q**. Ya'ni chegaralarni konstanta bo'yicha
+qidirish ularni **umuman ko'rmaydi** — qo'lda sanash kerak bo'ldi. Bu §148 dagi
+`oauth.py` bilan **bir xil sabab**, lekin u yerda 9 ta edi.
+
+### §149.2. Chegaralar, va ularni kim tekshirardi
+
+| Chegara | Qiymat | Joy |
+|---|---|---|
+| sxema chuqurligi | 64 daraja | `validate_schema` rekursiya shifti |
+| argument obyekti | 20 000 **bayt** | `validate_schema` object shoxi |
+| massiv uzunligi | 0 .. 100 | `validate_schema` array sukuti |
+| qator uzunligi | 0 .. 4 000 | `validate_schema` string sukuti |
+| butun son oralig'i | ±10**12 | `validate_schema` integer sukuti |
+| `string()` yordamchisi | 4 000 | **har bir** tool maydonining sukuti |
+| provayder javobi | 1 000 000 bayt | `post_json` o'qish shifti |
+| provayder timeout | 25 s | `post_json` sukuti |
+| xotira qidiruvi | 10 qator | `memory_search` LIMIT |
+| yozuvlar ro'yxati | 50 qator | `records_list` LIMIT |
+| credential havolasi | `[A-Z][A-Z0-9_]*` | `secret` nom shakli |
+| tool risk darajasi | 4 qiymat | `Registry.add` |
+
+### §149.3. O'lchov — birinchi matritsa, **15 mutatsiyadan 10 tasi YASHIL**
+
+```
+CONTROL                GREEN           OK
+argument object 20000 bytes RED          FAILED (failures=1)
+array maxItems default 100 RED           FAILED (failures=1)
+array minItems default 0 GREEN           OK
+string maxLength default 4000 RED        FAILED (failures=1)
+string minLength default 0 GREEN         OK
+integer maximum default 10**12 RED       FAILED (failures=1)
+integer minimum default -10**12 RED      FAILED (failures=1)
+string() helper default 4000 GREEN       OK
+provider response read cap GREEN         OK
+provider response ceiling GREEN          OK
+provider timeout 25s   GREEN             OK
+memory search LIMIT 10 GREEN             OK
+records list LIMIT 50  GREEN             OK
+credential name shape  GREEN             OK
+tool risk level set    GREEN             OK
+```
+
+Ya'ni **besh chegara** qadalgan edi, **o'ntasi yo'q**. Eng qimmati —
+`string() yordamchisi`: bu **har bir tool maydonining** sukut chegarasi, ya'ni uni
+kengaytirish **hamma** maydonni jimgina kengaytiradi, va **hech narsa sezmadi**.
+
+**Muhim o'lchov:** `Registry.add` ning risk tekshiruvi **ham** yashil chiqdi —
+`test_registration_contract.py` faqat *takroriy nom* shartnomasini o'lchaydi,
+risk to'plamini emas.
+
+### §149.4. Haqiqiy nuqson A — **ikki sabab, bitta xabar**
+
+`Registry.add` da bitta shart **ikki xil sababni** bitta xabar bilan rad etardi:
+
+| Holat | Tuzatishdan **oldin** | Tuzatishdan **keyin** |
+|---|---|---|
+| nom takrorlangan | `Invalid tool registration` | `Tool already registered: x.y` |
+| risk noma'lum | `Invalid tool registration` | `Unknown tool risk level: bogus` |
+| ikkalasi birga | `Invalid tool registration` | (risk nomi aytiladi) |
+
+Bu — §148 dagi "beshta rad etish bitta xabar" naqshining **aynan o'zi**, bir
+qatlam yuqorida. Va eng muhimi: **bu xabarni shu repo o'zi allaqachon shikoyat
+qilgan** — `register_once` ning docstring'i (P15 da yozilgan) aynan shunday deb
+yozadi: *"a second call must be a no-op rather than a duplicate-name error whose
+message says nothing about the cause"*. Ya'ni **da'vo to'g'ri edi va kod hali ham
+uni bajarayotgan edi**; `register_once` xatoni **chetlab o'tgan**, uni **nomlamagan**.
+
+**Tuzatish:** rad etish **o'zgarmadi** (baribir `ValueError`), faqat **sabab**
+nomlandi. Risk **birinchi** tekshiriladi, chunki u qo'shilayotgan tool'ning
+xossasi, takroriylik esa registrning **holati**.
+
+### §149.5. Haqiqiy nuqson B — **qo'riqchi rad etish o'rniga yiqilardi**
+
+`validate_schema` **operator konfiguratsiyasi** bo'lgan sxema bo'ylab har
+daraja uchun **bir marta rekursiya** qiladi, ya'ni sxema chuqurligi bu modul
+nazorat qilmaydigan kattalik.
+
+**O'lchandi (tuzatishdan oldin):**
+
+| Sxema chuqurligi | Natija |
+|---|---|
+| 200 / 500 / 900 | qabul qilindi |
+| **1500** | **`RecursionError`** — `ValueError` shartnomasi emas |
+
+**Va bu yetib boriladi, nazariy emas:** `mcp.call` **chaqiruvchi** argumentlarini
+**operator** e'lon qilgan sxema bo'yicha tekshiradi, `arguments_json` esa
+**12 000 belgi** oladi — 1500 daraja uchun ~10 500 belgi yetarli. Ya'ni
+`RecursionError` **chaqiruvchi tomonidan** chaqirilishi mumkin edi, va u
+`ValueError` emas, shuning uchun hech bir chaqiruvchi uni **rad etish** deb
+tushunmaydi.
+
+**Tuzatish:** `MAX_SCHEMA_DEPTH = 64` — qo'riqchi **rad etadi**, yiqilmaydi.
+**Raqam o'lchandi, o'ylab topilmadi:** 88 tool'ning eng chuqur sxemasi —
+**3 daraja**, ya'ni shift 21× keng.
+
+**Ikkinchi shift ham o'lchandi va RAD ETILDI (nuqson emas):** `encode()` **butun**
+qiymat bo'yicha, qo'riqchi rekursiyasidan **oldin** chaqiriladi, JSON enkoderi esa
+o'zi rekursiv — demak ikkinchi shift bor. Bisection bilan o'lchandi:
+**enkoder 2998 darajada ishlaydi, 2999 da yiqiladi**; 12 000 belgi esa ko'pi bilan
+**1999** daraja tashiydi. Ya'ni **1999 < 2998** — bu shift **yetib borilmaydi**, va
+uni "tuzatish" kerak emas. Probe buni **har yurishda qayta o'lchaydi**.
+
+### §149.6. Qaytarish matritsasi — **17/17 qizil**
+
+Konstantalar nomlangach mutatsiya nishonlari ham nom bo'ldi (bir son — bir joy).
+Ikki rejim **konstanta emas**, balki shu fazada tuzatilgan ikki nuqson: qadalgan
+bo'lmasa, tuzatish **jimgina qaytarilishi** mumkin edi.
+
+```
+schema nesting 64      RED  22.7s  FAILED (failures=1)
+depth guard removed    RED  22.6s  FAILED (failures=1)
+argument object 20000 bytes RED  22.6s  FAILED (failures=2)
+array maxItems default 100 RED  22.4s  FAILED (failures=2)
+array minItems default 0 RED    22.6s  FAILED (errors=1)
+string maxLength default 4000 RED  22.6s  FAILED (failures=3)
+string minLength default 0 RED  22.9s  FAILED (errors=1)
+integer bound 10**12   RED  22.6s  FAILED (failures=3)
+string() helper default RED  22.7s  FAILED (failures=1)
+provider response ceiling RED  22.4s  FAILED (failures=1)
+provider timeout 25s   RED  22.5s  FAILED (failures=1)
+memory search LIMIT 10 RED  22.6s  FAILED (failures=1)
+records list LIMIT 50  RED  22.6s  FAILED (failures=1)
+credential name shape  RED  23.2s  FAILED (failures=1)
+tool risk level set    RED  23.6s  FAILED (failures=1)
+duplicate name not named RED  22.4s  FAILED (failures=1)
+risk refusal not named RED  22.5s  FAILED (failures=1)
+restore verified: YES
+```
+
+**Asbob yaxshilandi:** `scripts/revert_matrix.py` endi **bir nechta** test
+faylini bitta yurishda o'lchaydi (dotted spec), chunki bu chegaralar bir necha
+faylda qadalgan. Bitta fayl bilan chegaralansak, **qo'shni fayldagi** sinov
+qadaydigan chegara **yolg'on YASHIL** chiqardi — bu asbobning xatosi bo'lardi,
+kodning emas. Eski `*.py` rejimi o'zgarmadi.
+
+### §149.7. Qo'shilgan sinov va probe
+
+- `test_adapters.py`: yangi `DeclaredBoundTests` — **11 sinov**, 18 → **29**.
+  Har biri **literalni** qadaydi (konstantani moduldan **qayta o'qimaydi** — §142.5
+  da oltita chegara aynan shu sababdan yashil chiqqan edi) **va** chegarani
+  **ikki tomondan** yuradi.
+- `scripts/probe_tools_boundaries.py` — **66 xossa, 66 pass**, 6 bo'lim:
+  literallar, sxema qabuli, **tuzatilgan ikki nuqson**, transport, o'qish
+  shiftlari, credential nom shakli.
+
+### §149.8. O'zim qilgan xatolar (yashirilmadi)
+
+1. **Probe'da argumentlar tartibini almashtirdim** — `validate_schema(value, schema)`
+   ni `validate_schema(*nested(n))` bilan chaqirdim, ya'ni `(schema, value)`.
+   Natijada "1 daraja qabul qilindi" **FAIL** bo'ldi — modul emas, **mening**
+   xatom. O'lchov quroli ham tekshirilishi kerak (§134.9 darsi, yana bir nusxa).
+2. **Probe'da `staticmethod` ishlatdim** va `self` bog'lanishini yo'qotdim —
+   timeout **None** bo'lib chiqdi. Transport bo'limi qayta yozildi.
+3. **`_object_of_bytes` bir baytga xato edi** — `encode` **ixcham** JSON yozadi
+   (`{"a":""}` — 9 emas, **8** bayt). Test **o'z shartini assert qilgani** uchun
+   darhol ko'rindi.
+4. **Bisection predikati boolean qaytargan, lekin `deepest` istisno kutgan edi** —
+   `carried` 8000 bo'lib chiqdi. `RecursionError` endi "bajarilmadi" deb sanaladi.
+
+### §149.9. Saboqlar
+
+1. **"Konstanta yo'q" — skan uchun ko'rinmaslik, chegarasizlik emas.** Bu
+   takrorlanish: §148 da 9 ta, bu yerda 13 ta literal qo'lda sanaldi.
+2. **Modul o'z nuqsonini allaqachon yozib qo'ygan bo'lishi mumkin.** `register_once`
+   ning docstring'i xatoni **to'g'ri tasvirlagan**, lekin kod uni **tuzatmagan**.
+   Hujjat bilan kod zid bo'lsa — **kod** o'zgaradi (§129, §130, §134 naqshining
+   yangi nusxasi).
+3. **Qo'riqchi shartnomadan boshqa istisno ko'tarsa, u qo'riqchi emas.**
+   `RecursionError` — bu **rad etish** emas, **yiqilish**.
+4. **Har bir shiftni "tuzatish" shart emas — qaysi biri yetib borilishini
+   o'lchash kerak.** `encode()` ning 2998 shifti **haqiqiy**, lekin 12 000 belgi
+   faqat 1999 daraja tashiydi, ya'ni u **o'lik**. Uni tuzatish — o'lchanmagan ish.
+5. **Bir faylli matritsa qo'shni fayldagi qadalgan chegarani "yashil" deb
+   ko'rsatadi.** Asbob ham o'lchov quroli, va u ham **tekshirilishi** kerak.
+
+### §149.10. Yakuniy baseline — o'lchandi
+
+```
+Ran 2803 tests in 270.910s
+
+FAILED (failures=1, errors=11, skipped=1)
+```
+
+| Ko'rsatkich | Qiymat |
+|---|---|
+| Testlar | **2792 → 2803** = **+11** (`DeclaredBoundTests`), boshqa o'zgarish yo'q |
+| Imzo | `failures=1, errors=11, skipped=1` — **o'zgarmadi** |
+| `tools.py` | 303 → **343 satr**; nomlangan konstanta **0 → 11** |
+| Registry | **88** tool (o'zgarmadi), `known_tool_names()` **89** |
+| Matritsa | 15 → **17 mutatsiya**, **17/17 qizil**, 0 yashil, 0 o'lchanmagan |
+| Probe | **66 xossa, 66 pass** |
+| Yagona `failure` / 11 `error` | **oldindan mavjud** (Windows-only / POSIX-only) |

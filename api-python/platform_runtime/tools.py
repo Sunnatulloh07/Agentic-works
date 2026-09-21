@@ -14,8 +14,35 @@ import urllib.request
 from dataclasses import dataclass
 from .engine import encode, Conflict
 
+# The bounds this module enforces, named. A scan selected this module because it
+# carried thirteen large numeric literals and NO named constant at all, so a bound
+# could not be referred to, grepped for, or pinned by name -- every one of them had
+# to be counted by hand. Naming them changes nothing at runtime and is the
+# precondition for measuring them.
+MAX_SCHEMA_DEPTH = 64
+MAX_ARGUMENT_BYTES = 20000
+DEFAULT_MAX_ITEMS = 100
+DEFAULT_STRING_LENGTH = 4000
+INTEGER_BOUND = 10 ** 12
+MAX_PROVIDER_RESPONSE = 1_000_000
+PROVIDER_TIMEOUT_SECONDS = 25
+MEMORY_SEARCH_LIMIT = 10
+RECORDS_LIST_LIMIT = 50
+CREDENTIAL_NAME = re.compile(r'[A-Z][A-Z0-9_]*')
+RISK_LEVELS = frozenset({'read', 'write', 'destructive', 'physical'})
 
-def validate_schema(value,schema):
+
+def validate_schema(value,schema,depth=0):
+    # A schema is operator configuration, so its DEPTH is bounded by nothing this
+    # module controls, and this function recurses once per level. Measured: a
+    # 1500-level schema raised RecursionError -- the guard CRASHED on the input it
+    # exists to refuse, and RecursionError is not the ValueError contract every
+    # caller catches. Reachable, not theoretical: `mcp.call` validates caller
+    # arguments against an operator-declared schema, and `arguments_json` is
+    # allowed 12000 characters, which is more than the ~10500 a 1500-level value
+    # needs. The deepest schema in the 88-tool registry is 3, so this ceiling is
+    # generous rather than tight.
+    if depth>MAX_SCHEMA_DEPTH:raise ValueError('Schema nesting too deep')
     typ=schema.get('type')
     allowed={'object':dict,'array':list,'string':str,'integer':int,'boolean':bool}
     if typ not in allowed or not isinstance(value,allowed[typ]) or (typ=='integer' and isinstance(value,bool)):
@@ -28,20 +55,20 @@ def validate_schema(value,schema):
         # and this one measured characters, so a non-ASCII argument passed at
         # roughly TWICE the declared size. Measured: a Cyrillic object under
         # 20 000 characters whose JSON is over 20 000 bytes was accepted.
-        if len(encode(value).encode('utf-8'))>20000:raise ValueError('Arguments too large')
+        if len(encode(value).encode('utf-8'))>MAX_ARGUMENT_BYTES:raise ValueError('Arguments too large')
         props=schema.get('properties',{})
         if set(value)-set(props) or set(schema.get('required',[]))-set(value):raise ValueError('Schema fields mismatch')
-        for k,v in value.items():validate_schema(v,props[k])
+        for k,v in value.items():validate_schema(v,props[k],depth+1)
     if typ=='array':
-        if not schema.get('minItems',0)<=len(value)<=schema.get('maxItems',100):raise ValueError('Array length')
-        for item in value:validate_schema(item,schema['items'])
+        if not schema.get('minItems',0)<=len(value)<=schema.get('maxItems',DEFAULT_MAX_ITEMS):raise ValueError('Array length')
+        for item in value:validate_schema(item,schema['items'],depth+1)
     if typ=='string':
-        if not schema.get('minLength',0)<=len(value)<=schema.get('maxLength',4000):raise ValueError('String length')
-    if typ=='integer' and not schema.get('minimum',-10**12)<=value<=schema.get('maximum',10**12):raise ValueError('Integer bounds')
+        if not schema.get('minLength',0)<=len(value)<=schema.get('maxLength',DEFAULT_STRING_LENGTH):raise ValueError('String length')
+    if typ=='integer' and not schema.get('minimum',-INTEGER_BOUND)<=value<=schema.get('maximum',INTEGER_BOUND):raise ValueError('Integer bounds')
 
 
 def obj(props,required=None):return {'type':'object','properties':props,'required':list(props) if required is None else required,'additionalProperties':False}
-def string(maximum=4000):return {'type':'string','minLength':1,'maxLength':maximum}
+def string(maximum=DEFAULT_STRING_LENGTH):return {'type':'string','minLength':1,'maxLength':maximum}
 
 
 @dataclass(frozen=True)
@@ -58,7 +85,16 @@ class Tool:
 class Registry:
     def __init__(self):self.items={}
     def add(self,tool):
-        if tool.name in self.items or tool.risk not in {'read','write','destructive','physical'}:raise ValueError('Invalid tool registration')
+        # Two different causes, refused separately. This was one condition whose
+        # single message -- 'Invalid tool registration' -- covered both, and it is
+        # the very message `register_once`'s docstring below calls out as "saying
+        # nothing about the real cause". Measured before the fix: a duplicate name,
+        # an unknown risk level, and both at once each produced that one string.
+        # The refusal is unchanged and still a ValueError; the reason is now the
+        # reason. The risk is checked first because it is a property of the tool
+        # being added, whereas a duplicate is a property of the registry's state.
+        if tool.risk not in RISK_LEVELS:raise ValueError(f'Unknown tool risk level: {tool.risk}')
+        if tool.name in self.items:raise ValueError(f'Tool already registered: {tool.name}')
         self.items[tool.name]=tool
     def get(self,name):
         if name not in self.items:raise LookupError('Unknown executable tool')
@@ -89,15 +125,19 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):raise RuntimeError('Provider redirect rejected')
 
 
-def post_json(url,body,headers=None,timeout=25):
+def post_json(url,body,headers=None,timeout=PROVIDER_TIMEOUT_SECONDS):
     parsed=urllib.parse.urlparse(url)
     if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise ValueError('HTTPS provider configuration required')
     request=urllib.request.Request(url,data=encode(body).encode(),headers={'Content-Type':'application/json',**(headers or {})},method='POST')
     opener=urllib.request.build_opener(NoRedirect())
     with opener.open(request,timeout=timeout) as r:
-        raw=r.read(1_000_001)
-        if len(raw)>1_000_000:raise ValueError('Provider response too large')
+        # Read one byte past the ceiling and refuse on the excess, rather than
+        # reading the ceiling and trusting it: a body of exactly the limit must be
+        # accepted, and a body one byte over must not be silently truncated into
+        # valid-looking JSON.
+        raw=r.read(MAX_PROVIDER_RESPONSE+1)
+        if len(raw)>MAX_PROVIDER_RESPONSE:raise ValueError('Provider response too large')
         return json.loads(raw)
 
 
@@ -113,7 +153,7 @@ def config(tenant):
 
 def secret(cfg,name):
     ref=cfg.get(name,'')
-    if not isinstance(ref,str) or not re.fullmatch(r'[A-Z][A-Z0-9_]*',ref):raise RuntimeError('Invalid credential reference')
+    if not isinstance(ref,str) or not CREDENTIAL_NAME.fullmatch(ref):raise RuntimeError('Invalid credential reference')
     value=os.environ.get(ref,'')
     if not value:raise RuntimeError('Missing provider credential')
     return value
@@ -132,7 +172,7 @@ def memory_search(e,t,a,p,key):
     # Literal LIKE escaping; this is scoped keyword retrieval, NOT embedding RAG.
     q=p['query'].replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
     with e.read() as c:
-        rows=c.execute("SELECT key,value FROM p_memory WHERE tenant=? AND agent=? AND (expires=0 OR expires>?) AND value LIKE ? ESCAPE '\\' LIMIT 10",(t,a,e.clock(),'%'+q+'%')).fetchall()
+        rows=c.execute("SELECT key,value FROM p_memory WHERE tenant=? AND agent=? AND (expires=0 OR expires>?) AND value LIKE ? ESCAPE '\\' LIMIT ?",(t,a,e.clock(),'%'+q+'%',MEMORY_SEARCH_LIMIT)).fetchall()
     return {'matches':[dict(r) for r in rows]}
 
 
@@ -146,7 +186,7 @@ def record_create(e,t,a,p,key):
 
 def records_list(e,t,a,p,key):
     with e.read() as c:
-        rows=c.execute('SELECT id,body,created FROM p_records WHERE tenant=? AND kind=? ORDER BY created DESC LIMIT 50',(t,p['kind'])).fetchall()
+        rows=c.execute('SELECT id,body,created FROM p_records WHERE tenant=? AND kind=? ORDER BY created DESC LIMIT ?',(t,p['kind'],RECORDS_LIST_LIMIT)).fetchall()
     return {'records':[{'id':r['id'],'body':json.loads(r['body']),'created':r['created']} for r in rows]}
 
 
