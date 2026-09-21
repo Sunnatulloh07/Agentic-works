@@ -1,4 +1,29 @@
 /** Memory-only credentials. No cookies, localStorage or implicit write retries. */
+
+// A caller may add request headers, but never replace the ones this client owns.
+// `supervisor/route` is the reason the hook exists: it refuses a request without an
+// `Idempotency-Key`, and without a way to send one the route was unreachable from the
+// dashboard. The rule below is the smallest one that admits that key: a name is
+// alphanumeric-or-hyphen, a value is a short printable string, and the three headers
+// that decide identity, body interpretation and destination stay under this client's
+// control -- an allowlist of shapes rather than a denylist of names.
+const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+const OWNED_HEADERS = new Set(['authorization', 'content-type', 'host', 'cookie', 'origin', 'referer']);
+
+function checkedHeaders(headers) {
+  if (headers === undefined) return {};
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) throw new Error('API sarlavhalari yaroqsiz');
+  const out = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (!HEADER_NAME.test(name) || OWNED_HEADERS.has(name.toLowerCase()) ||
+        typeof value !== 'string' || !value || value.length > 256 || /[\x00-\x1f\x7f]/.test(value)) {
+      throw new Error('API sarlavhasi yaroqsiz');
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
 export class SessionClient {
   constructor(base, fetcher = globalThis.fetch, now = () => Date.now()) {
     const url = new URL(base);
@@ -16,13 +41,14 @@ export class SessionClient {
         !Number.isFinite(tokens.expires_in) || tokens.expires_in<=0) throw new Error('Session javobi yaroqsiz');
     this.session={...tokens, expiresAt:this.now()+tokens.expires_in*1000};
   }
-  async send(path, body, token, method) {
+  async send(path, body, token, method, headers) {
     if (typeof path!=='string' || !path.startsWith('/') || path.startsWith('//') || /[\x00-\x1f\\]/.test(path)) throw new Error('API yo‘li yaroqsiz');
     method=method || (body===undefined?'GET':'POST');
     if(!['GET','POST','PUT','PATCH','DELETE'].includes(method) || (method==='GET' && body!==undefined))throw new Error('API metodi yaroqsiz');
+    const extra=checkedHeaders(headers);
     const response=await this.fetcher(this.base+path, {
       method, credentials:'omit', cache:'no-store', redirect:'error',
-      headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+      headers:{'Content-Type':'application/json',...extra,...(token?{Authorization:'Bearer '+token}:{})},
       ...(body===undefined?{}:{body:JSON.stringify(body)})
     });
     if (!response.ok) {
@@ -56,11 +82,11 @@ export class SessionClient {
     }
     return this.pending;
   }
-  async request(path,body,method) {
+  async request(path,body,method,headers) {
     const epoch=this.epoch; const token=await this.access();
     if(epoch!==this.epoch)throw new Error('Session o‘zgargan');
     try {
-      const result=await this.send(path,body,token,method);
+      const result=await this.send(path,body,token,method,headers);
       if(epoch!==this.epoch)throw new Error('Session o‘zgargan');
       return result;
     } catch(err) {

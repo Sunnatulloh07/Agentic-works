@@ -5,6 +5,8 @@ import AgentRuns from '../../components/AgentRuns';
 import OAuthConnections from '../../components/OAuthConnections';
 import GoogleData from '../../components/GoogleData';
 import {BudgetPanel,KnowledgePanel} from '../../components/DevelopmentData';
+import {BriefingPanel,CustomerResourcesPanel,EscalationPanel,MetricsPanel,ReconcileControl,ReengagementPanel,SchedulesPanel,SupervisorPanel} from '../../components/OperationsPanels';
+import AdminPanel,{BootstrapPanel} from '../../components/AdminPanel';
 import {type SessionClient,type Workspace} from '../../lib/session-client.mjs';
 type Tool={name:string;risk:string;schema:unknown;runner:boolean};
 type Agent={id:string;name:string;department:string;tools:string[];ladder:string};
@@ -63,7 +65,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
     {busy && <p role="status">Yuklanmoqda...</p>}
     {connected && <>
       <p>Rol: <strong>{role}</strong> · {frozen?'Ijro to‘xtatilgan':'Faol'}</p>
-      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
+      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync'],['reengagement','Qayta aloqa'],['briefing','Brifing'],['escalation','Eskalatsiya'],['supervisor','Supervisor'],['schedules','Jadval'],['metrics','Holat'],['admin','Hisob']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role)) && (!['reengagement','briefing','escalation','supervisor','schedules'].includes(id) || ['owner','operator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
         setTab(id);if(id==='audit')setAudit((await req<{events:Audit[]}>('/audit')).events);
         if(id==='customers')setCustomers((await req<{customers:Customer[]}>('/customers')).customers);
         if(id==='connections')setConnections((await req<{connections:typeof connections}>('/connections')).connections);
@@ -72,6 +74,13 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
       })}>{label}</button>)}</nav>
       {tab==='google-data' && isOwner && <GoogleData client={client} tenant={tenant} agents={agents} frozen={frozen}/>}
       {tab==='oauth' && isOwner && <OAuthConnections client={client} tenant={tenant} frozen={frozen}/>}
+      {tab==='reengagement' && <ReengagementPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
+      {tab==='briefing' && <BriefingPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
+      {tab==='escalation' && <EscalationPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
+      {tab==='supervisor' && <SupervisorPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
+      {tab==='schedules' && <SchedulesPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
+      {tab==='metrics' && <MetricsPanel client={client} tenant={tenant} role={role}/>}
+      {tab==='admin' && <><AdminPanel client={client} workspace={workspace} exit={exit}/>{isOwner && <BootstrapPanel client={client}/>}</>}
       {tab==='budget' && <BudgetPanel client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}/>}
       {tab==='knowledge' && <KnowledgePanel client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}/>}
       {tab==='agent-runs' && <AgentRuns client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}
@@ -83,7 +92,9 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
           {customers.length===0 && <p>Hali mijoz yo‘q. Yangilash tugmasini bosing.</p>}
           {customers.map(c=><button key={c.id} style={{...button,display:'block',width:'100%',textAlign:'left'}} onClick={()=>run(async()=>setSelectedCustomer((await req<{customer:Customer}>(`/customers/${c.id}`)).customer))}><strong>{c.display_name}</strong><br/><small>{c.status} · {c.id.slice(0,10)}</small></button>)}
         </section>
-        <section style={panel}><h2>Customer detail</h2>{!selectedCustomer && <p>Mijozni tanlang.</p>}{selectedCustomer && <><h3>{selectedCustomer.display_name}</h3><p>{selectedCustomer.status} · {selectedCustomer.external_ref || 'external reference yo‘q'}</p><pre style={pre}>{JSON.stringify(selectedCustomer,null,2)}</pre></>}</section>
+        <section style={panel}><h2>Customer detail</h2>{!selectedCustomer && <p>Mijozni tanlang.</p>}{selectedCustomer && <><h3>{selectedCustomer.display_name}</h3><p>{selectedCustomer.status} · {selectedCustomer.external_ref || 'external reference yo‘q'}</p><pre style={pre}>{JSON.stringify(selectedCustomer,null,2)}</pre>
+          <CustomerResourcesPanel client={client} tenant={tenant} role={role} frozen={frozen} customer={selectedCustomer.id}
+            onChanged={async()=>setSelectedCustomer((await req<{customer:Customer}>(`/customers/${selectedCustomer.id}`)).customer)}/></>}</section>
       </div>}
       {tab==='tasks' && <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:20}}>
         <section style={panel}><h2>Yangi vazifa</h2>
@@ -110,7 +121,11 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
             {s.approval_status==='pending' && ['queued','waiting_approval'].includes(s.status) && <><p>Ushbu aniq argumentlarni tasdiqlaysizmi?</p><button disabled={busy || !canWrite} style={button} onClick={()=>run(()=>approve(s,'approved'))}>Tasdiqlash</button><button disabled={busy || !canWrite} style={button} onClick={()=>run(()=>approve(s,'rejected'))}>Rad etish</button></>}
             {s.approver && <p>Tasdiqlovchi: {s.approver}</p>}
             <details open={s.status==='succeeded'}><summary>Natija</summary><pre style={pre}>{JSON.stringify(s.result,null,2)}</pre></details>
-            {s.status==='uncertain' && <p style={{color:'#fdba74'}}>Natija noaniq. Avtomatik qayta ijro bloklangan. Owner tashqi tizimni tekshirib reconcile API orqali dalil bilan yakunlaydi.</p>}
+            {s.status==='uncertain' && <>
+              <p style={{color:'#fdba74'}}>Natija noaniq. Avtomatik qayta ijro bloklangan. Owner tashqi tizimni tekshirib, quyidagi dalil bilan yakunlaydi.</p>
+              <ReconcileControl client={client} tenant={tenant} role={role} step={s.id}
+                onDone={async()=>{await open(selected.id);await refresh();}}/>
+            </>}
           </article>)}
         </section>}
       </div>}

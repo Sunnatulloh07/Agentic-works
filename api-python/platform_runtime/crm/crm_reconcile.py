@@ -21,6 +21,13 @@ from .kommo_adapter import KommoAdapter
 from .onec_adapter import OneCAdapter
 from .custom_http_adapter import CustomHTTPAdapter
 
+# The provider lookup is read-only, but its width is still a bound: it decides how many
+# records are fetched before the exact-match rule runs, and therefore whether an
+# ambiguous result can be seen at all. A limit of one would make every duplicate look
+# like a unique match -- the failure this whole module exists to prevent.
+MAX_CANDIDATE_MATCHES = 5
+EXACT_MATCHES_REQUIRED = 1
+
 
 class CRMReconciler:
     def __init__(self, engine, config_resolver: Callable[[str], dict], adapter_factory: Optional[Callable] = None):
@@ -82,7 +89,7 @@ class CRMReconciler:
         try:
             query = phone or email or title or ''
             matches = find_leads_by_mode(adapter, driver, query=query, phone=phone,
-                                         email=email, limit=5)
+                                         email=email, limit=MAX_CANDIDATE_MATCHES)
         except Exception as err:
             return {
                 'settled': False,
@@ -99,7 +106,7 @@ class CRMReconciler:
             elif phone and m.get('phone') == phone:
                 exact_matches.append(m)
 
-        if len(exact_matches) == 1:
+        if len(exact_matches) == EXACT_MATCHES_REQUIRED:
             matched = exact_matches[0]
             matched_id = matched['id']
             receipt = {
@@ -129,7 +136,7 @@ class CRMReconciler:
                 'lead_id': matched_id,
                 'receipt': receipt,
             }
-        elif len(exact_matches) > 1:
+        elif len(exact_matches) > EXACT_MATCHES_REQUIRED:
             return {
                 'settled': False,
                 'status': 'uncertain',

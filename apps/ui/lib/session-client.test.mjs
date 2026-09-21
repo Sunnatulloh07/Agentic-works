@@ -68,3 +68,25 @@ test('backslash and control paths are rejected',async()=>{
   for(const path of ['/\\evil','/a\nother','/a\x00'])await assert.rejects(f.client.request(path));
   assert.equal(f.calls.length,before);
 });
+test('an explicit request header reaches the network',async()=>{
+  // supervisor/route answers 422 without Idempotency-Key, so this is the difference
+  // between the route being usable and being unreachable from the dashboard.
+  const f=fixture();await f.client.login('u','p');
+  await f.client.request('/platform/ws/supervisor/route',{question:'x'},'POST',{'Idempotency-Key':'abc-123'});
+  assert.equal(f.calls.at(-1).options.headers['Idempotency-Key'],'abc-123');
+  assert.equal(f.calls.at(-1).options.headers.Authorization,'Bearer access1');
+});
+test('headers this client owns cannot be replaced by a caller',async()=>{
+  const f=fixture();await f.client.login('u','p');const before=f.calls.length;
+  for(const headers of [{'Authorization':'Bearer forged'},{'authorization':'Bearer forged'},
+                        {'Content-Type':'text/plain'},{'Host':'evil.example'},{'Cookie':'a=b'}])
+    await assert.rejects(f.client.request('/a',undefined,'GET',headers));
+  assert.equal(f.calls.length,before);
+});
+test('malformed header names and values are rejected before network',async()=>{
+  const f=fixture();await f.client.login('u','p');const before=f.calls.length;
+  for(const headers of [{'X Bad':'v'},{'X-Bad\n':'v'},{'X-Ok':''},{'X-Ok':'a\nb'},
+                        {'X-Ok':'x'.repeat(257)},{'X-Ok':123},{'X-Ok':null},['X-Ok','v'],'nope'])
+    await assert.rejects(f.client.request('/a',undefined,'GET',headers));
+  assert.equal(f.calls.length,before);
+});

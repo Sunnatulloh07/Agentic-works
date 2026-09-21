@@ -1,6 +1,13 @@
 """Strict single-decision parser shared by both planner modes."""
 import json
 
+# The decision text is model output, so these are limits on data this platform did not
+# author. They existed as literals inside the loop and were asserted nowhere.
+MAX_DECISION_BYTES = 20000
+MAX_JSON_DEPTH = 32
+MAX_JSON_NODES = 5000
+REQUIRED_CHOICES = 1
+
 
 def unique_object(pairs):
     out={}
@@ -13,10 +20,10 @@ def unique_object(pairs):
 def reject_constant(value):raise ValueError('Non-finite model JSON value')
 
 
-def parse_decision(response, maximum_bytes=20000):
+def parse_decision(response, maximum_bytes=MAX_DECISION_BYTES):
     if not isinstance(response,dict):raise ValueError('Model response must be an object')
     choices=response.get('choices')
-    if not isinstance(choices,list) or len(choices)!=1 or not isinstance(choices[0],dict):
+    if not isinstance(choices,list) or len(choices)!=REQUIRED_CHOICES or not isinstance(choices[0],dict):
         raise ValueError('Exactly one model choice required')
     choice=choices[0]
     if choice.get('finish_reason')!='stop' or not isinstance(choice.get('message'),dict):
@@ -36,7 +43,7 @@ def parse_decision(response, maximum_bytes=20000):
     stack=[(value,0)];visited=0
     while stack:
         node,depth=stack.pop();visited+=1
-        if depth>32 or visited>5000:raise ValueError('Model JSON structure exceeds limits')
+        if depth>MAX_JSON_DEPTH or visited>MAX_JSON_NODES:raise ValueError('Model JSON structure exceeds limits')
         if isinstance(node,dict):stack.extend((child,depth+1) for child in node.values())
         elif isinstance(node,list):stack.extend((child,depth+1) for child in node)
     return value

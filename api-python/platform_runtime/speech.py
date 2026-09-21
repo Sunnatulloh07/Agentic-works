@@ -12,6 +12,13 @@ from .tools import NoRedirect
 
 ORIGIN = 'https://back.aisha.group'
 MAX_AUDIO = 1_000_000  # Local product limit, NOT a published Aisha v1 limit.
+MAX_RESPONSE_BYTES = 1_000_000
+TRANSPORT_TIMEOUT_SECONDS = 60
+MAX_TTS_CHARS = 1000
+MIN_SPEED = 0.5
+MAX_SPEED = 2.0
+MAX_AUDIO_PATH_CHARS = 1000
+MAX_TRANSCRIPT_CHARS = 80_000
 
 
 class SpeechError(RuntimeError):
@@ -58,16 +65,16 @@ class AishaREST:
             raise SpeechError('Speech request failed; billing outcome may be unknown') from None
 
     def synthesize(self, text, mood='Neutral', speed=1.0):
-        if not isinstance(text, str) or not text.strip() or len(text) > 1000:
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TTS_CHARS:
             raise ValueError('TTS requires 1..1000 characters')
         if mood not in {'Neutral', 'Cheerful', 'Happy', 'Sad'}:
             raise ValueError('Invalid mood')
-        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not 0.5 <= speed <= 2.0:
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not MIN_SPEED <= speed <= MAX_SPEED:
             raise ValueError('Invalid speech speed')
         body = self._post('/api/v1/tts/post/', {'transcript': text, 'language': 'uz',
                          'model': 'Gulnoza', 'mood': mood, 'speed': str(speed)}, 201)
         path = body.get('audio_path', '')
-        if not isinstance(path, str) or len(path)>1000:
+        if not isinstance(path, str) or len(path)>MAX_AUDIO_PATH_CHARS:
             raise SpeechError('Invalid audio path')
         parts = urlsplit(path)
         decoded = unquote(path)
@@ -89,7 +96,7 @@ class AishaREST:
                           'has_offset':'false', 'is_summary':'false'}, 200,
                           ('audio.' + format, formats[format], data))
         text = body.get('transcript')
-        if not isinstance(text, str) or len(text)>80_000:
+        if not isinstance(text, str) or len(text)>MAX_TRANSCRIPT_CHARS:
             raise SpeechError('Invalid transcript')
         return {'provider':'aisha', 'transcript':text}
 

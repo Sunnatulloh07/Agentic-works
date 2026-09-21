@@ -8,6 +8,16 @@ import urllib.request
 from urllib.parse import urlsplit
 from .tools import post_json
 
+# A local inference endpoint is operator-configured but still an untrusted peer: it can
+# be a hostile process on the same host. The port floor keeps the platform from being
+# pointed at a privileged service, and the byte limits bound what a bad endpoint can
+# make this process allocate. All four were literals with nothing asserting them.
+MIN_LOCAL_PORT = 1024
+MAX_PORT = 65535
+MAX_LOCAL_REQUEST_BYTES = 128000
+MAX_LOCAL_RESPONSE_BYTES = 128000
+LOCAL_TIMEOUT_SECONDS = 30
+
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -27,7 +37,7 @@ def validate_url(cfg,url):
     if local_mode(cfg):
         if parts.scheme!='http' or parts.hostname not in {'127.0.0.1','::1'} or parts.port is None:
             raise ValueError('Local model requires explicit numeric loopback HTTP and port')
-        if not 1024<=parts.port<=65535:raise ValueError('Local model requires an unprivileged service port')
+        if not MIN_LOCAL_PORT<=parts.port<=MAX_PORT:raise ValueError('Local model requires an unprivileged service port')
     elif parts.scheme!='https':
         raise ValueError('Cloud model HTTPS required')
 
@@ -44,16 +54,16 @@ def transport_for(cfg,transport=post_json):
         if not local_mode(cfg) or transport is not post_json:
             return transport(url,body,request_headers)
         data=json.dumps(body,ensure_ascii=False,allow_nan=False).encode('utf-8')
-        if len(data)>128000:raise ValueError('Local model request exceeds byte limit')
+        if len(data)>MAX_LOCAL_REQUEST_BYTES:raise ValueError('Local model request exceeds byte limit')
         request=urllib.request.Request(url,data,{'Content-Type':'application/json',**request_headers},method='POST')
         # Local inference on the deployed machine must never route prompts through
         # a configured outbound proxy. No network is used by offline tests.
         opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
         try:
-            with opener.open(request,timeout=30) as response:
+            with opener.open(request,timeout=LOCAL_TIMEOUT_SECONDS) as response:
                 if response.status!=200:raise RuntimeError('Local model request rejected')
-                raw=response.read(128001)
-                if len(raw)>128000:raise ValueError('Local model response exceeds byte limit')
+                raw=response.read(MAX_LOCAL_RESPONSE_BYTES+1)
+                if len(raw)>MAX_LOCAL_RESPONSE_BYTES:raise ValueError('Local model response exceeds byte limit')
                 from .model_response import unique_object, reject_constant
                 return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
         except Exception:

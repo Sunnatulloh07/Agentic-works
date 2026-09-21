@@ -5871,3 +5871,240 @@ bog'liq: §149 da 270.9 s edi, bu yurishda 576.8 s — test soni va imzo bir xil
 | `secret_vault.py` | 99 → **147 satr**; nomlangan konstanta **0 → 12** |
 | Matritsa | 13 → **17 mutatsiya**, **17/17 qizil**, 0 yashil, 0 o'lchanmagan |
 | Probe | **99 xossa, 99 pass** |
+
+---
+
+## §151. Fazza qirq oltinchi — tashqi provayder transporti va **shakli hech narsa bilan qadalmagan client id**
+
+To'rt modul birgalikda o'lchandi, chunki ular bir xil savolga javob beradi: *provayder
+javobiga qanchalik ishonish mumkin?* — `google_oauth.py`, `model_transport.py`,
+`model_response.py`, `mcp.py`.
+
+### §151.1. Chegaralar, va ularni kim tekshirardi
+
+O'n to'qqizta chegara: javob hajmi, so'rov tanasi, credential uzunligi, xato tanasi,
+client id, redirect URI, subject, transport muddati, konfiguratsiya sxemasi versiyasi,
+lokal port, JSON chuqurligi, JSON tugunlari, majburiy tanlovlar, protokol versiyalari.
+
+Ularning **hammasi inline literal** edi. Ya'ni: `1_000_000`, `64000`, `16000`, `25`.
+
+### §151.2. Haqiqiy nuqson — **client id shakli o'chirilishi mumkin edi**
+
+Matritsa `client id suffix` mutatsiyasini **YASHIL** qaytardi. Ya'ni
+`[A-Za-z0-9._-]+\.apps\.googleusercontent\.com` qoidasini **butunlay o'chirish**
+mumkin edi va to'plam jim qolardi.
+
+Sabab: mavjud chegara testi faqat **to'g'ri shakldagi** id bilan oziqlangan edi — u
+**uzunlikni** qadaydi, **shaklni** o'lchamagan. Bu §II fazasining (`truncated`)
+takrorlanishi: chegara bor, uni o'lchaydigan test yo'q.
+
+Tuzatish: `test_client_id_must_be_a_google_client_id`. Qayta yurish → **RED
+(failures=5)**.
+
+### §151.3. Qaytarish matritsasi — **23/23 qizil, 1 o'lchangan**
+
+24 mutatsiyadan 23 tasi qizil. Bittasi — `MAX_PORT = 65535` — **ataylab
+tuzatilmadi**: `urlsplit` 65 535 dan katta portni **taqqoslashdan oldin** rad etadi,
+ya'ni konstanta kengaytirilsa ham natija o'zgarmaydi. Bu **o'lchov muvaffaqiyatsizligi**,
+kod nuqsoni emas — va shunday yozib qo'yildi.
+
+---
+
+## §152. Fazza qirq yettinchi — planner, speech, baza o'qish, CRM reconcile
+
+### §152.1. Nima uchun bu to'rtlik
+
+Inventar to'rttasini ham "na probe, na faza" deb belgilagan edi. Har biri bir raqam
+biror narsani hal qiladigan joy: model qancha kontekst ko'radi, qancha audio
+yuboriladi, qancha qator qaytadi, aniq moslik qoidasidan oldin qancha nomzod olinadi.
+
+### §152.2. Ikki chegara **boshqa shaklda** qadaldi — va shakl topilma
+
+- `DEFAULT_PORT` faqat konfiguratsiyada port **yo'qligi** sifatida yetib boriladi,
+  shuning uchun mutatsiya **rad etish** bilan emas, **qiymat** tekshiruvi bilan
+  ushlanadi. U qo'shnilaridan **ataylab** boshqacha o'qiladi.
+- `MIN_SPEED` — modul chaqiruvchiga ishonishni to'xtatgan chegara. Qo'shni `bool`
+  rad etilishi **alohida** qadalgan, chunki Python'da `True` — bu `int`, va oddiy
+  son oralig'i tekshiruvidan **o'tib ketardi**. Modul bu nuqsonni allaqachon
+  chetlab o'tgan edi; endi qadaydi.
+
+### §152.3. Natija — **28/28 qizil, 0 yashil**
+
+Bu fazada **bitta ham** chegara yashil chiqmadi. Sabab asbobda emas, modullarda:
+har bir raqam allaqachon biror narsani rad etardi, yetishmayotgani — buni **aytgan
+test** edi.
+
+### §152.4. Asbob o'zgardi — **imzo asosidagi baseline**
+
+Bu fazada nazorat yurishi **YASHIL bo'lmadi**: naqshga `test_foundation_v02.test_mount_scope`
+kirdi, u esa POSIX mount semantikasi talab qiladi va Windows'da hech qachon yashil
+bo'lmaydi. Ya'ni "nazorat yashil bo'lishi shart" qoidasi **hech qachon** o'lchay
+olmasdi.
+
+`revert_matrix.py` ga `signature()` va `AUTO_BASELINE` qo'shildi: nazorat **yashil**
+bo'lishi emas, **yozib olingan imzoni takrorlashi** shart. Har bir mutatsiya esa
+o'sha imzoni **o'zgartirishi** shart — bu yashillikdan **qattiqroq**, chunki
+oldindan mavjud xatoni o'chirib tashlagan mutatsiya ham ushlanadi.
+
+---
+
+## §153. Fazza qirq sakkizinchi — boshqaruv tekisligi va **10× kengaytirilgan avtonomiya shifti**
+
+### §153.1. Nega aynan bu fayl
+
+`app/platform_api.py` — har bir tenant yozuvi o'tadigan yagona eshik: **717 satr,
+88 `Field(...)`**. Inventar uni "eng katta audit qilinmagan modul" deb belgilagan
+edi, va sabab bir qatorda ko'rinadi:
+
+```
+grep -l 'le=10' runtime_tests/*.py        →  0 fayl
+grep -l 'max_length=20' runtime_tests/*.py →  0 fayl
+```
+
+Ya'ni **hech bir test umuman raqam aytmasdi**. Savol shu sababdan boshqacha
+qo'yildi: *avtomatlashtirish mijozga qanchalik qattiq tegishi mumkinligi chegarasini
+bitta ham test qizarmasdan kengaytirish mumkinmi?* — **ha**.
+
+### §153.2. Nima qilindi
+
+**48 shakl**, **81 chaqiruv joyi** nomlangan konstantaga aylantirildi. Konstantalar
+uch bo'limga ajratildi: **shift** (matn, vektor, pul, qadam, vaqt), **avtonomiya
+shiftlari** (qayta aloqa, eskalatsiya, brifing), **standart qiymatlar**.
+
+Invariant **mutlaq** qilindi: modulda bitta ham `Field(...)` ichida raqamli literal
+qolmadi, va buni `NoInlineBoundTests` tekshiradi. Busiz yuqoridagi ikki qatlam
+"vakillik" bo'lib qolardi — **to'liqlik** emas.
+
+### §153.3. Strukturaviy test **uchta haqiqiy xatoni** ushlab qoldi
+
+Umumiy naqsh almashtirishlari bir xil *qiymatga* ega, lekin **boshqa ma'noli**
+maydonlarni birlashtirib qo'ygan edi. "E'lon qilingan-u ishlatilmagan konstanta"
+testi ularni topdi:
+
+| Konstanta | Nima bo'lgan edi |
+|---|---|
+| `MAX_DISPLAY_NAME_CHARS` | `display_name` `MAX_KEY_CHARS` ga tushgan |
+| `MAX_EXTERNAL_ID_CHARS` | `external_ref`, `external_id` `MAX_KEY_CHARS` / `MAX_MODEL_CHARS` ga tushgan |
+| `MAX_QUERY_CHARS` | bilim `query` si `MAX_EVIDENCE_CHARS` ga tushgan |
+
+Qiymat bir xil (500, 256) bo'lgani uchun **hech bir xulq o'zgarmagan** — lekin
+kelajakda bittasi o'zgarsa, ikkinchisi ham **jimgina** o'zgarardi.
+
+### §153.4. Blast radius **o'lchandi, taxmin qilinmadi**
+
+Uchta eng xavfli chegara yigirma daqiqalik naqsh bilan mutatsiya qilindi:
+
+| Mutatsiya | `test_reengagement` + `test_escalation` + `test_briefing` |
+|---|---|
+| `MAX_REENGAGEMENT_PER_CYCLE` 20 → **200** | **YASHIL** |
+| `MAX_ESCALATION_PER_CYCLE` 50 → **500** | **YASHIL** |
+| `MAX_COOLDOWN_SECONDS` 2 592 000 → **25 920 000** | **YASHIL** |
+
+Bir siklda **10 barobar ko'proq** mijozga tegish va anti-spam kutish muddatini
+**10 barobar** qisqartirish — bu uch modul uchun **butunlay ko'rinmas**. Ular
+endpoint'lar **orqasidagi** siklni o'lchaydi, **oldidagi** shartnomani emas. Shu
+sabab matritsa naqshi ataylab **bitta fayl**: to'rt modul 2 daqiqalik matritsani
+70 daqiqaga aylantirardi va **hech narsani isbotlamasdi**.
+
+### §153.5. Qaytarish matritsasi — **61/61 qizil**
+
+**0 yashil, 0 o'lchanmagan.** Birinchi marta **barcha standart qiymatlar ham**
+qadalgan (16 mutatsiya). `DEFAULT_*` — bu chegara emas, **siyosat**: operator
+tanlamaganda tizim **o'zi** nima qiladi.
+
+### §153.6. Yakuniy o'lchov
+
+| Ko'rsatkich | Qiymat |
+|---|---|
+| Mutatsiya | **61**, **61/61 qizil**, 0 yashil, 0 o'lchanmagan |
+| Yangi sinov | `test_control_plane_bounds.py` — **50 sinov**, uch qatlam |
+| `platform_api.py` | 717 → **913 satr**; nomlangan konstanta **0 → 90** |
+| Imzo | `failures=1, errors=11, skipped=1` — **o'zgarmadi** |
+
+### §153.7. O'zim qilgan xatolar
+
+**`min_length=1` ni tashlab ketdim** — keyin nomladim (`MIN_NON_EMPTY`), chunki u
+ham chegara ("bo'sh bo'lmasin"), va nomlanmasa struktura invarianti **mutlaq**
+bo'lmasdi, ya'ni bitta istisno qolardi. **`MAX_EXTERNAL_ID_CHARS` va
+`MAX_QUERY_CHARS` ni e'lon qildim, lekin ishlatmadim** — strukturaviy test ushladi.
+**Umumiy naqsh almashtirishga haddan tashqari ishondim** — uchtasi birlashib ketdi.
+
+---
+
+## §154. Fazza qirq to'qqizinchi — Windows uchun bloklangan yuza: **11 emas, 12**
+
+### §154.1. Yozuvning o'zi xato edi
+
+| | |
+|---|---|
+| Inventar da'vosi | `failures=0, errors=11, skipped=2` |
+| **O'lchangan** | `failures=1, errors=11, skipped=1` |
+
+Uch maydondan **bittasi** to'g'ri. Sabab mazmunli:
+`test_macos_bundle.test_all_files_private` — **failure**, **error** emas: u
+yetishmayotgan primitivni chaqirmaydi, **ruxsat bitlarini** tekshiradi
+(`st_mode & 0o077 == 0`), shuning uchun boshqacha yiqiladi va "error" sanovidan
+tushib qolgan. `skipped=2` esa umuman yo'q: to'plamdagi **yagona** `skipTest` —
+`test_whatsapp_inbound` da, va u platforma uchun emas, **runtime** uchun.
+
+Ya'ni **o'zini yozuv deb e'lon qilgan hujjat ichida** raqam surilib ketgan.
+
+### §154.2. Bitta yetishmayotgan primitiv yettitasini bloklaydi
+
+| Sabab | Sinovlar |
+|---|---|
+| `os.O_NOFOLLOW` yo'q | **7** |
+| `os.mkfifo` yo'q | 2 |
+| `fcntl` moduli yo'q | 1 |
+| POSIX mount semantikasi (`test_foundation_v02`) | 1 |
+| POSIX ruxsat bitlari (`test_macos_bundle`) | 1 |
+
+`O_NOFOLLOW` — to'plamning **yarmidan ko'pini** bloklayotgan yagona sabab, chunki u
+`open()` ning simlinkni kuzatmasligini ta'minlaydi va `portable_fs` butun
+descriptor-identifikatsiya tekshiruvini shunga qaraydi.
+
+### §154.3. Yechim — **sabab bo'yicha** qadash, sinovlarni qayta yurgizmasdan
+
+`runtime_tests/test_platform_baseline.py` (**7 sinov**) ro'yxatni shunday qadaydi:
+Windows'da har bir sabab **hamon** amal qilishi shart, POSIX'da esa **hech biri**
+amal qilmasligi shart. Ya'ni kim `os.O_NOFOLLOW` ni shim qilsa yoki loyiha Linux
+runner'ga o'tsa, modul **qizil** bo'ladi va "yozuv eskirgan" deydi.
+
+Ro'yxatdagi har bir ID **import qilinib tekshiriladi**, ya'ni xato yozilgan ID
+12 gacha sanab, hech narsani hujjatlashtirmasligi mumkin emas.
+
+**O'tkazib yuborish — bu o'tish emas.** O'n ikkisi Windows'da **tekshirilmagan**,
+yashil emas.
+
+### §154.4. Yo'l-yo'lakay topilgan nuqson — `integration_tests` **yig'ilmasdi**
+
+```
+pytest integration_tests --collect-only
+→ 86 tests collected, 1 error
+→ ERROR integration_tests/test_connector_authority_http.py - app.config.ConfigError
+```
+
+Sakkiz moduldan **yettitasi** `ENV` ni o'zi o'rnatadi, bittasi yo'q.
+`test_connector_authority_http.py` ning 4-qatori `app.platform_api` ni import
+qiladi, `ENV` ni o'rnatadigan modulga esa 6-qatorda yetadi — pytest esa uni alifbo
+bo'yicha **birinchi** yig'adi. `app.platform_api` → `app.auth` import vaqtida
+konfiguratsiyani tekshiradi va **fail-closed** yopiladi.
+
+Tuzatish: `integration_tests/conftest.py` — pytest har qanday test modulidan
+**oldin** `conftest` ni import qiladi. Natija: **95 sinov, 95 pass, 50 s.**
+
+### §154.5. Yakuniy baseline
+
+```
+Ran 2949 tests in 425.883s
+
+FAILED (failures=1, errors=11, skipped=1)
+```
+
+| Ko'rsatkich | Qiymat |
+|---|---|
+| Testlar | 2814 → **2949** = **+135** |
+| Imzo | `failures=1, errors=11, skipped=1` — **o'zgarmadi** |
+| Bloklangan yuza | **12**, endi `test_platform_baseline.py` qadaydi |
+| `integration_tests` | **95 pass** (ilgari yig'ilmasdi) |
+| Devor vaqti | 576.8 s → **425.9 s** — test **ko'paydi**, vaqt **qisqardi** |

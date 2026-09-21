@@ -9,6 +9,9 @@ from .model_transport import headers as model_headers, transport_for
 
 MAX_CONTEXT_BYTES = 64000
 MAX_OUTPUT_TOKENS = 1600
+# The model name is tenant configuration, so its length is a bound on configuration
+# rather than on provider output. It was the only unnamed number left in this module.
+MAX_MODEL_NAME_CHARS = 256
 
 
 class ResultPlanner:
@@ -21,7 +24,7 @@ class ResultPlanner:
         if not isinstance(cfg, dict) or cfg.get('agent_loop_enabled') is not True:
             raise RuntimeError('Result-fed planning requires explicit operator opt-in')
         model = cfg.get('model')
-        if not isinstance(model, str) or not model.strip() or len(model) > 256:
+        if not isinstance(model, str) or not model.strip() or len(model) > MAX_MODEL_NAME_CHARS:
             raise RuntimeError('Explicit model configuration required')
         agent = context['agent']
         policy = self.engine.policy(tenant, agent)

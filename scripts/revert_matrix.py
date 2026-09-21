@@ -16,7 +16,10 @@ Safety, each learned by getting it wrong:
   folding it into "green" is how two unrun modes were once read as passing;
 * the restore is VERIFIED at the end by walking every mutation's ``old`` bytes
   against the live file, because ``atexit`` does not run when a matrix is killed;
-* the file is edited as BYTES, so CRLF is preserved.
+* the file is edited as BYTES, so CRLF is preserved;
+* a control that is not GREEN refuses to measure -- but on a platform where some
+  tests are known-red, GREEN is the wrong bar and the recorded SIGNATURE is the
+  right one. See ``signature`` and the ``baseline`` argument to ``main``.
 
 Mutations are given as a list of ``(label, old_bytes, new_bytes)``.
 """
@@ -25,6 +28,7 @@ from __future__ import annotations
 import atexit
 import hashlib
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -37,6 +41,33 @@ MANAGED = os.path.join(os.path.expanduser('~'), '.workbuddy-ai', 'binaries',
                        'python', 'envs', 'default', 'Scripts', 'python.exe')
 
 RED, GREEN, MISSING = 'RED', 'GREEN', 'PATTERN-MISSING'
+
+# Passing this as ``baseline_signature`` measures the control and adopts whatever it
+# produced. That is what makes an audit portable: the same pattern is green on Linux
+# and carries eleven known errors on Windows, and hardcoding either would make the
+# script wrong on the other platform.
+AUTO_BASELINE = 'auto'
+
+
+def signature(line):
+    """The failure counts unittest printed, as a comparable string. Empty means green.
+
+    Eleven tests in this suite are red on Windows and stay red: they exercise POSIX mount
+    semantics the platform cannot provide. Requiring the control to be GREEN therefore
+    refuses to measure any pattern that happens to include one of them -- which is how a
+    known-red suite stops being measured at all, and how red stops meaning anything.
+
+    A signature makes the control's requirement "reproduce the recorded baseline
+    exactly", and a mutation's requirement "change it". Both are stricter than GREEN: a
+    mutation that *removes* a pre-existing failure is caught as well.
+    """
+    text = line.strip()
+    if text.startswith('OK'):
+        return ''
+    match = re.search(r'\(([^)]*)\)', text)
+    if not match:
+        return text or 'unknown'
+    return ', '.join(sorted(part.strip() for part in match.group(1).split(',') if part.strip()))
 
 
 def interpreter():
@@ -72,7 +103,7 @@ def run_tests(pattern, python):
                           text=True, env=env)
     tail = proc.stderr.strip().splitlines()
     last = tail[-1] if tail else ''
-    return proc.returncode, last.strip()
+    return proc.returncode, last.strip(), signature(last)
 
 
 def verify(target, mutations):
@@ -101,7 +132,7 @@ def verify(target, mutations):
     return 1 if bad else 0
 
 
-def main(target, pattern, mutations):
+def main(target, pattern, mutations, baseline_signature=None):
     path = os.path.join(API, target) if not os.path.isabs(target) else target
     sidecar = path + '.matrix-baseline'
 
@@ -145,11 +176,21 @@ def main(target, pattern, mutations):
     print(f'interpreter : {python}')
     print(f'tests       : {pattern}\n')
 
-    # A control: the unmutated file must be green, or the matrix measures nothing.
-    code, last = run_tests(pattern, python)
-    print(f'{"CONTROL":<22} {RED if code else GREEN:<15} {last}')
-    if code:
-        print('control failed; fix the baseline before mutating')
+    # A control: the unmutated file must reproduce the recorded baseline, or the
+    # matrix measures nothing. GREEN is the bar when no baseline is given; when one
+    # is, the bar is the recorded signature, because eleven tests are red on Windows
+    # and a pattern containing one of them could never be measured otherwise.
+    code, last, measured = run_tests(pattern, python)
+    if baseline_signature == AUTO_BASELINE:
+        baseline_signature = measured
+        print(f'baseline    : signature {measured!r} (measured, not recorded)')
+    expected = '' if baseline_signature is None else baseline_signature
+    control_ok = (code == 0) if baseline_signature is None else (measured == expected)
+    print(f'{"CONTROL":<22} {GREEN if control_ok else RED:<15} {last}')
+    if not control_ok:
+        print('control does not reproduce the recorded baseline; fix it before mutating')
+        print('  recorded: %r' % expected)
+        print('  measured: %r' % measured)
         return 1
 
     results = []
@@ -170,10 +211,13 @@ def main(target, pattern, mutations):
             continue
         open(path, 'wb').write(current.replace(old, new, 1))
         start = time.perf_counter()
-        code, last = run_tests(pattern, python)
+        code, last, measured = run_tests(pattern, python)
         elapsed = time.perf_counter() - start
         open(path, 'wb').write(baseline)
-        verdict = RED if code else GREEN
+        if baseline_signature is None:
+            verdict = RED if code else GREEN
+        else:
+            verdict = RED if measured != baseline_signature else GREEN
         results.append((label, verdict, 1, last))
         print(f'{label:<22} {verdict:<15} {elapsed:5.1f}s  {last}')
 

@@ -13,6 +13,121 @@ from .auth import verify_claims, issue_token
 
 router=APIRouter(prefix='/platform',tags=['platform'])
 
+# ---------------------------------------------------------------------------
+# Declared bounds (§153).
+#
+# Every limit the control plane enforces is named here, and every name is
+# asserted literally in ``runtime_tests/test_control_plane_bounds.py``.  Inline
+# ``Field(ge=..., le=...)`` values are not addressable from a test, so widening
+# one used to be silent: the suite stayed green while the control plane began
+# accepting wider autonomous behaviour.
+# ---------------------------------------------------------------------------
+
+MIN_NON_EMPTY = 1
+
+# Text ceilings.
+MAX_IDENTIFIER_CHARS = 128
+MAX_KEY_CHARS = 256
+MAX_EXTERNAL_ID_CHARS = 256
+MAX_EVIDENCE_CHARS = 500
+MAX_TEXT_CHARS = 4000
+MAX_URL_CHARS = 2000
+MAX_TITLE_CHARS = 200
+MAX_MODEL_CHARS = 256
+MAX_CONTENT_CHARS = 100_000
+MAX_QUERY_CHARS = 500
+MAX_QUESTION_CHARS = 2000
+MAX_DISPLAY_NAME_CHARS = 256
+MAX_CONTACT_VALUE_CHARS = 512
+MAX_CHANNEL_CHARS = 32
+MAX_BRIEFING_TITLE_CHARS = 120
+MAX_SECTION_REF_CHARS = 64
+MAX_KEYWORDS_PER_SECTION = 20
+
+# Vector and knowledge ceilings.
+MAX_VECTOR_DIMENSION = 1024
+MAX_VECTORS_PER_DOCUMENT = 224
+MIN_KNOWLEDGE_RESULTS = 1
+MAX_KNOWLEDGE_RESULTS = 5
+DEFAULT_KNOWLEDGE_RESULTS = 4
+MIN_DIMENSION = 0
+MAX_DIMENSION = 1024
+MIN_VERSION = 0
+MIN_DELETE_VERSION = 1
+MAX_VERSION = 2 ** 31  # exclusive: the fields use ``lt=``
+
+# Money, in minor units.
+MIN_MONEY_MINOR = 0
+MAX_MONEY_MINOR = 10 ** 15
+MIN_LIMIT_MICRO = 1
+MAX_LIMIT_MICRO = 10 ** 15
+MIN_ACTUAL_MICRO = 0
+MIN_MAX_INFLIGHT = 1
+MAX_MAX_INFLIGHT = 100
+DEFAULT_MAX_INFLIGHT = 4
+
+# Step ceilings.
+MIN_SUBMIT_STEPS = 1
+MAX_SUBMIT_STEPS = 20
+MIN_SECTIONS = 1
+MAX_SECTIONS = 12
+DEFAULT_MAX_SECTIONS = 6
+MIN_AGENT_RUN_STEPS = 1
+MAX_AGENT_RUN_STEPS = 12
+DEFAULT_AGENT_RUN_STEPS = 6
+DEFAULT_REENGAGEMENT_STEPS = 4
+DEFAULT_SUPERVISOR_STEPS = 6
+MIN_SUPERVISOR_HOPS = 1
+MAX_SUPERVISOR_HOPS = 3
+
+# Wall-clock ceilings, in seconds.
+MIN_MAX_SECONDS = 60
+MAX_MAX_SECONDS = 86_400
+DEFAULT_MAX_SECONDS = 1800
+MIN_SCHEDULE_INTERVAL_SECONDS = 60
+MAX_SCHEDULE_INTERVAL_SECONDS = 31_536_000
+
+# Re-engagement autonomy ceilings.  These govern how often the platform may act
+# on a customer without a human in the loop, so they are the ones worth pinning.
+MIN_INACTIVE_MINUTES = 1
+MAX_INACTIVE_MINUTES = 20_160
+DEFAULT_INACTIVE_MINUTES = 120
+MIN_COOLDOWN_SECONDS = 300
+MAX_COOLDOWN_SECONDS = 2_592_000
+DEFAULT_COOLDOWN_SECONDS = 86_400
+MIN_REENGAGEMENT_ATTEMPTS = 1
+MAX_REENGAGEMENT_ATTEMPTS = 10
+DEFAULT_REENGAGEMENT_ATTEMPTS = 2
+MIN_REENGAGEMENT_PER_CYCLE = 1
+MAX_REENGAGEMENT_PER_CYCLE = 20
+DEFAULT_REENGAGEMENT_PER_CYCLE = 5
+MIN_CYCLE_INTERVAL_SECONDS = 300
+MAX_CYCLE_INTERVAL_SECONDS = 604_800
+DEFAULT_CYCLE_INTERVAL_SECONDS = 3600
+
+# Escalation autonomy ceilings.
+MIN_ESCALATION_PER_CYCLE = 1
+MAX_ESCALATION_PER_CYCLE = 50
+DEFAULT_ESCALATION_PER_CYCLE = 10
+MIN_MAX_AGE_DAYS = 1
+MAX_MAX_AGE_DAYS = 365
+DEFAULT_MAX_AGE_DAYS = 30
+
+# Briefing ceilings.
+MIN_HOUR = 0
+MAX_HOUR = 23
+DEFAULT_HOUR = 8
+MIN_MINUTE = 0
+MAX_MINUTE = 59
+DEFAULT_MINUTE = 0
+MIN_TIMEZONE_OFFSET_MINUTES = -1440
+MAX_TIMEZONE_OFFSET_MINUTES = 1440
+DEFAULT_TIMEZONE_OFFSET_MINUTES = 300
+MIN_BRIEFING_ROWS = 1
+MAX_BRIEFING_ROWS = 50
+DEFAULT_BRIEFING_ROWS = 5
+
+
 
 def agents(tenant):
     return [{'id':a.id,'name':a.name,'department':a.department,'tools':a.tools,'ladder':a.ladder} for a in load_pack(tenant).agents]
@@ -61,9 +176,9 @@ class StrictRequest(BaseModel):
 
 
 class Submit(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    key:str=Field(min_length=1,max_length=256)
-    steps:list[dict]=Field(min_length=1,max_length=20)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    key:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_KEY_CHARS)
+    steps:list[dict]=Field(min_length=MIN_SUBMIT_STEPS,max_length=MAX_SUBMIT_STEPS)
 
 
 @router.get('/{tenant}/identity')
@@ -122,7 +237,7 @@ def cancel(tenant:str,task:str,request:Request):
 
 class Reconcile(StrictRequest):
     outcome:Literal['succeeded','failed']
-    evidence:str=Field(min_length=1,max_length=500)
+    evidence:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_EVIDENCE_CHARS)
 
 
 @router.post('/{tenant}/steps/{step}/reconcile')
@@ -158,8 +273,8 @@ def inbox(tenant:str,request:Request):
 
 
 class RetryEvent(StrictRequest):
-    channel:str=Field(min_length=1,max_length=32)
-    key:str=Field(min_length=1,max_length=256)
+    channel:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_CHANNEL_CHARS)
+    key:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_KEY_CHARS)
 
 
 @router.post('/{tenant}/inbox/retry')
@@ -169,7 +284,7 @@ def retry_event(tenant:str,req:RetryEvent,request:Request):
 
 
 class DeviceRequest(StrictRequest):
-    device_id:str=Field(min_length=1,max_length=128,pattern=r'^[A-Za-z0-9_-]+$')
+    device_id:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS,pattern=r'^[A-Za-z0-9_-]+$')
     revoked:bool=False
 
 
@@ -190,7 +305,7 @@ def devices(tenant:str,request:Request):
 
 
 class ScheduleRequest(Submit):
-    interval_seconds:int=Field(ge=60,le=31536000)
+    interval_seconds:int=Field(ge=MIN_SCHEDULE_INTERVAL_SECONDS,le=MAX_SCHEDULE_INTERVAL_SECONDS)
 
 
 @router.post('/{tenant}/schedules')
@@ -201,8 +316,8 @@ def schedule(tenant:str,req:ScheduleRequest,request:Request):
 
 
 class EventRequest(StrictRequest):
-    key:str=Field(min_length=1,max_length=256)
-    text:str=Field(min_length=1,max_length=4000)
+    key:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_KEY_CHARS)
+    text:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_TEXT_CHARS)
 
 
 @router.post('/{tenant}/events')
@@ -251,28 +366,28 @@ async def runner(ws:WebSocket):
 
 
 class CustomerCreate(StrictRequest):
-    display_name:str=Field(min_length=1,max_length=256)
-    external_ref:str=Field(default='',max_length=256)
+    display_name:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_DISPLAY_NAME_CHARS)
+    external_ref:str=Field(default='',max_length=MAX_EXTERNAL_ID_CHARS)
     status:str='active'
 
 
 class CustomerContact(StrictRequest):
-    type:str=Field(min_length=1,max_length=32)
-    value:str=Field(min_length=1,max_length=512)
+    type:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_CHANNEL_CHARS)
+    value:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_CONTACT_VALUE_CHARS)
     verified:bool=Field(default=False,strict=True)
 
 
 class ChannelIdentity(StrictRequest):
-    channel:str=Field(min_length=1,max_length=32)
-    external_id:str=Field(min_length=1,max_length=256)
+    channel:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_CHANNEL_CHARS)
+    external_id:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_EXTERNAL_ID_CHARS)
     verified:bool=Field(strict=True)
 
 
 class CustomerOrder(StrictRequest):
-    external_id:str=Field(min_length=1,max_length=256)
+    external_id:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_EXTERNAL_ID_CHARS)
     status:str='new'
     currency:str='UZS'
-    total_minor:int=Field(default=0,ge=0,le=10**15,strict=True)
+    total_minor:int=Field(default=MIN_MONEY_MINOR,ge=MIN_MONEY_MINOR,le=MAX_MONEY_MINOR,strict=True)
 
 
 @router.get('/{tenant}/customers')
@@ -336,7 +451,7 @@ def customer_order(tenant:str,customer_id:str,req:CustomerOrder,request:Request)
 
 
 class ConnectionVerifyRequest(StrictRequest):
-    agent:str | None=Field(default=None,min_length=1,max_length=128)
+    agent:str | None=Field(default=None,min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
 
 
 @router.post('/{tenant}/connections/{connection_id}/verify')
@@ -364,11 +479,11 @@ def get_connections(tenant:str,request:Request):
 
 
 class AgentRunRequest(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    key:str=Field(min_length=1,max_length=256)
-    text:str=Field(min_length=1,max_length=4000)
-    max_steps:int=Field(default=6,ge=1,le=12)
-    max_seconds:int=Field(default=1800,ge=60,le=86400)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    key:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_KEY_CHARS)
+    text:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_TEXT_CHARS)
+    max_steps:int=Field(default=DEFAULT_AGENT_RUN_STEPS,ge=MIN_AGENT_RUN_STEPS,le=MAX_AGENT_RUN_STEPS)
+    max_seconds:int=Field(default=DEFAULT_MAX_SECONDS,ge=MIN_MAX_SECONDS,le=MAX_MAX_SECONDS)
 
 
 @router.post('/{tenant}/agent-runs')
@@ -405,13 +520,13 @@ def agent_run_cancel(tenant:str,run_id:str,request:Request):
 # Development v0.3.6: local budget and knowledge service surfaces.
 class BudgetSettings(StrictRequest):
     currency:str=Field(pattern=r'^[A-Z]{3}$')
-    limit_micro:int=Field(ge=1,le=10**15)
-    max_inflight:int=Field(default=4,ge=1,le=100)
+    limit_micro:int=Field(ge=MIN_LIMIT_MICRO,le=MAX_LIMIT_MICRO)
+    max_inflight:int=Field(default=DEFAULT_MAX_INFLIGHT,ge=MIN_MAX_INFLIGHT,le=MAX_MAX_INFLIGHT)
 
 
 class BudgetSettlement(StrictRequest):
-    actual_micro:int=Field(ge=0,le=10**15)
-    evidence:str=Field(min_length=1,max_length=500)
+    actual_micro:int=Field(ge=MIN_ACTUAL_MICRO,le=MAX_LIMIT_MICRO)
+    evidence:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_EVIDENCE_CHARS)
 
 
 @router.get('/{tenant}/usage-budget')
@@ -444,28 +559,28 @@ def budget_reconcile(tenant:str,reservation:str,req:BudgetSettlement,request:Req
 
 
 class KnowledgeCollection(StrictRequest):
-    id:str=Field(min_length=1,max_length=128)
-    model:str=Field(default='',max_length=256)
-    dimension:int=Field(default=0,ge=0,le=1024)
+    id:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    model:str=Field(default='',max_length=MAX_MODEL_CHARS)
+    dimension:int=Field(default=MIN_DIMENSION,ge=MIN_DIMENSION,le=MAX_DIMENSION)
 
 
 class KnowledgeGrant(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
     allowed:bool
 
 
 class KnowledgeDocument(StrictRequest):
-    id:str=Field(min_length=1,max_length=128)
-    title:str=Field(min_length=1,max_length=200)
-    content:str=Field(min_length=1,max_length=100000)
-    source_url:str=Field(default='',max_length=2000)
-    expected_version:int=Field(default=0,ge=0,lt=2**31)
-    model:str=Field(default='',max_length=256)
-    vectors:list[list[float|int]]|None=Field(default=None,max_length=224)
+    id:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    title:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_TITLE_CHARS)
+    content:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_CONTENT_CHARS)
+    source_url:str=Field(default='',max_length=MAX_URL_CHARS)
+    expected_version:int=Field(default=MIN_VERSION,ge=MIN_VERSION,lt=MAX_VERSION)
+    model:str=Field(default='',max_length=MAX_MODEL_CHARS)
+    vectors:list[list[float|int]]|None=Field(default=None,max_length=MAX_VECTORS_PER_DOCUMENT)
 
 
 class KnowledgeDelete(StrictRequest):
-    expected_version:int=Field(ge=1,lt=2**31)
+    expected_version:int=Field(ge=MIN_DELETE_VERSION,lt=MAX_VERSION)
 
 
 @router.post('/{tenant}/knowledge/collections')
@@ -507,11 +622,11 @@ def knowledge_delete(tenant:str,collection:str,document:str,req:KnowledgeDelete,
 
 
 class KnowledgeQuery(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    query:str=Field(min_length=1,max_length=500)
-    limit:int=Field(default=4,ge=1,le=5)
-    query_vector:list[float|int]|None=Field(default=None,max_length=1024)
-    model:str=Field(default='',max_length=256)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    query:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_QUERY_CHARS)
+    limit:int=Field(default=DEFAULT_KNOWLEDGE_RESULTS,ge=MIN_KNOWLEDGE_RESULTS,le=MAX_KNOWLEDGE_RESULTS)
+    query_vector:list[float|int]|None=Field(default=None,max_length=MAX_VECTOR_DIMENSION)
+    model:str=Field(default='',max_length=MAX_MODEL_CHARS)
 
 
 @router.post('/{tenant}/knowledge/{collection}/search')
@@ -530,15 +645,15 @@ def reengagement():
 
 
 class ReengagementPolicy(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    connection:str=Field(min_length=1,max_length=128)
-    inactive_minutes:int=Field(default=120,ge=1,le=20160,strict=True)
-    cooldown_seconds:int=Field(default=86400,ge=300,le=2592000,strict=True)
-    max_attempts:int=Field(default=2,ge=1,le=10,strict=True)
-    max_per_cycle:int=Field(default=5,ge=1,le=20,strict=True)
-    interval_seconds:int=Field(default=3600,ge=300,le=604800,strict=True)
-    max_steps:int=Field(default=4,ge=1,le=12,strict=True)
-    max_seconds:int=Field(default=1800,ge=60,le=86400,strict=True)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    connection:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    inactive_minutes:int=Field(default=DEFAULT_INACTIVE_MINUTES,ge=MIN_INACTIVE_MINUTES,le=MAX_INACTIVE_MINUTES,strict=True)
+    cooldown_seconds:int=Field(default=DEFAULT_COOLDOWN_SECONDS,ge=MIN_COOLDOWN_SECONDS,le=MAX_COOLDOWN_SECONDS,strict=True)
+    max_attempts:int=Field(default=DEFAULT_REENGAGEMENT_ATTEMPTS,ge=MIN_REENGAGEMENT_ATTEMPTS,le=MAX_REENGAGEMENT_ATTEMPTS,strict=True)
+    max_per_cycle:int=Field(default=DEFAULT_REENGAGEMENT_PER_CYCLE,ge=MIN_REENGAGEMENT_PER_CYCLE,le=MAX_REENGAGEMENT_PER_CYCLE,strict=True)
+    interval_seconds:int=Field(default=DEFAULT_CYCLE_INTERVAL_SECONDS,ge=MIN_CYCLE_INTERVAL_SECONDS,le=MAX_CYCLE_INTERVAL_SECONDS,strict=True)
+    max_steps:int=Field(default=DEFAULT_REENGAGEMENT_STEPS,ge=MIN_AGENT_RUN_STEPS,le=MAX_AGENT_RUN_STEPS,strict=True)
+    max_seconds:int=Field(default=DEFAULT_MAX_SECONDS,ge=MIN_MAX_SECONDS,le=MAX_MAX_SECONDS,strict=True)
     enabled:bool=Field(default=True,strict=True)
 
 
@@ -576,18 +691,18 @@ def briefing():
 
 
 class BriefingSchedule(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    recipient:str=Field(min_length=1,max_length=128)
-    connection:str=Field(min_length=1,max_length=128)
-    sections:list[dict]=Field(min_length=1,max_length=12)
-    interval_seconds:int=Field(default=86400,ge=300,le=604800,strict=True)
-    hour:int=Field(default=8,ge=0,le=23,strict=True)
-    minute:int=Field(default=0,ge=0,le=59,strict=True)
-    timezone_offset_minutes:int=Field(default=300,ge=-1440,le=1440,strict=True)
-    max_sections:int=Field(default=6,ge=1,le=12,strict=True)
-    max_rows:int=Field(default=5,ge=1,le=50,strict=True)
-    max_seconds:int=Field(default=1800,ge=60,le=86400,strict=True)
-    title:str=Field(default='',max_length=120)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    recipient:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    connection:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    sections:list[dict]=Field(min_length=MIN_SECTIONS,max_length=MAX_SECTIONS)
+    interval_seconds:int=Field(default=DEFAULT_COOLDOWN_SECONDS,ge=MIN_CYCLE_INTERVAL_SECONDS,le=MAX_CYCLE_INTERVAL_SECONDS,strict=True)
+    hour:int=Field(default=DEFAULT_HOUR,ge=MIN_HOUR,le=MAX_HOUR,strict=True)
+    minute:int=Field(default=DEFAULT_MINUTE,ge=MIN_MINUTE,le=MAX_MINUTE,strict=True)
+    timezone_offset_minutes:int=Field(default=DEFAULT_TIMEZONE_OFFSET_MINUTES,ge=MIN_TIMEZONE_OFFSET_MINUTES,le=MAX_TIMEZONE_OFFSET_MINUTES,strict=True)
+    max_sections:int=Field(default=DEFAULT_MAX_SECTIONS,ge=MIN_SECTIONS,le=MAX_SECTIONS,strict=True)
+    max_rows:int=Field(default=DEFAULT_BRIEFING_ROWS,ge=MIN_BRIEFING_ROWS,le=MAX_BRIEFING_ROWS,strict=True)
+    max_seconds:int=Field(default=DEFAULT_MAX_SECONDS,ge=MIN_MAX_SECONDS,le=MAX_MAX_SECONDS,strict=True)
+    title:str=Field(default='',max_length=MAX_BRIEFING_TITLE_CHARS)
     enabled:bool=Field(default=True,strict=True)
 
 
@@ -621,13 +736,13 @@ def escalation():
 
 
 class EscalationSchedule(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    recipient:str=Field(min_length=1,max_length=128)
-    title:str=Field(default='',max_length=120)
-    cooldown_seconds:int=Field(default=86400,ge=300,le=2592000,strict=True)
-    max_per_cycle:int=Field(default=10,ge=1,le=50,strict=True)
-    interval_seconds:int=Field(default=3600,ge=300,le=604800,strict=True)
-    max_age_days:int=Field(default=30,ge=1,le=365,strict=True)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    recipient:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    title:str=Field(default='',max_length=MAX_BRIEFING_TITLE_CHARS)
+    cooldown_seconds:int=Field(default=DEFAULT_COOLDOWN_SECONDS,ge=MIN_COOLDOWN_SECONDS,le=MAX_COOLDOWN_SECONDS,strict=True)
+    max_per_cycle:int=Field(default=DEFAULT_ESCALATION_PER_CYCLE,ge=MIN_ESCALATION_PER_CYCLE,le=MAX_ESCALATION_PER_CYCLE,strict=True)
+    interval_seconds:int=Field(default=DEFAULT_CYCLE_INTERVAL_SECONDS,ge=MIN_CYCLE_INTERVAL_SECONDS,le=MAX_CYCLE_INTERVAL_SECONDS,strict=True)
+    max_age_days:int=Field(default=DEFAULT_MAX_AGE_DAYS,ge=MIN_MAX_AGE_DAYS,le=MAX_MAX_AGE_DAYS,strict=True)
     enabled:bool=Field(default=True,strict=True)
 
 
@@ -666,18 +781,18 @@ def supervisor():
 
 
 class SupervisorSection(StrictRequest):
-    agent:str=Field(min_length=1,max_length=128)
-    title:str=Field(default='',max_length=120)
-    keywords:list[str]=Field(default_factory=list,max_length=20)
+    agent:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_IDENTIFIER_CHARS)
+    title:str=Field(default='',max_length=MAX_BRIEFING_TITLE_CHARS)
+    keywords:list[str]=Field(default_factory=list,max_length=MAX_KEYWORDS_PER_SECTION)
     enabled:bool=Field(default=True,strict=True)
 
 
 class SupervisorRoute(StrictRequest):
-    question:str=Field(min_length=1,max_length=2000)
-    section:str=Field(default='',max_length=64)
-    max_hops:int=Field(default=1,ge=1,le=3,strict=True)
-    max_steps:int=Field(default=6,ge=1,le=12,strict=True)
-    max_seconds:int=Field(default=1800,ge=60,le=86400,strict=True)
+    question:str=Field(min_length=MIN_NON_EMPTY,max_length=MAX_QUESTION_CHARS)
+    section:str=Field(default='',max_length=MAX_SECTION_REF_CHARS)
+    max_hops:int=Field(default=MIN_SUPERVISOR_HOPS,ge=MIN_SUPERVISOR_HOPS,le=MAX_SUPERVISOR_HOPS,strict=True)
+    max_steps:int=Field(default=DEFAULT_SUPERVISOR_STEPS,ge=MIN_AGENT_RUN_STEPS,le=MAX_AGENT_RUN_STEPS,strict=True)
+    max_seconds:int=Field(default=DEFAULT_MAX_SECONDS,ge=MIN_MAX_SECONDS,le=MAX_MAX_SECONDS,strict=True)
 
 
 @router.get('/{tenant}/supervisor')

@@ -3,6 +3,121 @@
 Joriy source **v0.5**. Ish davom etmoqda, **IN_PROGRESS**, production **NO_GO**. To‘liq PRD
 100% tugamagan.
 
+## Mahsulotlashtirish sessiyasi: UI qatlami, chegara auditi §151–§152, DR
+
+Bu sessiya **kod emas, yetkazib berish** bo‘shlig‘ini yopishga qaratildi. Har bir da’vo
+o‘lchov bilan; o‘lchanmagan narsa «o‘lchanmagan» deb yozilgan.
+
+### 1. UI qatlami — 27 route endi interfeysga ega
+
+`ui_full_product: PARTIAL` ning sababi shu edi: backend route bor, UI yo‘q. Endi:
+
+| Panel | Route’lar | Fayl |
+|---|---|---|
+| Qayta aloqa | `GET/PUT /reengagement`, `/ledger`, `/sync` | `OperationsPanels.tsx` |
+| Brifing | `GET/PUT /briefing`, `/ledger` | shu |
+| Eskalatsiya | `GET/PUT /escalation`, `/ledger`, `/disable` | shu |
+| Supervisor | `GET/PUT /supervisor`, `/route`, `/history` | shu |
+| Takrorlanuvchi jadval | `POST /schedules` | shu |
+| Holat/metrika | `GET /health` + mavjud ro‘yxat route’lari | shu |
+| Mijoz sub-resurslari | `/contacts`, `/channel-identities`, `/orders` | shu |
+| Hisob/a’zolik | `logout-all`, `sessions`, `workspaces`, `select`, `invitations`, `accept`, `revoke` | `AdminPanel.tsx` |
+| Bootstrap | `POST /identity/bootstrap` | shu |
+
+**Eng muhim tuzatish:** `page.tsx` noaniq qadam uchun «reconcile API orqali dalil bilan
+yakunlaydi» deb **buyurar** edi, lekin tugma yo‘q edi — ya’ni yagona hujjatlashtirilgan
+tiklash yo‘li hujjatlashtirilgan, qurilmagan edi. `ReconcileControl` shu bo‘shliqni
+yopadi: owner-only, dalil majburiy, natija audit jurnaliga tushadi.
+
+**Supervisor `/route` uchun `Idempotency-Key` majburiy edi va uni yuborish yo‘li yo‘q
+edi.** `SessionClient` ga allowlist asosidagi header qo‘shildi: nom `[A-Za-z0-9-]{1,64}`,
+qiymat 256 belgidan qisqa, `Authorization`/`Content-Type`/`Host`/`Cookie`/`Origin`/
+`Referer` **qayta yozilmaydi**. 15 ta node testi (4 tasi yangi).
+
+**UI gate’lari endi RUN, oldin NOT_RUN edi:**
+
+| Gate | Natija |
+|---|---|
+| `tsc --noEmit` | **PASS**, 0 xato |
+| `next build` | **PASS**, 7 sahifa |
+| `npm audit --audit-level=high` | **FAIL** — pastga qarang |
+
+**Ochiq risk (yangi topilgan):** `next@14.2.5` da **1 critical + 1 high**. `14.2.35` ga
+ko‘tarildi (11 advisory yopiladi, patch darajasi, typecheck+build qayta tasdiqlandi),
+lekin qolgan advisory’lar **`>=15.5.24`** talab qiladi. Ya’ni bu gate’ni **14.x
+liniyasida yopib bo‘lmaydi** — Next 15 + React 19 ga rejalashtirilgan major upgrade
+kerak. `ui_dependency_security` CI job shu sababdan **qizil**.
+
+### 2. Chegara auditi §151 — tashqi provayder transporti
+
+`google_oauth.py`, `model_transport.py`, `model_response.py`, `mcp.py`. 24 mutatsiya.
+
+**Natija: 23 RED, 1 RECORDED, 0 o‘lchanmagan.** Matritsa **bitta haqiqiy nuqson**
+topdi va u o‘qishdan ko‘rinmasdi:
+
+> `client id suffix` mutatsiyasi **YASHIL** chiqdi. Ya’ni «client id Google client id
+> bo‘lishi shart» degan qoidani **butunlay o‘chirib tashlash mumkin edi** va to‘plam
+> jim qolardi. Sabab: mavjud chegara testi faqat **to‘g‘ri** client id berardi — u
+> uzunlikni qadadi, **shaklni** emas. `test_client_id_must_be_a_google_client_id`
+> qo‘shildi; qayta yurishda **RED**.
+
+`MAX_PORT = 65535` (model_transport) **RECORDED**: `urlsplit` 65535 dan katta portni
+taqqoslashdan **oldin** rad etadi, shuning uchun konstanta kengaytirilsa ham natija
+o‘zgarmaydi va hech bir test buni ajrata olmaydi. Bu — chegara emas, **o‘lchanish**
+masalasi.
+
+### 3. Chegara auditi §152 — planner, speech, baza o‘qish
+
+`agent_planner.py`, `speech.py`, `postgres_connector.py`, `crm/crm_reconcile.py`.
+28 mutatsiya.
+
+**Natija: 28 RED, 0 RECORDED, 0 o‘lchanmagan.** Loyihada birinchi marta **bitta ham
+yashil yo‘q**.
+
+### 4. `revert_matrix` — asbob tuzatildi (muhim)
+
+§152 da kontrol **yashil emas**: `test_foundation_v02` ichida Windows bajarolmaydigan
+POSIX mount testi bor (11 ma’lum error’dan biri). «Kontrol yashil bo‘lishi shart» qoidasi
+shu sababdan **umuman o‘lchashdan bosh tortdi**.
+
+Asbob endi **imzo (signature)** bilan ishlaydi: kontrol **yozilgan bazani aynan
+takrorlashi**, har bir mutatsiya esa **uni o‘zgartirishi** kerak. Bu yashildan
+**qat’iyroq**: oldindan mavjud xatoni **yo‘q qilgan** mutatsiya ham ushlanadi.
+`AUTO_BASELINE` — imzo platformada o‘lchanadi, shuning uchun skript Linux’da ham,
+Windows’da ham to‘g‘ri.
+
+### 5. `retry.py` — 429/5xx uchun chegaralangan qayta urinish (yangi)
+
+Inventar buni «umuman yo‘q» deb yozgan edi. To‘rt qaror:
+
+- **O‘qish takrorlanadi, yozuv takrorlanmaydi.** `run` `idempotent=True` bo‘lmasa
+  **bir marta** chaqiradi. Sabab: takroriy POST — bu **ikkinchi ta’sir**, va platforma
+  buni allaqachon `uncertain` deb qaraydi.
+- **Faqat 429 va 5xx.** 400/401/403/404 abadiy bir xil javob beradi; 401 ni qayta
+  urinish operator ko‘rishi kerak bo‘lgan xatoni **yashiradi**.
+- **`Retry-After` hurmat qilinadi, lekin cheklanadi** (RFC 9110 ning ikkala shakli).
+- **Devor-soat shifti** — provayder «bir soatdan keyin» desa, worker bir soat
+  uxlamaydi.
+
+17 test, barcha chegara o‘z **raqami** bilan qadalgan.
+
+### 6. Reliz va infratuzilma gigiyenasi
+
+| Ish | Oldin | Endi |
+|---|---|---|
+| `MANIFEST.sha256` | FAIL — 445 tekshirildi, 51 hash mos emas, 162 ro‘yxatda yo‘q | **PASS — 483 fayl, 0 xato** |
+| Generator | repo ichida **yo‘q** | `scripts/generate_manifest.py` (`--check` bilan) |
+| `.gitignore` hisobi | `verify_manifest` uni o‘qimasdi → dev daraxtida hech qachon yashil emas | o‘qiladi (git top-level qo‘riqchisi bilan) |
+| `test_symlink_denied` | **FAIL** (baseline `failures=1`) | tuzatildi: `symlink_to` muvaffaqiyatini **tekshiradi** |
+| `api-python/tmp*` | 4 ta chala papka | o‘chirildi |
+| DR mashqi | **yo‘q** | `scripts/dr_drill.py` + `DR-RUNBOOK-UZ.md` |
+
+**DR drill o‘lchovi:** 42 jadval, 16 satr, **0.295 s**; 7 qadam ham `ok`, shu jumladan
+**tenant izolyatsiyasi tiklangan nusxada**. Qamrab olinmaganlari hujjatda: shifrlash,
+offsite, retention, PITR, tarmoq bazalari, HA.
+
+---
+
 ## v0.5 blok: Business Graph (P1)
 
 Real mijozning **ikkinchi** feedbackidan chiqqan yo‘nalish. Chuqur tadqiqot va
@@ -1621,3 +1736,171 @@ probe o'lchadi.
 `agent_planner.py`, `google_oauth.py`, `postgres_connector.py`, `speech.py`,
 `mcp.py`, `model_transport.py`, `model_response.py`, `crm/crm_reconcile.py`.
 `production_release` **NO_GO** bo'lib qoladi.
+
+## V05W — Boshqaruv tekisligi chegaralari: **61 mutatsiya, 61 qizil** (§153)
+
+`app/platform_api.py` — har bir tenant yozuvi o'tadigan yagona eshik: **717 satr,
+88 `Field(...)`**. Inventar uni "eng katta audit qilinmagan modul" deb belgilagan
+edi, va sabab aniq edi: **barcha chegaralar inline literal** edi (`le=10`,
+`max_length=500`). Inline literalni test **manzillay olmaydi** — bu §151–§152 ning
+butun mantiqi.
+
+Birinchi o'lchov savolni shunday qo'ydi: *avtomatlashtirish mijozga qanchalik
+qattiq tegishi mumkinligi chegarasini **bitta ham test qizarmasdan** kengaytirish
+mumkinmi?* Javob **ha** edi, chunki hech bir test umuman raqam aytmasdi:
+
+```
+grep -l 'le=10' runtime_tests/*.py   →  0 fayl
+grep -l 'max_length=20' runtime_tests/*.py   →  0 fayl
+```
+
+### Nima qilindi
+
+**48 shakl**, **81 chaqiruv joyi** nomlangan konstantaga aylantirildi
+(`MAX_IDENTIFIER_CHARS`, `MAX_REENGAGEMENT_PER_CYCLE`, `DEFAULT_HOUR`, …).
+Konstantalar bloki fayl boshida, uch bo'limga ajratilgan: **shift** (matn, vektor,
+pul, qadam, vaqt), **avtonomiya shiftlari** (qayta aloqa, eskalatsiya, brifing) va
+**standart qiymatlar**.
+
+**Invariant endi mutlaq:** modulda **bitta ham** `Field(...)` ichida raqamli
+literal qolmadi. Buni test tekshiradi (`NoInlineBoundTests`), ya'ni yangi maydon
+`le=500` bilan qo'shilsa, to'plam **qizil** bo'ladi — nomlanishi shart. Busiz
+yuqoridagi ikki qatlam "vakillik" bo'lib qolardi, "to'liqlik" emas.
+
+### Strukturaviy test **uchta haqiqiy xatoni ushlab qoldi**
+
+Umumiy naqsh almashtirishlari bir xil *qiymatga* ega, lekin **boshqa ma'noli**
+maydonlarni birlashtirib qo'ygan edi. `test_every_named_bound_is_referenced_by_the_module`
+(belgilangan-u ishlatilmagan konstanta) ularni topdi:
+
+| Konstanta | Nima bo'lgan edi | Tuzatish |
+|---|---|---|
+| `MAX_DISPLAY_NAME_CHARS` | `display_name` `MAX_KEY_CHARS` ga tushgan | o'z nomi |
+| `MAX_EXTERNAL_ID_CHARS` | `external_ref`, `external_id` `MAX_KEY_CHARS` / `MAX_MODEL_CHARS` ga tushgan | o'z nomi |
+| `MAX_QUERY_CHARS` | bilim `query` si `MAX_EVIDENCE_CHARS` ga tushgan | o'z nomi |
+
+Qiymat bir xil (500, 256) bo'lgani uchun **hech bir xulq o'zgarmagan** — lekin
+kelajakda bittasi o'zgarsa, ikkinchisi ham **jimgina** o'zgarardi. Bu aynan
+audit qidirayotgan nuqson sinfi.
+
+### Blast radius **o'lchandi, taxmin qilinmadi**
+
+Yigirma daqiqalik naqsh bilan **uchta eng xavfli chegara** kengaytirildi:
+
+| Mutatsiya | `test_reengagement` + `test_escalation` + `test_briefing` |
+|---|---|
+| `MAX_REENGAGEMENT_PER_CYCLE` 20 → **200** | **YASHIL** |
+| `MAX_ESCALATION_PER_CYCLE` 50 → **500** | **YASHIL** |
+| `MAX_COOLDOWN_SECONDS` 2 592 000 → **25 920 000** | **YASHIL** |
+
+Ya'ni: bir siklda **10 barobar ko'proq** mijozga tegish, va anti-spam kutish
+muddatini **10 barobar** qisqartirish — bu uch modul uchun **butunlay ko'rinmas**.
+Ular bu endpoint'lar **orqasidagi** siklni o'lchaydi, **oldidagi** shartnomani emas.
+
+Shu sabab matritsa naqshi ataylab **bitta fayl**. To'rt modulni qo'shish 2 daqiqalik
+matritsani 70 daqiqaga aylantirardi va **hech narsani isbotlamasdi** — natija
+baribir qizil bo'lardi, chunki qadovchi test bitta.
+
+### Qaytarish matritsasi — **61/61 qizil**, restore tasdiqlangan
+
+**0 yashil, 0 o'lchanmagan.** Birinchi marta **barcha standart qiymatlar ham
+qadalgan**. `DEFAULT_*` — bu chegara emas, **siyosat**: operator tanlamaganda tizim
+**o'zi** nima qiladi. Shuning uchun ular ko'rib chiqilishi shart bo'lgan eng xavfli
+guruh, va ular endi 16 mutatsiya bilan qadalgan.
+
+### Qo'shilgan
+
+- `runtime_tests/test_control_plane_bounds.py` — **50 sinov**, uch qatlam
+  (literal, xulq, struktura).
+- `scripts/audit_control_plane_bounds.py` — **61 mutatsiya**, 61/61 qizil.
+- `platform_api.py`: nomlangan konstanta **0 → 90**; 717 → **913 satr**.
+
+### O'z xatolarim
+
+**`min_length=1` ni tashlab ketdim** — keyin ko'rib chiqib nomladim
+(`MIN_NON_EMPTY`), chunki u ham chegara ("bo'sh bo'lmasin"), va nomlanmasa
+struktura invariant **mutlaq** bo'lmasdi, ya'ni istisno qolardi.
+**`MAX_EXTERNAL_ID_CHARS` va `MAX_QUERY_CHARS` ni e'lon qildim, lekin
+ishlatmadim** — strukturaviy test ushladi. **Umumiy naqsh almashtirishga haddan
+tashqari ishondim** — uchtasi birlashib ketdi, yuqoridagi jadvalga qarang.
+
+**Baseline:** **2949 test**, `failures=1, errors=11, skipped=1` — imzo
+**o'zgarmadi** (§150 bilan aynan).
+
+---
+
+## V05X — Windows uchun bloklangan yuza: **11 emas, 12** (§154)
+
+Inventar shunday yozgan edi:
+
+| | |
+|---|---|
+| Inventar da'vosi | `failures=0, errors=11, skipped=2` |
+| **O'lchangan** | `failures=1, errors=11, skipped=1` |
+
+Uch maydondan **bittasi** to'g'ri edi. Farqning sababi mazmunli:
+`test_macos_bundle.test_all_files_private` — bu **failure**, **error** emas: u
+yetishmayotgan primitivni chaqirmaydi, **ruxsat bitlarini** tekshiradi
+(`st_mode & 0o077 == 0`), shuning uchun boshqacha yiqiladi va "error" sanovidan
+tushib qolgan. `skipped=2` esa umuman yo'q: to'plamdagi **yagona** `skipTest` —
+`test_whatsapp_inbound` da, va u platforma uchun emas, **runtime** uchun
+o'tkazib yuboradi.
+
+Ya'ni **o'zini yozuv deb e'lon qilgan hujjat ichida** raqam surilib ketgan.
+
+### Bitta yetishmayotgan primitiv yettitasini bloklaydi
+
+| Sabab | Sinovlar |
+|---|---|
+| `os.O_NOFOLLOW` yo'q | **7** |
+| `os.mkfifo` yo'q | 2 |
+| `fcntl` moduli yo'q | 1 |
+| POSIX mount semantikasi (`test_foundation_v02`) | 1 |
+| POSIX ruxsat bitlari (`test_macos_bundle`) | 1 |
+
+`O_NOFOLLOW` — to'plamning **yarmidan ko'pini** bloklayotgan yagona sabab, chunki
+u `open()` ning simlinkni kuzatmasligini ta'minlaydi va `portable_fs` butun
+descriptor-identifikatsiya tekshiruvini shunga qaraydi.
+
+### Yozilgani
+
+`runtime_tests/test_platform_baseline.py` — **7 sinov**. U ro'yxatni **sabab
+bo'yicha** qadaydi, sinovlarni **qayta yurgizmasdan**: Windows'da har bir sabab
+**hamon** amal qilishi shart, POSIX'da esa **hech biri** amal qilmasligi shart.
+Ya'ni kim `os.O_NOFOLLOW` ni shim qilsa yoki loyiha Linux runner'ga o'tsa, bu
+modul **qizil** bo'ladi va "yozuv eskirgan" deydi — yozuv haqiqiy qolishining
+yagona yo'li shu. Ro'yxatdagi har bir ID **import qilinib tekshiriladi**, ya'ni
+xato yozilgan ID 12 gacha sanab, hech narsani hujjatlashtirmasligi mumkin emas.
+
+**O'tkazib yuborish — bu o'tish emas.** O'n ikkisi Windows'da **tekshirilmagan**,
+yashil emas. Modul aynan shuni CI jurnalini o'qib bilmaslikka majbur qiladi.
+
+---
+
+## V05Y — `integration_tests` **yig'ilmay** turgan edi (tuzatildi)
+
+Bu "test infratuzilmasi" bandi edi va u taxmin qilinganidan **oddiyroq** chiqdi.
+
+```
+pytest integration_tests --collect-only
+→ 86 tests collected, 1 error
+→ ERROR integration_tests/test_connector_authority_http.py - app.config.ConfigError
+```
+
+Sabab: sakkiz moduldan **yettitasi** `ENV` ni o'zi o'rnatadi, bittasi yo'q.
+`test_connector_authority_http.py` ning 4-qatori `app.platform_api` ni import
+qiladi, `ENV` ni o'rnatadigan modulga esa 6-qatorda yetadi — pytest esa uni
+alifbo bo'yicha **birinchi** yig'adi. `app.platform_api` → `app.auth` esa
+import vaqtida konfiguratsiyani tekshiradi va **fail-closed** yopiladi.
+
+Tuzatish: `integration_tests/conftest.py` — pytest har qanday test modulidan
+**oldin** `conftest` ni import qiladi, ya'ni tartibga bog'liqlik yo'qoladi.
+Har moduldagi `setdefault` **qoldirildi** (ular zararsiz, va olib tashlansa
+fayllar yakka holda yurmay qolardi).
+
+Natija: **86 + 1 xato → 95 sinov, 95 pass, 50 s.**
+
+`integration_tests` **asosiy offline gate'ga qo'shilmadi**: u FastAPI/HTTPX talab
+qiladi va offline Computer'da yurmaydi (modulning o'z hujjati shuni aytadi:
+"NOT RUN in the offline Computer"). U endi **yig'iladi va yashil**, lekin
+`verify_offline.py` dan tashqarida qoladi — bu ataylab.

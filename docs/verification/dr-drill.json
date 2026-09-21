@@ -1,0 +1,170 @@
+{
+  "kind": "offline_dr_drill",
+  "synthetic": true,
+  "started_at": "2026-09-21T19:04:27.791675+00:00",
+  "steps": [
+    {
+      "name": "seed through Engine",
+      "seconds": 0.1531,
+      "detail": {
+        "engine": "Engine"
+      }
+    },
+    {
+      "name": "count source rows",
+      "seconds": 0.0115,
+      "detail": {
+        "p_agent_runs": 0,
+        "p_agent_turns": 0,
+        "p_approvals": 0,
+        "p_audit": 0,
+        "p_briefing": 0,
+        "p_briefing_ledger": 0,
+        "p_budget_accounts": 0,
+        "p_budget_reservations": 0,
+        "p_budget_settings": 0,
+        "p_database_dispatch": 0,
+        "p_devices": 0,
+        "p_documents": 0,
+        "p_erp_postings": 0,
+        "p_escalation": 0,
+        "p_escalation_ledger": 0,
+        "p_events": 0,
+        "p_freeze": 0,
+        "p_google_dispatch": 0,
+        "p_kb_acl": 0,
+        "p_kb_chunks": 0,
+        "p_kb_collections": 0,
+        "p_kb_documents": 0,
+        "p_memory": 0,
+        "p_migrations": 8,
+        "p_oauth_connections": 0,
+        "p_oauth_revocations": 0,
+        "p_oauth_states": 0,
+        "p_posting_plans": 0,
+        "p_quota": 0,
+        "p_records": 0,
+        "p_reengagement": 0,
+        "p_reengagement_ledger": 0,
+        "p_schedule_owners": 0,
+        "p_schedules": 0,
+        "p_steps": 6,
+        "p_supervisor_route": 0,
+        "p_supervisor_section": 0,
+        "p_sync_pages": 0,
+        "p_sync_records": 0,
+        "p_sync_streams": 0,
+        "p_sync_versions": 0,
+        "p_tasks": 2
+      }
+    },
+    {
+      "name": "snapshot",
+      "seconds": 0.0404,
+      "detail": {
+        "bytes": 475136
+      }
+    },
+    {
+      "name": "snapshot integrity",
+      "seconds": 0.0104,
+      "detail": {
+        "integrity": "ok"
+      }
+    },
+    {
+      "name": "restore from snapshot",
+      "seconds": 0.0392,
+      "detail": {
+        "bytes": 475136
+      }
+    },
+    {
+      "name": "count restored rows",
+      "seconds": 0.0099,
+      "detail": {
+        "p_agent_runs": 0,
+        "p_agent_turns": 0,
+        "p_approvals": 0,
+        "p_audit": 0,
+        "p_briefing": 0,
+        "p_briefing_ledger": 0,
+        "p_budget_accounts": 0,
+        "p_budget_reservations": 0,
+        "p_budget_settings": 0,
+        "p_database_dispatch": 0,
+        "p_devices": 0,
+        "p_documents": 0,
+        "p_erp_postings": 0,
+        "p_escalation": 0,
+        "p_escalation_ledger": 0,
+        "p_events": 0,
+        "p_freeze": 0,
+        "p_google_dispatch": 0,
+        "p_kb_acl": 0,
+        "p_kb_chunks": 0,
+        "p_kb_collections": 0,
+        "p_kb_documents": 0,
+        "p_memory": 0,
+        "p_migrations": 8,
+        "p_oauth_connections": 0,
+        "p_oauth_revocations": 0,
+        "p_oauth_states": 0,
+        "p_posting_plans": 0,
+        "p_quota": 0,
+        "p_records": 0,
+        "p_reengagement": 0,
+        "p_reengagement_ledger": 0,
+        "p_schedule_owners": 0,
+        "p_schedules": 0,
+        "p_steps": 6,
+        "p_supervisor_route": 0,
+        "p_supervisor_section": 0,
+        "p_sync_pages": 0,
+        "p_sync_records": 0,
+        "p_sync_streams": 0,
+        "p_sync_versions": 0,
+        "p_tasks": 2
+      }
+    },
+    {
+      "name": "row counts match",
+      "seconds": 0.0,
+      "detail": {
+        "tables": 42,
+        "rows": 16
+      }
+    },
+    {
+      "name": "tenant isolation",
+      "seconds": 0.0161,
+      "detail": {
+        "tables_with_tenant": 41,
+        "scoped_reads": 4
+      }
+    },
+    {
+      "name": "engine opens restored copy",
+      "seconds": 0.0149,
+      "detail": {
+        "tasks_per_tenant": {
+          "dr-alpha": 1,
+          "dr-beta": 1
+        }
+      }
+    }
+  ],
+  "release": "NO_GO",
+  "tables": 42,
+  "rows": 16,
+  "total_seconds": 0.2955,
+  "finished_at": "2026-09-21T19:04:28.103800+00:00",
+  "not_covered": [
+    "encrypted artifact",
+    "remote/offsite copy",
+    "retention policy",
+    "restore while a worker is running",
+    "point-in-time recovery",
+    "restore of a network database (PostgreSQL, MySQL)"
+  ]
+}
