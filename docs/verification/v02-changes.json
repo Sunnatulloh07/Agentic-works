@@ -1,0 +1,222 @@
+[
+  {
+    "path": "README.md",
+    "status": "modified",
+    "sha256": "849732ed2dd674be4ab9e10be22d3c1657219ecd20da31eb4498b4868cee4ff1"
+  },
+  {
+    "path": "api-python/.env.example",
+    "status": "modified",
+    "sha256": "f1ad108664e78a8b29f85d708cb58ebb14fc008d13447a4eb398eecbd8a62744"
+  },
+  {
+    "path": "api-python/app/config.py",
+    "status": "modified",
+    "sha256": "6644694e9a2caf02b6e0127efea7ec85aca90edd097a4c3819bdc296f8cbdc8a"
+  },
+  {
+    "path": "api-python/app/main.py",
+    "status": "modified",
+    "sha256": "3a7651e37476034ebc666c0dde032fb8ca8b83e9ab8443056c0cbc06f611cd8f"
+  },
+  {
+    "path": "api-python/app/packs.py",
+    "status": "modified",
+    "sha256": "42b4e6e11a5ce593a69dfbc4a234ce9e884ca0d77e4ad7b2a72f714e0edef149"
+  },
+  {
+    "path": "api-python/app/platform_api.py",
+    "status": "modified",
+    "sha256": "0e66189782bb66597a94c7a3e5679cc5189332bcff010b899f945551878637d9"
+  },
+  {
+    "path": "api-python/app/security.py",
+    "status": "modified",
+    "sha256": "3cec8951ac046babf32b6e973fa3e071f50fef5d4a8729a2e6c673ecf561bcfd"
+  },
+  {
+    "path": "api-python/app/voice.py",
+    "status": "modified",
+    "sha256": "ee89541da1d0dc16f7fd1c7f8d8249e3cf446a18171b336ef6e28b7b1a612fab"
+  },
+  {
+    "path": "api-python/integration_tests/test_http.py",
+    "status": "modified",
+    "sha256": "e69d9d3bc3517c5e0f206fba94d5e15d029118f3aed259ac9ab22fcaef76804b"
+  },
+  {
+    "path": "api-python/platform_runtime/connectors.py",
+    "status": "added",
+    "sha256": "d5bbedb027e0513e050a1eacc03d2858d41278f6916c687df0ec250794258411"
+  },
+  {
+    "path": "api-python/platform_runtime/engine.py",
+    "status": "modified",
+    "sha256": "31a2e47f0642409274bcd2e5603eda04c0e81619baeaf59f9d6de1625a1926a6"
+  },
+  {
+    "path": "api-python/platform_runtime/speech.py",
+    "status": "added",
+    "sha256": "aded8e3dabf6d31b8f61cd9830528579783f29386ada29bdf91810c72f44b67a"
+  },
+  {
+    "path": "api-python/platform_runtime/tools.py",
+    "status": "modified",
+    "sha256": "a4932413b38e3893a17779d5dfb20d4d0cb3ce2249a83a1728105e4858241f80"
+  },
+  {
+    "path": "api-python/runtime_tests/test_foundation_v02.py",
+    "status": "added",
+    "sha256": "c0f16f7b43f32ab2144763aac427b93b681b9fa04d8584de6defe242a320d48b"
+  },
+  {
+    "path": "api-python/tests/conftest.py",
+    "status": "modified",
+    "sha256": "e9ae11efc7e4132968bd41206c950f74f270671c1df8b3d8c0da8c40d0e23b92"
+  },
+  {
+    "path": "api-python/tests/test_config.py",
+    "status": "modified",
+    "sha256": "eb033b8b0dbdebdceadc1b7a842c5e8a92370518fec4498ca7d78dc485e6ab2b"
+  },
+  {
+    "path": "apps/runner/runner.js",
+    "status": "modified",
+    "sha256": "b7ed339a84b53164bc9cfcffb6565732841f9e9ac890c5878582ee906c253490"
+  },
+  {
+    "path": "apps/runner/test.js",
+    "status": "modified",
+    "sha256": "91ba67a13a1528cbaace44e51d33d4e5a99df2b328532825aa06bb25e4963192"
+  },
+  {
+    "path": "apps/ui/app/platform/page.tsx",
+    "status": "modified",
+    "sha256": "d51c2562b0c83a16d93cfc1adec5579af5cf5d585c897b992efbf75951928419"
+  },
+  {
+    "path": "config/agent-capabilities.example.yaml",
+    "status": "added",
+    "sha256": "fede17854e828124342e5afec8efbd6baa735a0df3342c82cf5b3eb0dd1f7f46"
+  },
+  {
+    "path": "config/customer-sqlite.example.json",
+    "status": "added",
+    "sha256": "fd5f24d3cb5d7a70b5b963cb66a654648e1086f6c4b5a8e7818b67133e759487"
+  },
+  {
+    "path": "config/integrations.example.json",
+    "status": "modified",
+    "sha256": "e0ed7567819a269490eec834a714e9a49e311b8f43465a57c70d85c1c4339a05"
+  },
+  {
+    "path": "docker-compose.yml",
+    "status": "modified",
+    "sha256": "c95c9b8de8628b59906aa669ee9d7a2b8eb86c8225882a3f23e16e08f1720784"
+  },
+  {
+    "path": "docs/AUDIT-V02-UZ.md",
+    "status": "added",
+    "sha256": "dc044f641329f398f01e705b5a1271f763d347c214934133a95b0042479346f9"
+  },
+  {
+    "path": "docs/IMPLEMENTATION-STATUS.md",
+    "status": "modified",
+    "sha256": "6dd1381c1faaac00fd70b901f638d2e49405fd2c6fe8f66d07ebac69f3a68aaa"
+  },
+  {
+    "path": "docs/V02-RUNBOOK-UZ.md",
+    "status": "added",
+    "sha256": "67614a60d7c91dd3c115197401b08ec0595b71e64ee71ab7f3ef4c3c1993ca9a"
+  },
+  {
+    "path": "docs/prd-v02/00-INDEX.md",
+    "status": "added",
+    "sha256": "0b06fdb9bba928b082449ed4054e9100b8975a2f0f3e361235e093330737400f"
+  },
+  {
+    "path": "docs/prd-v02/01-PRODUCT-WORKSPACES.md",
+    "status": "added",
+    "sha256": "36063ff5c4061845049ccf049f940b0f096d2a681dc560fbadd4a02f972afae2"
+  },
+  {
+    "path": "docs/prd-v02/02-CONNECTORS-DATA.md",
+    "status": "added",
+    "sha256": "0d21831738e007601e3ce826551751ebc0697b87e70a3af9ae2625cc1185d02d"
+  },
+  {
+    "path": "docs/prd-v02/03-AGENT-EXECUTION.md",
+    "status": "added",
+    "sha256": "684b46378ec86166387a9f6912507dbcaa0e074b7c1f09f48bb641123afc99d2"
+  },
+  {
+    "path": "docs/prd-v02/04-VOICE-COST-QUALITY.md",
+    "status": "added",
+    "sha256": "4cbd42047f3158edee9ccd7790cc493d686f1f003954ac94b8b1f56ef2f6d971"
+  },
+  {
+    "path": "docs/prd-v02/05-ADMIN-OPERATIONS.md",
+    "status": "added",
+    "sha256": "280e2698aa64cd083d2adcde7c53b0b847fe8e92fac9b7276b78beb3b0a300f7"
+  },
+  {
+    "path": "docs/prd-v02/06-RELEASE-ACCEPTANCE.md",
+    "status": "added",
+    "sha256": "290e7fa33d51296186c28fee582bfcf08482d7bcf8279ce2f2b954113b13f3d1"
+  },
+  {
+    "path": "docs/verification/source-inventory-v02.json",
+    "status": "added",
+    "sha256": "65176a15ffda3dea53ee146ce3c31b0927330229e2cbe5ff71699923f8629e3e"
+  },
+  {
+    "path": "docs/verification/v01-original-MANIFEST.sha256",
+    "status": "added",
+    "sha256": "1be07db971c5db517c25b66cf71450b95cadccebcc2c614fa971a1965962592d"
+  },
+  {
+    "path": "docs/verification/v02-baseline-node.txt",
+    "status": "added",
+    "sha256": "469f18b4166ad017f414e568cad4772c4f3e6005ceeaf527b2c5c04d24dc87f4"
+  },
+  {
+    "path": "docs/verification/v02-baseline-python.txt",
+    "status": "added",
+    "sha256": "ed8bd808241cc38abadb5a9917ac083411eeffaf535607e5c7a9cdb6ac6e8379"
+  },
+  {
+    "path": "docs/verification/v02-node_runner.txt",
+    "status": "added",
+    "sha256": "01bd79930a63679d3262390e0e7664ff36e249f5266ed3bbb80409371c83fd68"
+  },
+  {
+    "path": "docs/verification/v02-offline_demo.txt",
+    "status": "added",
+    "sha256": "bc2250180b9f52a5b2fc702e63216b2297be0e6c898b2fc791b96897e5b60435"
+  },
+  {
+    "path": "docs/verification/v02-python_runtime.txt",
+    "status": "added",
+    "sha256": "3a62670720f8dcf1c96cfe8c3ba0931bf09ed21ab62ca8da7a0ec99efbdd69d0"
+  },
+  {
+    "path": "docs/verification/v02-python_syntax.txt",
+    "status": "added",
+    "sha256": "3a4b774a10a9e34032bea48f1d88b5e42081363d2db22e75071765dce99a494d"
+  },
+  {
+    "path": "docs/verification/v02-summary.json",
+    "status": "added",
+    "sha256": "3dcb48c1d107d0cf827401077bafcae1d0b69b756e9dce19776999ec96d5a38a"
+  },
+  {
+    "path": "docs/verification/v02-ui_syntax_only.txt",
+    "status": "added",
+    "sha256": "2fb90b385cac7920f3b8e673bdac8106bd810d58344b598af58bfc2f89ca9230"
+  },
+  {
+    "path": "docs/verification/v02-ui_typecheck_attempt.txt",
+    "status": "added",
+    "sha256": "22e3722493cd21f204dbf91a6c9f56f71c3fcd0aaa5670e338151e3fa9bcf774"
+  }
+]

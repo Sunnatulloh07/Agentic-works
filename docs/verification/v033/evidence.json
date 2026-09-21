@@ -1,0 +1,77 @@
+{
+  "version": "0.3.3",
+  "production": "NO_GO",
+  "original_archive_sha256": "712ca26f80a95d158b8532317170679896d9956b4bc1262ccf18a741a3fd9af0",
+  "gates": {
+    "browser_session_client": {
+      "status": "PASS",
+      "tests": 8,
+      "evidence": "docs/verification/v033/browser_session_client.log"
+    },
+    "crm_oauth_sync_write_reconcile": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "dependency_security_review": {
+      "status": "FAIL",
+      "evidence": "docs/CHECKPOINT-V033-UZ.md",
+      "reason": "Known old Next.js 14.2.5 App Router dependency; full dependency audit and supported-version migration open"
+    },
+    "encrypted_offsite_restore": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "http_integration": {
+      "status": "BLOCKED",
+      "reason": "Dependencies unavailable in the Computer; no packages installed"
+    },
+    "load_fault_injection": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "mcp_live": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "node_runner": {
+      "status": "PASS",
+      "tests": 15,
+      "evidence": "docs/verification/v033/node_runner.log"
+    },
+    "oidc_mfa": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "postgres_live_two_tenant": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "python_runtime": {
+      "status": "PASS",
+      "tests": 293,
+      "evidence": "docs/verification/v033/python_runtime.log"
+    },
+    "secret_vault": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "staging_pilot": {
+      "status": "NOT_RUN",
+      "reason": "Not verified for this checkpoint"
+    },
+    "ui_production_build": {
+      "status": "BLOCKED",
+      "reason": "Dependencies unavailable in the Computer; no packages installed"
+    },
+    "ui_typecheck": {
+      "status": "BLOCKED",
+      "reason": "Dependencies unavailable in the Computer; no packages installed"
+    }
+  },
+  "offline_test_total": 319,
+  "new_regressions": 37,
+  "syntax_not_typecheck": true,
+  "next_decision": "customer_database_write_boundary",
+  "scope": "connector authority and targeted source/dependency review",
+  "source_tree_sha256": "20d48459fc12703d9a704307066092ec8f49f40ce9f8e290b78b113daf5660d8"
+}

@@ -1,0 +1,84 @@
+{
+  "_comment": "Business Graph: operator-declared, read-only cross-system entity view. Copy into config/integrations.json under the tenant key and replace SET_... values. A source is an existing read tool (connectors.read, sheets.rows, sheets.read, database.read) invoked through its ordinary handler, so the graph never grants authority the agent does not already hold. The model may name an entity, an attribute and an id; it can never name a connection, table, range or URL.",
+  "demo-retail": {
+    "business_graph": {
+      "conflict_policy": "report",
+      "entities": {
+        "product": {
+          "identity": "sku",
+          "priority": ["moysklad", "onec_docs", "finance"],
+          "sources": {
+            "moysklad": {
+              "tool": "connectors.read",
+              "args": {
+                "connection": "moysklad_export",
+                "table": "products",
+                "columns": ["sku", "name", "price", "cost", "stock"],
+                "limit": 100
+              },
+              "key": "sku",
+              "map": {
+                "price": "price",
+                "cost": "cost",
+                "stock_quantity": "stock"
+              }
+            },
+            "onec_docs": {
+              "tool": "connectors.read",
+              "args": {
+                "connection": "onec_export",
+                "table": "nomenclature",
+                "columns": ["code", "price_with_vat", "tax_category"],
+                "limit": 100
+              },
+              "key": "code",
+              "map": {
+                "price": "price_with_vat",
+                "tax_category": "tax_category"
+              }
+            },
+            "finance": {
+              "tool": "sheets.rows",
+              "args": { "register": "finance", "range": "margins" },
+              "key": "SKU",
+              "map": { "margin": "Foyda" }
+            }
+          }
+        },
+        "customer": {
+          "identity": "customer_id",
+          "priority": ["crm", "ledger"],
+          "sources": {
+            "crm": {
+              "tool": "connectors.read",
+              "args": {
+                "connection": "crm_export",
+                "table": "clients",
+                "columns": ["customer_id", "phone", "deal_stage", "manager"],
+                "limit": 100
+              },
+              "key": "customer_id",
+              "map": {
+                "phone": "phone",
+                "deal_stage": "deal_stage",
+                "manager": "manager"
+              }
+            },
+            "ledger": {
+              "tool": "sheets.rows",
+              "args": { "register": "finance", "range": "receivables" },
+              "key": "Mijoz ID",
+              "map": { "balance": "Qarz" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "_notes": [
+    "conflict_policy: report (default) returns every observed value and selects none. primary_wins selects the first source in the entity's priority order and still reports the conflict. newest_wins is refused: observed is the local read time, not the provider's update time.",
+    "A source that fails is listed in source_errors and sets complete=false. It is never rendered as 'this attribute does not exist'.",
+    "A denied connection raises Forbidden for the whole read before any provider I/O, so a scope mistake never looks like a provider outage.",
+    "Every attribute value carries source and observed, so a salesperson and an accountant can each see which system produced the number."
+  ]
+}

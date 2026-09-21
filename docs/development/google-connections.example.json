@@ -1,0 +1,30 @@
+{
+  "oauth_connections": {
+    "google-office": {
+      "enabled": false,
+      "client_id": "REPLACE.apps.googleusercontent.com",
+      "client_secret_env": "GOOGLE_OFFICE_CLIENT_SECRET",
+      "redirect_uri": "https://YOUR-UI-HOST/oauth/google/callback",
+      "expected_subject": "REPLACE_WITH_VERIFIED_GOOGLE_SUB",
+      "scopes": [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+        "https://www.googleapis.com/auth/calendar.events.readonly"
+      ]
+    }
+  },
+  "google_resources": {
+    "google-office": {
+      "recipient_emails": [],
+      "calendar_ids": []
+    }
+  },
+  "_documentation": {
+    "enable": "Operator must replace values, grant only required scopes, enable explicitly; no real credentials are included.",
+    "pack_policy": "Assign exact google.* tools and allowed_connections=[google-office] to the intended agent only.",
+    "vault": "PLATFORM_VAULT_KEYS_JSON maps version IDs to independently generated base64 32-byte keys, PLATFORM_VAULT_ACTIVE_KEY selects one. Never commit key values.",
+    "callback": "Exact same origin as UI, path /oauth/google/callback; proxy access logs must omit query strings. Cookies/localStorage are not used."
+  }
+}

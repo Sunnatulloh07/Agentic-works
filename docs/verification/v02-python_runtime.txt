@@ -1,0 +1,166 @@
+COMMAND: python -m unittest discover -s runtime_tests -v
+EXIT: 0
+test_credentials_in_url_rejected (test_adapters.AdapterTests.test_credentials_in_url_rejected) ... ok
+test_http_url_rejected_before_network (test_adapters.AdapterTests.test_http_url_rejected_before_network) ... ok
+test_mcp_errors_rejected (test_adapters.AdapterTests.test_mcp_errors_rejected) ... ok
+test_mcp_mismatched_id (test_adapters.AdapterTests.test_mcp_mismatched_id) ... ok
+test_mcp_protocol_sequence (test_adapters.AdapterTests.test_mcp_protocol_sequence) ... ok
+test_mcp_unknown_version (test_adapters.AdapterTests.test_mcp_unknown_version) ... ok
+test_model_cannot_change_channel (test_adapters.AdapterTests.test_model_cannot_change_channel) ... ok
+test_model_cannot_choose_tenant (test_adapters.AdapterTests.test_model_cannot_choose_tenant) ... ok
+test_model_cannot_redirect_message (test_adapters.AdapterTests.test_model_cannot_redirect_message) ... ok
+test_model_malformed_json_rejected (test_adapters.AdapterTests.test_model_malformed_json_rejected) ... ok
+test_no_model_silent_fallback (test_adapters.AdapterTests.test_no_model_silent_fallback) ... ok
+test_sheets_raw_no_formula_evaluation (test_adapters.AdapterTests.test_sheets_raw_no_formula_evaluation) ... ok
+test_telegram_rejection_not_success (test_adapters.AdapterTests.test_telegram_rejection_not_success) ... ok
+test_telegram_uses_actual_chat_id (test_adapters.AdapterTests.test_telegram_uses_actual_chat_id) ... ok
+test_unavailable_tool_rejected (test_adapters.AdapterTests.test_unavailable_tool_rejected) ... ok
+test_valid_structured_plan (test_adapters.AdapterTests.test_valid_structured_plan) ... ok
+test_approval_executes_exactly_one_record (test_engine.EngineTests.test_approval_executes_exactly_one_record) ... ok
+test_approval_expires (test_engine.EngineTests.test_approval_expires) ... ok
+test_argument_tamper_invalidates_approval (test_engine.EngineTests.test_argument_tamper_invalidates_approval) ... ok
+test_cancel_running_is_uncertain (test_engine.EngineTests.test_cancel_running_is_uncertain) ... ok
+test_claim_exclusive (test_engine.EngineTests.test_claim_exclusive) ... ok
+test_cloud_cannot_claim_runner (test_engine.EngineTests.test_cloud_cannot_claim_runner) ... ok
+test_conflicting_replay (test_engine.EngineTests.test_conflicting_replay) ... ok
+test_cross_tenant_approval (test_engine.EngineTests.test_cross_tenant_approval) ... ok
+test_cross_tenant_finish (test_engine.EngineTests.test_cross_tenant_finish) ... ok
+test_device_bound_claim (test_engine.EngineTests.test_device_bound_claim) ... ok
+test_device_generation_rotation (test_engine.EngineTests.test_device_generation_rotation) ... ok
+test_device_revocation_invalidates_running_claim (test_engine.EngineTests.test_device_revocation_invalidates_running_claim) ... ok
+test_empty_plan (test_engine.EngineTests.test_empty_plan) ... ok
+test_engine_rejects_unallowlisted_direct_send (test_engine.EngineTests.test_engine_rejects_unallowlisted_direct_send) ... ok
+test_engine_verifies_inbound_send_destination (test_engine.EngineTests.test_engine_verifies_inbound_send_destination) ... ok
+test_event_crash_recovery_after_submission (test_engine.EngineTests.test_event_crash_recovery_after_submission) ... ok
+test_external_write_failure_is_uncertain (test_engine.EngineTests.test_external_write_failure_is_uncertain) ... ok
+test_failed_event_retry (test_engine.EngineTests.test_failed_event_retry) ... ok
+test_freeze_invalidates_active_claim (test_engine.EngineTests.test_freeze_invalidates_active_claim) ... ok
+test_freeze_stops_planning_and_schedule (test_engine.EngineTests.test_freeze_stops_planning_and_schedule) ... ok
+test_frozen_tenant_no_claim (test_engine.EngineTests.test_frozen_tenant_no_claim) ... ok
+test_human_led_reads_require_approval (test_engine.EngineTests.test_human_led_reads_require_approval) ... ok
+test_idempotency (test_engine.EngineTests.test_idempotency) ... ok
+test_inbox_conflict (test_engine.EngineTests.test_inbox_conflict) ... ok
+test_inbox_quota_atomic_and_replay_not_charged (test_engine.EngineTests.test_inbox_quota_atomic_and_replay_not_charged) ... ok
+test_inbox_replay (test_engine.EngineTests.test_inbox_replay) ... ok
+test_inbox_to_generic_runtime (test_engine.EngineTests.test_inbox_to_generic_runtime) ... ok
+test_like_wildcards_literal (test_engine.EngineTests.test_like_wildcards_literal) ... ok
+test_memory_isolation_and_ttl (test_engine.EngineTests.test_memory_isolation_and_ttl) ... ok
+test_meta_account_unique_mapping (test_engine.EngineTests.test_meta_account_unique_mapping) ... ok
+test_missing_args (test_engine.EngineTests.test_missing_args) ... ok
+test_no_double_approval (test_engine.EngineTests.test_no_double_approval) ... ok
+test_no_unbound_runner_tool (test_engine.EngineTests.test_no_unbound_runner_tool) ... ok
+test_owner_only_approval_policy (test_engine.EngineTests.test_owner_only_approval_policy) ... ok
+test_policy_change_invalidates_approval (test_engine.EngineTests.test_policy_change_invalidates_approval) ... ok
+test_read_completes (test_engine.EngineTests.test_read_completes) ... ok
+test_real_multi_process_claim (test_engine.EngineTests.test_real_multi_process_claim) ... ok
+test_reconcile_owner_only (test_engine.EngineTests.test_reconcile_owner_only) ... ok
+test_reenrollment_cancels_old_device_tasks (test_engine.EngineTests.test_reenrollment_cancels_old_device_tasks) ... ok
+test_rejected_never_executes (test_engine.EngineTests.test_rejected_never_executes) ... ok
+test_revoked_device (test_engine.EngineTests.test_revoked_device) ... ok
+test_same_plan_different_channels (test_engine.EngineTests.test_same_plan_different_channels) ... ok
+test_schedule_dedup (test_engine.EngineTests.test_schedule_dedup) ... ok
+test_sequential_steps (test_engine.EngineTests.test_sequential_steps) ... ok
+test_stale_claim_cannot_finish (test_engine.EngineTests.test_stale_claim_cannot_finish) ... ok
+test_tenant_independent_keys (test_engine.EngineTests.test_tenant_independent_keys) ... ok
+test_tenant_not_found (test_engine.EngineTests.test_tenant_not_found) ... ok
+test_transaction_rollback (test_engine.EngineTests.test_transaction_rollback) ... ok
+test_unknown_args (test_engine.EngineTests.test_unknown_args) ... ok
+test_unknown_tool (test_engine.EngineTests.test_unknown_tool) ... ok
+test_unsupported_agent (test_engine.EngineTests.test_unsupported_agent) ... ok
+test_viewer_cannot_approve (test_engine.EngineTests.test_viewer_cannot_approve) ... ok
+test_write_needs_approval (test_engine.EngineTests.test_write_needs_approval) ... ok
+test_wrong_fence_rejected (test_engine.EngineTests.test_wrong_fence_rejected) ... ok
+test_wrong_schema_type (test_engine.EngineTests.test_wrong_schema_type) ... ok
+test_actual_engine_connection (test_foundation_v02.ConnectorTests.test_actual_engine_connection) ... ok
+test_actual_read (test_foundation_v02.ConnectorTests.test_actual_read) ... ok
+test_column_scope (test_foundation_v02.ConnectorTests.test_column_scope) ... ok
+test_cross_tenant_denied (test_foundation_v02.ConnectorTests.test_cross_tenant_denied) ... ok
+test_disabled_connection (test_foundation_v02.ConnectorTests.test_disabled_connection) ... ok
+test_disabled_entry_does_not_break_catalog (test_foundation_v02.ConnectorTests.test_disabled_entry_does_not_break_catalog) ... ok
+test_exact_filter (test_foundation_v02.ConnectorTests.test_exact_filter) ... ok
+test_filter_parameterized (test_foundation_v02.ConnectorTests.test_filter_parameterized) ... ok
+test_internal_database_denied (test_foundation_v02.ConnectorTests.test_internal_database_denied) ... ok
+test_large_result_rejected (test_foundation_v02.ConnectorTests.test_large_result_rejected) ... ok
+test_limit_rejected (test_foundation_v02.ConnectorTests.test_limit_rejected) ... ok
+test_metadata_no_path (test_foundation_v02.ConnectorTests.test_metadata_no_path) ... ok
+test_mount_scope (test_foundation_v02.ConnectorTests.test_mount_scope) ... ok
+test_no_arbitrary_sql (test_foundation_v02.ConnectorTests.test_no_arbitrary_sql) ... ok
+test_no_root_default (test_foundation_v02.ConnectorTests.test_no_root_default) ... /opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a020>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a2f0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff683949e40>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a3e0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a4d0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a5c0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a6b0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a7a0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a890>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394a980>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394ab60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394aa70>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394ad40>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394ac50>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/unittest/mock.py:2259: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ff68394ae30>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_table_scope (test_foundation_v02.ConnectorTests.test_table_scope) ... ok
+test_view_denied (test_foundation_v02.ConnectorTests.test_view_denied) ... ok
+test_agent_connection_denied_at_submit (test_foundation_v02.SecurityTests.test_agent_connection_denied_at_submit) ... ok
+test_config_dev_secrets_required (test_foundation_v02.SecurityTests.test_config_dev_secrets_required) ... ok
+test_dev_requires_explicit_opt_in (test_foundation_v02.SecurityTests.test_dev_requires_explicit_opt_in) ... ok
+test_explicit_dev_opt_in (test_foundation_v02.SecurityTests.test_explicit_dev_opt_in) ... ok
+test_explicit_test_defaults (test_foundation_v02.SecurityTests.test_explicit_test_defaults) ... ok
+test_freeze_after_claim_before_dispatch (test_foundation_v02.SecurityTests.test_freeze_after_claim_before_dispatch) ... ok
+test_freeze_blocks_approval (test_foundation_v02.SecurityTests.test_freeze_blocks_approval) ... ok
+test_freeze_blocks_new_event (test_foundation_v02.SecurityTests.test_freeze_blocks_new_event) ... ok
+test_freeze_blocks_new_task_but_replay_safe (test_foundation_v02.SecurityTests.test_freeze_blocks_new_task_but_replay_safe) ... ok
+test_freeze_blocks_schedule (test_foundation_v02.SecurityTests.test_freeze_blocks_schedule) ... ok
+test_independent_approval (test_foundation_v02.SecurityTests.test_independent_approval) ... ok
+test_known_demo_secret_rejected_outside_insecure_mode (test_foundation_v02.SecurityTests.test_known_demo_secret_rejected_outside_insecure_mode) ... ok
+test_mcp_schema_required_before_network (test_foundation_v02.SecurityTests.test_mcp_schema_required_before_network) ... ok
+test_mcp_unknown_argument_rejected (test_foundation_v02.SecurityTests.test_mcp_unknown_argument_rejected) ... ok
+test_missing_env_not_open (test_foundation_v02.SecurityTests.test_missing_env_not_open) ... ok
+test_prod_ignores_insecure_flag (test_foundation_v02.SecurityTests.test_prod_ignores_insecure_flag) ... ok
+test_tts_requires_approval (test_foundation_v02.SecurityTests.test_tts_requires_approval) ... ok
+test_mood_and_speed_validation (test_foundation_v02.SpeechTests.test_mood_and_speed_validation) ... ok
+test_no_empty_or_overlong_text (test_foundation_v02.SpeechTests.test_no_empty_or_overlong_text) ... ok
+test_no_retry_and_sanitized_failure (test_foundation_v02.SpeechTests.test_no_retry_and_sanitized_failure) ... ok
+test_stt_exact_contract (test_foundation_v02.SpeechTests.test_stt_exact_contract) ... ok
+test_stt_limits (test_foundation_v02.SpeechTests.test_stt_limits) ... ok
+test_stt_response_validated (test_foundation_v02.SpeechTests.test_stt_response_validated) ... ok
+test_tts_exact_multipart_contract (test_foundation_v02.SpeechTests.test_tts_exact_multipart_contract) ... ok
+test_tts_remote_path_rejected (test_foundation_v02.SpeechTests.test_tts_remote_path_rejected) ... ok
+test_unexpected_status_not_success (test_foundation_v02.SpeechTests.test_unexpected_status_not_success) ... ok
+
+----------------------------------------------------------------------
+Ran 114 tests in 2.508s
+
+OK

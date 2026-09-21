@@ -1,0 +1,1266 @@
+--- v0.3.7/.github/workflows/verify.yml
++++ v0.3.8/.github/workflows/verify.yml
+@@ -20,7 +20,7 @@
+       - uses: actions/setup-node@v4
+         with:
+           node-version: '22'
+-      - run: node --test apps/runner/test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs
++      - run: node --test apps/runner/test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs
+   http:
+     runs-on: ubuntu-latest
+     steps:
+--- v0.3.7/api-python/app/google_data_api.py
++++ v0.3.8/api-python/app/google_data_api.py
+@@ -0,0 +1,97 @@
++"""Owner/session-bound metadata sync and positive-evidence reconciliation APIs."""
++from typing import Literal
++import time
++from fastapi import APIRouter,HTTPException,Request
++from pydantic import Field
++from .platform_api import engine,call,StrictRequest
++from .oauth_api import session_actor
++from platform_runtime.engine import Forbidden,digest
++from platform_runtime.oauth import OAuthError
++from platform_runtime.secret_vault import VaultError
++from platform_runtime.tools import config
++from platform_runtime.google_adapters import configured_resources
++from platform_runtime.google_oauth import configured_manager
++from platform_runtime.google_sync import GoogleSync,stream_id
++from platform_runtime.google_reconcile import GoogleReconciler
++
++router=APIRouter(prefix='/platform',tags=['google-data'])
++
++
++class SyncRequest(StrictRequest):
++    agent:str=Field(min_length=1,max_length=128)
++    kind:Literal['gmail','drive','calendar']
++    calendar:str=Field(default='',max_length=256)
++
++
++class SyncRecords(SyncRequest):
++    after:str=Field(default='',max_length=256)
++    limit:int=Field(default=50,ge=1,le=100)
++
++
++class SyncReset(SyncRequest):
++    confirm_reset:Literal[True]
++
++
++def invoke(fn,*args,**kwargs):
++    try:return call(fn,*args,**kwargs)
++    except (OAuthError,VaultError):raise HTTPException(503,'Google operation unavailable; no automatic write retry') from None
++
++
++def context(request,tenant,connection):
++    actor,family=session_actor(request,tenant)
++    e=engine()
++    try:
++        manager=configured_manager(e,tenant,connection)
++        resources=configured_resources(tenant,connection)
++        def binding():
++            return digest({'oauth':config(tenant).get('oauth_connections',{}).get(connection),
++                           'resources':configured_resources(tenant,connection)})
++        original=binding()
++    except Exception:raise HTTPException(503,'Google deployment configuration unavailable') from None
++    def guard(db):
++        if binding()!=original:raise Forbidden('Google configuration changed during request')
++        row=db.execute('SELECT 1 FROM p_sessions WHERE family_id=? AND user_id=? AND workspace_id=? AND revoked_at=0 AND expires>?',
++                       (family,actor,tenant,time.time())).fetchone()
++        if not row:raise Forbidden('Initiating session revoked')
++    return e,manager,resources,actor,guard
++
++
++@router.post('/{tenant}/google/{connection}/sync/page')
++def sync_page(tenant:str,connection:str,req:SyncRequest,request:Request):
++    e,m,r,actor,guard=context(request,tenant,connection)
++    return invoke(GoogleSync(e,m,r).page,tenant,connection,req.agent,actor,req.kind,req.calendar,session_guard=guard)
++
++
++@router.post('/{tenant}/google/{connection}/sync/records')
++def sync_records(tenant:str,connection:str,req:SyncRecords,request:Request):
++    e,m,r,actor,guard=context(request,tenant,connection);s=GoogleSync(e,m,r)
++    def read():
++        stream=stream_id(req.kind,req.calendar)
++        with e.read() as db:before=s._guard(db,tenant,connection,req.agent,actor,req.kind,req.calendar,session_guard=guard)
++        rows=s.store.records(tenant,connection,stream,actor,req.limit,after=req.after)
++        with e.read() as db:after=s._guard(db,tenant,connection,req.agent,actor,req.kind,req.calendar,session_guard=guard)
++        if before['generation']!=after['generation']:raise Forbidden('Sync credential changed during read')
++        return {'records':rows,'next_after':rows[-1]['id'] if len(rows)==req.limit else None,'untrusted_content':True,
++                'coverage':'metadata_only','version_kind':'local_observation_sequence'}
++    return invoke(read)
++
++
++@router.post('/{tenant}/google/{connection}/sync/reset')
++def sync_reset(tenant:str,connection:str,req:SyncReset,request:Request):
++    e,m,r,actor,guard=context(request,tenant,connection);s=GoogleSync(e,m,r)
++    def reset():
++        stream=stream_id(req.kind,req.calendar)
++        def checked(db):s._guard(db,tenant,connection,req.agent,actor,req.kind,req.calendar,session_guard=guard)
++        s.store.reset(tenant,connection,stream,actor,guard=checked)
++        return {'reset':True,'stream':stream,'provider_records_deleted':False}
++    return invoke(reset)
++
++
++@router.post('/{tenant}/google/steps/{step}/reconcile')
++def reconcile_step(tenant:str,step:str,request:Request):
++    session_actor(request,tenant)
++    e=engine()
++    with e.read() as db:row=db.execute('SELECT connection FROM p_google_dispatch WHERE tenant=? AND step=?',(tenant,step)).fetchone()
++    if not row:raise HTTPException(404,'Dispatch not found')
++    e,m,r,actor,guard=context(request,tenant,row['connection'])
++    return invoke(GoogleReconciler(e,m,r).reconcile,tenant,step,actor,session_guard=guard)
+--- v0.3.7/api-python/app/main.py
++++ v0.3.8/api-python/app/main.py
+@@ -20,7 +20,7 @@
+ from .voice import router as voice_router
+ from .identity_api import router as identity_router
+ 
+-VERSION = "0.3.7-development-preview"
++VERSION = "0.3.8-development-preview"
+ bearer = HTTPBearer(auto_error=False)
+ 
+ app = FastAPI(title="Agent Platform API", version=VERSION)
+@@ -38,8 +38,10 @@
+ 
+ from .platform_api import router as platform_router
+ app.include_router(platform_router)
++from .google_data_api import router as google_data_router
+ from .oauth_api import router as oauth_router
+ app.include_router(oauth_router)
++app.include_router(google_data_router)
+ 
+ from fastapi.middleware.cors import CORSMiddleware
+ origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
+--- v0.3.7/api-python/app/platform_api.py
++++ v0.3.8/api-python/app/platform_api.py
+@@ -80,7 +80,7 @@
+     e=engine()
+     pack_agents=agents(tenant)
+     assigned={name for agent in pack_agents for name in agent['tools']}
+-    return {'agents':pack_agents,'tools':e.registry.describe(assigned),'version':'0.3.7-development-preview'}
++    return {'agents':pack_agents,'tools':e.registry.describe(assigned),'version':'0.3.8-development-preview'}
+ 
+ 
+ @router.post('/{tenant}/tasks')
+--- v0.3.7/api-python/integration_tests/test_google_data_http.py
++++ v0.3.8/api-python/integration_tests/test_google_data_http.py
+@@ -0,0 +1,107 @@
++"""Requires FastAPI/Pydantic/pytest. NOT_RUN in the constrained Computer.
++
++These tests must be run in dependency-backed CI; source inspection is not a pass.
++"""
++import os
++os.environ.setdefault('ENV','test')
++os.environ.setdefault('ALLOW_INSECURE_DEV','true')
++import secrets
++from urllib.parse import parse_qs,urlsplit
++import pytest
++from fastapi.testclient import TestClient
++from app.main import app
++from app import google_data_api as api,identity_store as identity
++from app.auth import issue_token
++from app.storage import reset,tx
++from platform_runtime.engine import Forbidden
++from platform_runtime.oauth import OAuthManager
++from platform_runtime.secret_vault import SecretVault
++from platform_runtime.google_adapters import SCOPES
++from platform_runtime.google_sync import GoogleSync
++from runtime_tests.test_oauth import FakeProvider
++
++
++@pytest.fixture
++def google_http(tmp_path,monkeypatch):
++    monkeypatch.setenv('IDENTITY_DIRECTORY','true');monkeypatch.setenv('APP_DB',str(tmp_path/'db'));reset()
++    user=identity.register_user('sync-owner@example.invalid','fixture password 123','Owner')
++    identity.create_workspace(user['id'],'demo-retail','Demo')
++    raw,session=identity.create_session(user['id'],'demo-retail')
++    headers={'Authorization':'Bearer '+issue_token('demo-retail',subject=user['id'],role='owner',session_id=session['session_id'])}
++    e=api.engine();e.policy=lambda t,a:{'tools':list(SCOPES),'allowed_connections':['google'],'ladder':'autonomous'}
++    provider=FakeProvider();provider.scopes=set(SCOPES.values())|provider.scopes
++    manager=OAuthManager(e,SecretVault({'test':secrets.token_bytes(32)},'test'),provider)
++    state=parse_qs(urlsplit(manager.begin('demo-retail','google',user['id'],'test-family')['authorization_url']).query)['state'][0]
++    manager.complete('demo-retail','google',user['id'],'test-family',state,'code')
++    resources={'recipient_emails':[],'calendar_ids':['primary']}
++    monkeypatch.setattr(api,'engine',lambda:e)
++    monkeypatch.setattr(api,'configured_manager',lambda *args:manager)
++    monkeypatch.setattr(api,'configured_resources',lambda *args:resources)
++    monkeypatch.setattr(api,'config',lambda t:{'oauth_connections':{'google':{'configured':True}}})
++    calls=[];hooks=[];responses=[]
++    def transport(method,url,token,body):
++        calls.append((method,url))
++        if hooks:hooks.pop(0)()
++        return responses.pop(0) if responses else {'historyId':'100'}
++    monkeypatch.setattr(api,'GoogleSync',lambda e,m,r:GoogleSync(e,m,r,transport))
++    with TestClient(app) as client:yield client,headers,e,raw,resources,calls,hooks,responses,user
++    reset()
++
++
++URL='/platform/demo-retail/google/google/sync/'
++BODY={'agent':'ops','kind':'gmail','calendar':''}
++
++
++def test_authenticated_metadata_sync(google_http):
++    client,headers,_,_,_,calls,*_=google_http
++    response=client.post(URL+'page',headers=headers,json=BODY)
++    assert response.status_code==200 and response.json()['phase']=='snapshot'
++    assert response.headers['cache-control']=='no-store'
++    assert 'fake-access' not in response.text and 'anchor' not in response.text
++    assert len(calls)==1
++
++
++def test_anonymous_sync_is_denied(google_http):
++    client,*_=google_http
++    assert client.post(URL+'page',json=BODY).status_code==401
++
++
++def test_role_removed_blocks_read(google_http):
++    client,headers,_,_,_,calls,_,_,user=google_http
++    with tx() as db:db.execute("UPDATE p_memberships SET role='viewer' WHERE user_id=?",(user['id'],))
++    assert client.post(URL+'page',headers=headers,json=BODY).status_code==403
++    assert not calls
++
++
++@pytest.mark.parametrize('extra',[{'url':'https://evil.invalid'},{'cursor':'injected'},{'actor':'other'},{'access_token':'secret'}])
++def test_no_client_control_of_authority_or_cursor(google_http,extra):
++    client,headers,*_=google_http
++    assert client.post(URL+'page',headers=headers,json={**BODY,**extra}).status_code==422
++
++
++def test_reset_requires_explicit_confirmation(google_http):
++    client,headers,*_=google_http
++    for extra in ({},{'confirm_reset':False}):
++        assert client.post(URL+'reset',headers=headers,json={**BODY,**extra}).status_code==422
++
++
++def test_session_revoked_during_sync_cannot_commit(google_http):
++    client,headers,e,raw,_,calls,hooks,*_=google_http
++    hooks.append(lambda:identity.revoke_session(raw))
++    assert client.post(URL+'page',headers=headers,json=BODY).status_code==403
++    with e.read() as db:assert db.execute('SELECT cursor FROM p_sync_streams').fetchone()[0]==''
++
++
++def test_reset_does_not_delete_google_records(google_http):
++    client,headers,_,_,_,calls,*_=google_http
++    assert client.post(URL+'page',headers=headers,json=BODY).status_code==200
++    n=len(calls)
++    r=client.post(URL+'reset',headers=headers,json={**BODY,'confirm_reset':True})
++    assert r.status_code==200 and not r.json()['provider_records_deleted'] and len(calls)==n
++
++
++def test_config_change_mid_request_is_fenced(google_http):
++    client,headers,e,_,resources,_,hooks,*_=google_http
++    hooks.append(lambda:resources.update(calendar_ids=['other']))
++    assert client.post(URL+'page',headers=headers,json=BODY).status_code==403
++    with e.read() as db:assert db.execute('SELECT cursor FROM p_sync_streams').fetchone()[0]==''
+--- v0.3.7/api-python/platform_runtime/google_adapters.py
++++ v0.3.8/api-python/platform_runtime/google_adapters.py
+@@ -116,11 +116,27 @@
+     raise ValueError('Unknown Google operation')
+ 
+ 
++class GoogleHTTPError(OAuthError):
++    """Sanitized status only; no provider body or credential headers."""
++    def __init__(self, status):
++        self.status = status
++        super().__init__('Google API HTTP ' + str(status))
++
++
+ def api_transport(method, url, token, body=None):
+     parsed = urllib.parse.urlsplit(url)
+-    if (parsed.scheme != 'https' or parsed.username or parsed.password or parsed.fragment or parsed.port not in {None,443}
++    host_path = (
++        parsed.hostname == 'gmail.googleapis.com' and
++        (parsed.path in {'/gmail/v1/users/me/history', '/gmail/v1/users/me/profile', '/gmail/v1/users/me/messages'}
++         or parsed.path.startswith('/gmail/v1/users/me/messages/'))
++    ) or (
++        parsed.hostname == 'www.googleapis.com' and
++        (parsed.path in {'/drive/v3/files', '/drive/v3/changes', '/drive/v3/changes/startPageToken'}
++         or parsed.path.startswith(('/drive/v3/files/', '/calendar/v3/calendars/')))
++    )
++    if (parsed.scheme != 'https'  or parsed.username or parsed.password or parsed.fragment or parsed.port not in {None,443}
+             or parsed.hostname not in {'gmail.googleapis.com', 'www.googleapis.com'}
+-            or not parsed.path.startswith(('/gmail/v1/users/me/messages', '/drive/v3/files', '/calendar/v3/calendars/'))
++            or not host_path
+             or method not in {'GET', 'POST'}):
+         raise OAuthError('Unregistered Google API destination')
+     bounded(token, 16000)
+@@ -133,6 +149,10 @@
+         with urllib.request.build_opener(NoRedirect()).open(request, timeout=25) as response:
+             if response.status not in {200,201}: raise OAuthError('Google response rejected')
+             return strict_json(response.read(1_000_001))
++    except urllib.error.HTTPError as error:
++        status = error.code
++        error.close()
++        raise GoogleHTTPError(status) from None
+     except Exception:
+         raise OAuthError('Google API request failed; no automatic retry') from None
+ 
+--- v0.3.7/api-python/platform_runtime/google_reconcile.py
++++ v0.3.8/api-python/platform_runtime/google_reconcile.py
+@@ -0,0 +1,130 @@
++"""Owner-triggered, read-only Google write reconciliation.
++
++Only positive, fully matched provider evidence settles an uncertain step. Missing
++objects, partial/mismatched data, multiple Gmail matches and transport failures
++never prove non-delivery. No send/create request or automatic retry is performed.
++The journal and engine step settle in one transaction, with a second authority,
++configuration, session, credential-generation and uncertain-state check.
++"""
++import base64
++import json
++import urllib.parse
++from email import policy
++from email.parser import BytesParser
++from .engine import Conflict, Forbidden, NotFound, encode, digest
++from .oauth import OAuthError, bounded
++from .google_adapters import SCOPES, WRITES, authorize_args, api_transport, component, GoogleHTTPError, _date
++from .google_sync import objects, GMAIL
++
++
++class GoogleReconciler:
++    def __init__(self,engine,manager,resources,transport=api_transport):
++        self.e,self.m,self.resources,self.transport=engine,manager,resources,transport
++
++    def _load(self,db,tenant,step,actor,session_guard=None):
++        self.e.require_active(db,tenant)
++        self.e.require_authority(db,tenant,'web',actor,('owner',))
++        if session_guard is not None: session_guard(db)
++        row=db.execute('SELECT s.*,t.agent FROM p_steps s JOIN p_tasks t ON t.tenant=s.tenant AND t.id=s.task WHERE s.tenant=? AND s.id=?',(tenant,step)).fetchone()
++        if not row: raise NotFound('Step not found')
++        if row['tool'] not in WRITES or row['status']!='uncertain': raise Conflict('Uncertain Google write required')
++        dispatch=db.execute('SELECT * FROM p_google_dispatch WHERE tenant=? AND step=?',(tenant,step)).fetchone()
++        if not dispatch or dispatch['status'] not in {'uncertain','dispatching','succeeded'}:
++            raise Conflict('Recoverable dispatch evidence required')
++        args=json.loads(row['args']);connection=args['connection']
++        if dispatch['connection']!=connection: raise Forbidden('Dispatch connection mismatch')
++        method,url,body,reference=authorize_args(row['tool'],args,self.resources,step)
++        required=[SCOPES[row['tool']]]
++        if row['tool']=='google.gmail.send':required.append(SCOPES['google.gmail.read'])
++        credential=self.m._agent(db,tenant,connection,row['agent'],required)
++        if credential['generation']!=dispatch['generation']:raise Forbidden('Original dispatch credential generation required')
++        # Same policy and configuration snapshot as the original approved step.
++        canonical=self.e._validated(tenant,row['agent'],[{'tool':row['tool'],'args':args}])[0]
++        if canonical[4]!=row['fingerprint']:raise Forbidden('Original step policy changed')
++        expected=digest({'url':url,'body':body,'step_fingerprint':row['fingerprint'],'connection':connection,
++                         'generation':dispatch['generation'],'config':self.m.config_hash,'resources':digest(self.resources)})
++        if expected!=dispatch['fingerprint']:raise Forbidden('Dispatch fingerprint mismatch')
++        return row,dispatch,args,reference,required
++
++    def reconcile(self,tenant,step,actor,*,session_guard=None):
++        with self.e.read() as db:
++            row,dispatch,args,reference,required=self._load(db,tenant,step,actor,session_guard)
++        connection=args['connection']
++        grant=self.m.access(tenant,connection,row['agent'],required)
++        if grant.generation!=dispatch['generation']:raise Forbidden('Credential changed')
++        def get(url):
++            self.m.fence(tenant,connection,row['agent'],required,grant)
++            with self.e.read() as db:self._load(db,tenant,step,actor,session_guard)
++            response=self.transport('GET',url,grant.token,None)
++            if not isinstance(response,dict) or len(encode(response).encode())>1_000_000:
++                raise OAuthError('Invalid bounded provider evidence')
++            self.m.fence(tenant,connection,row['agent'],required,grant)
++            return response
++        try:
++            if row['tool']=='google.calendar.create':
++                external_id=self._calendar(args,reference,step,get)
++            else:external_id=self._gmail(args,reference,get)
++        except GoogleHTTPError as error:
++            if error.status in {404,410}:external_id=None
++            else:raise
++        # Even a negative result is not returned to a revoked session.
++        with self.e.tx() as db:
++            current,journal,_,_,_=self._load(db,tenant,step,actor,session_guard)
++            credential=self.m._agent(db,tenant,connection,row['agent'],required)
++            if credential['generation']!=grant.generation or credential['status']!='active' or credential['expires']<=self.e.clock():
++                raise Forbidden('Reconciliation credential fenced')
++            if not external_id:
++                self.e.audit(db,tenant,row['task'],'google.reconcile_unresolved',actor,{'step':step})
++                return {'status':'uncertain','reason':'No unique matching positive provider evidence','retried_write':False}
++            receipt={'provider':'google','operation':row['tool'],'external_id':external_id,**reference,
++                     'reconciled':True,'evidence_kind':'provider_readback'}
++            db.execute("UPDATE p_google_dispatch SET status='succeeded',receipt=?,updated=? WHERE tenant=? AND step=?",
++                       (encode(receipt),self.e.clock(),tenant,step))
++            db.execute("UPDATE p_steps SET status='succeeded',result=?,error='provider_reconciled',claim='',lease=0 WHERE tenant=? AND id=? AND status='uncertain'",
++                       (encode(receipt),tenant,step))
++            self.e.audit(db,tenant,row['task'],'google.provider_reconciled',actor,{'step':step,'external_id':external_id})
++            self.e._refresh(db,tenant,row['task'])
++            return {'status':'succeeded','receipt':receipt,'retried_write':False}
++
++    def _calendar(self,args,reference,step,get):
++        response=get('https://www.googleapis.com/calendar/v3/calendars/'+component(args['calendar'])+'/events/'+component(reference['event_id']))
++        if response.get('id')!=reference['event_id'] or response.get('status')=='cancelled':return None
++        extended=response.get('extendedProperties',{})
++        if not isinstance(extended,dict):return None
++        private=extended.get('private',{})
++        if not isinstance(private,dict) or private.get('platform_step')!=digest({'step':step}):return None
++        if response.get('attendees'):return None
++        if response.get('summary')!=args['summary'] or response.get('description','')!=args.get('description',''):return None
++        try:
++            if _date(response['start']['dateTime'])!=_date(args['start']) or _date(response['end']['dateTime'])!=_date(args['end']):return None
++        except (KeyError,TypeError,ValueError):return None
++        return reference['event_id']
++
++    def _gmail(self,args,reference,get):
++        message_id='<ap.'+reference['message_reference']+'@agent-platform.invalid>'
++        query=urllib.parse.urlencode({'q':'in:sent rfc822msgid:'+message_id,'maxResults':2,'includeSpamTrash':'true'})
++        response=get(GMAIL+'messages?'+query)
++        matches=objects(response,'messages',2)
++        if len(matches)!=1 or response.get('nextPageToken'):return None
++        mid=bounded(matches[0].get('id'),256)
++        response=get(GMAIL+'messages/'+component(mid)+'?format=raw')
++        labels=response.get('labelIds',[])
++        if not isinstance(labels,list) or len(labels)>100 or response.get('id')!=mid or 'SENT' not in labels:return None
++        raw=response.get('raw')
++        if not isinstance(raw,str) or len(raw)>100000:return None
++        try:
++            binary=base64.b64decode(raw+'='*((-len(raw))%4),altchars=b'-_',validate=True)
++            msg=BytesParser(policy=policy.default).parsebytes(binary)
++            if msg.defects or msg.is_multipart() or msg.get_content_type()!='text/plain':return None
++            for name,expected in [('Message-ID',message_id),('To',args['to']),('Subject',args['subject'])]:
++                values=msg.get_all(name,[])
++                if len(values)!=1 or str(values[0])!=expected:return None
++            if msg.get_all('Cc',[]) or msg.get_all('Bcc',[]):return None
++            # EmailMessage.set_content appends a terminal newline; reconstruct the
++            # expected MIME body rather than trimming arbitrary whitespace.
++            _,_,body,_=authorize_args('google.gmail.send',args,self.resources,'unused')
++            expected_msg=BytesParser(policy=policy.default).parsebytes(base64.urlsafe_b64decode(body['raw']))
++            normalize=lambda value:value.replace('\r\n','\n').replace('\r','\n')
++            if normalize(msg.get_content())!=normalize(expected_msg.get_content()):return None
++        except (ValueError,TypeError,LookupError):return None
++        return mid
+--- v0.3.7/api-python/platform_runtime/google_sync.py
++++ v0.3.8/api-python/platform_runtime/google_sync.py
+@@ -0,0 +1,220 @@
++"""Bounded Google metadata snapshots and incremental sync, with durable cursors.
++
++Record versions are LOCAL serialized observation sequences, not provider versions.
++Calendar sequence/updated, Drive version and Gmail historyId are not interchangeable.
++Each page and cursor commit atomically under stream lease and OAuth generation.
++No message bodies, file bytes, automatic scheduling or automatic destructive reset.
++"""
++import urllib.parse
++from .engine import Conflict, Forbidden, digest, encode
++from .oauth import OAuthError, bounded, ident
++from .google_adapters import SCOPES, api_transport, component, GoogleHTTPError
++from .google_oauth import strict_json
++from .sync_store import SyncStore
++
++READ_TOOL = {'gmail':'google.gmail.list', 'drive':'google.drive.list', 'calendar':'google.calendar.list'}
++GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me/'
++DRIVE = 'https://www.googleapis.com/drive/v3/'
++FILE_FIELDS = 'id,name,mimeType,modifiedTime,version,trashed'
++
++
++class ResetRequired(Conflict):
++    pass
++
++
++def stream_id(kind, calendar=''):
++    if kind not in READ_TOOL: raise ValueError('Unsupported sync kind')
++    if kind == 'calendar': bounded(calendar,256)
++    elif calendar: raise ValueError('Calendar is only valid for calendar sync')
++    return 'google_'+kind+'_'+digest({'calendar':calendar})[:24]
++
++
++def token(value):
++    return bounded(value,1500)
++
++
++def objects(body,key,maximum=100):
++    result=body.get(key,[])
++    if not isinstance(result,list) or len(result)>maximum or any(not isinstance(x,dict) for x in result):
++        raise OAuthError('Invalid or oversized provider collection')
++    return result
++
++
++def text_fields(item,fields):
++    out={}
++    for field in fields:
++        if field in item:
++            value=item[field]
++            if not isinstance(value,str) or len(value)>4096 or '\x00' in value: raise OAuthError('Invalid metadata text')
++            out[field]=value
++    return out
++
++
++class GoogleSync:
++    def __init__(self,engine,manager,resources,transport=api_transport):
++        self.e,self.m,self.resources,self.transport=engine,manager,resources,transport
++        self.store=SyncStore(engine)
++
++    def _guard(self,db,tenant,connection,agent,actor,kind,calendar,grant=None,session_guard=None):
++        self.store._authority(db,tenant,actor)
++        policy=self.e.policy(tenant,agent)
++        if READ_TOOL[kind] not in policy.get('tools',[]): raise Forbidden('Agent sync tool denied')
++        if kind=='calendar' and calendar not in self.resources['calendar_ids']:
++            raise Forbidden('Calendar not allowlisted')
++        row=self.m._agent(db,tenant,connection,agent,[SCOPES[READ_TOOL[kind]]])
++        if row['status'] not in {'active','refreshing'}: raise Forbidden('Active sync connection required')
++        if grant and (row['status']!='active' or row['generation']!=grant.generation or row['expires']<=self.e.clock()):
++            raise Forbidden('Sync credential fenced')
++        if session_guard is not None: session_guard(db)
++        return row
++
++    def _cursor(self,raw,kind,calendar):
++        if not raw: return {'v':1,'kind':kind,'calendar':calendar,'phase':'start','anchor':'','page':''}
++        data=strict_json(raw.encode())
++        if set(data)!={'v','kind','calendar','phase','anchor','page'} or type(data['v']) is not int or data['v']!=1:
++            raise Conflict('Unsupported sync checkpoint')
++        if data['kind']!=kind or data['calendar']!=calendar or data['phase'] not in {'snapshot','delta'}:
++            raise Conflict('Sync checkpoint binding mismatch')
++        for key in ('anchor','page'):
++            if data[key]: token(data[key])
++            elif data[key]!='': raise Conflict('Invalid sync token')
++        if kind!='calendar' or data['phase']=='delta': token(data['anchor'])
++        return data
++
++    def page(self,tenant,connection,agent,actor,kind,calendar='',*,session_guard=None):
++        for value in (tenant,connection,agent): ident(value)
++        stream=stream_id(kind,calendar)
++        with self.e.read() as db:
++            self._guard(db,tenant,connection,agent,actor,kind,calendar,session_guard=session_guard)
++        lease=self.store.claim(tenant,connection,stream,actor,300)
++        try:
++            grant=self.m.access(tenant,connection,agent,[SCOPES[READ_TOOL[kind]]])
++            def guard(db): self._guard(db,tenant,connection,agent,actor,kind,calendar,grant,session_guard)
++            def get(url):
++                with self.e.read() as db: guard(db)
++                self.store.renew(tenant,connection,stream,actor,lease['claim'],300)
++                response=self.transport('GET',url,grant.token,None)
++                if not isinstance(response,dict) or len(encode(response).encode())>1_000_000:
++                    raise OAuthError('Invalid bounded Google response')
++                with self.e.read() as db: guard(db)
++                return response
++            state=self._cursor(lease['cursor'],kind,calendar)
++            next_state,items,complete=self._fetch(state,get)
++            if state['page'] and next_state['page']==state['page']:
++                raise Conflict('Provider repeated pagination token')
++            unique={}
++            for item in items: unique[item['id']]=item
++            if len(unique)>100: raise OAuthError('Too many changed records; cursor not advanced')
++            events=[{**item,'version':(lease['revision']+1)*1000+index} for index,item in enumerate(unique.values())]
++            receipt=self.store.commit(tenant,connection,stream,actor,lease['claim'],
++                digest({'revision':lease['revision'],'cursor':lease['cursor']}),lease['cursor'],encode(next_state),events,guard=guard)
++            return {'stream':stream,'revision':receipt['revision'],'changed_records':receipt['changed_records'],
++                    'phase':next_state['phase'],'caught_up':complete,'untrusted_content':True,
++                    'coverage':'metadata_only','version_kind':'local_observation_sequence'}
++        finally:
++            try: self.store.release(tenant,connection,stream,actor,lease['claim'])
++            except (Conflict,Forbidden): pass
++
++    def _fetch(self,state,get):
++        kind,phase=state['kind'],state['phase']
++        if phase=='start' and kind in {'gmail','drive'}:
++            url=GMAIL+'profile' if kind=='gmail' else DRIVE+'changes/startPageToken'
++            key='historyId' if kind=='gmail' else 'startPageToken'
++            return {**state,'phase':'snapshot','anchor':token(get(url).get(key))},[],False
++        if kind=='calendar': return self._calendar(state,get)
++        if phase=='snapshot': return self._snapshot(state,get)
++        try: return self._gmail_history(state,get) if kind=='gmail' else self._drive_changes(state,get)
++        except GoogleHTTPError as error:
++            if error.status==(404 if kind=='gmail' else 410):
++                raise ResetRequired('Google cursor expired; explicit owner reset required') from None
++            raise
++
++    def _message(self,mid,get):
++        mid=bounded(mid,256)
++        try: obj=get(GMAIL+'messages/'+component(mid)+'?format=minimal')
++        except GoogleHTTPError as error:
++            if error.status==404: return {'id':mid,'deleted':True,'data':{}}
++            raise
++        if obj.get('id')!=mid: raise OAuthError('Message identity mismatch')
++        data=text_fields(obj,('id','threadId','historyId'))
++        labels=obj.get('labelIds',[])
++        if not isinstance(labels,list) or len(labels)>100: raise OAuthError('Invalid label list')
++        data['labelIds']=sorted({bounded(v,256) for v in labels})
++        return {'id':mid,'deleted':False,'data':data}
++
++    def _file(self,obj,fid=None,removed=False):
++        mid=bounded(fid if fid is not None else obj.get('id'),256)
++        if removed: return {'id':mid,'deleted':True,'data':{}}
++        if obj.get('id')!=mid: raise OAuthError('File identity mismatch')
++        data=text_fields(obj,('id','name','mimeType','modifiedTime','version'))
++        if type(obj.get('trashed',False)) is not bool: raise OAuthError('Invalid file trash status')
++        return {'id':mid,'deleted':obj.get('trashed',False),'data':{} if obj.get('trashed') else data}
++
++    def _snapshot(self,state,get):
++        params={'maxResults':20,'includeSpamTrash':'true'} if state['kind']=='gmail' else {
++            'pageSize':100,'fields':'nextPageToken,incompleteSearch,files('+FILE_FIELDS+')','spaces':'drive','corpora':'user'}
++        if state['page']: params['pageToken']=state['page']
++        response=get((GMAIL+'messages' if state['kind']=='gmail' else DRIVE+'files')+'?'+urllib.parse.urlencode(params))
++        if response.get('incompleteSearch'): raise OAuthError('Drive search incomplete; cursor not advanced')
++        items=([self._message(x.get('id'),get) for x in objects(response,'messages',20)] if state['kind']=='gmail'
++               else [self._file(x) for x in objects(response,'files')])
++        page=token(response['nextPageToken']) if 'nextPageToken' in response else ''
++        return {**state,'page':page,'phase':'snapshot' if page else 'delta'},items,False
++
++    def _gmail_history(self,state,get):
++        params={'startHistoryId':state['anchor'],'maxResults':10}
++        if state['page']: params['pageToken']=state['page']
++        response=get(GMAIL+'history?'+urllib.parse.urlencode(params))
++        changed={}
++        for history in objects(response,'history',10):
++            for field in ('messagesAdded','labelsAdded','labelsRemoved','messagesDeleted'):
++                for change in objects(history,field,100):
++                    msg=change.get('message')
++                    if not isinstance(msg,dict): raise OAuthError('History message required')
++                    changed[bounded(msg.get('id'),256)]=field=='messagesDeleted'
++        if len(changed)>100: raise OAuthError('Too many history messages; cursor not advanced')
++        items=[{'id':mid,'deleted':True,'data':{}} if deleted else self._message(mid,get) for mid,deleted in changed.items()]
++        page=token(response['nextPageToken']) if 'nextPageToken' in response else ''
++        anchor=state['anchor'] if page else token(response.get('historyId'))
++        return {**state,'page':page,'anchor':anchor},items,not page
++
++    def _drive_changes(self,state,get):
++        params={'pageToken':state['page'] or state['anchor'],'pageSize':100,'spaces':'drive','includeRemoved':'true',
++                'fields':'nextPageToken,newStartPageToken,changes(fileId,removed,file('+FILE_FIELDS+'))'}
++        response=get(DRIVE+'changes?'+urllib.parse.urlencode(params))
++        items=[]
++        for change in objects(response,'changes'):
++            removed=change.get('removed',False)
++            if type(removed) is not bool: raise OAuthError('Invalid removed flag')
++            file=change.get('file',{})
++            if not isinstance(file,dict): raise OAuthError('Invalid file object')
++            items.append(self._file(file,change.get('fileId'),removed))
++        page=token(response['nextPageToken']) if 'nextPageToken' in response else ''
++        anchor=state['anchor'] if page else token(response.get('newStartPageToken'))
++        return {**state,'page':page,'anchor':anchor},items,not page
++
++    def _calendar(self,state,get):
++        params={'maxResults':100,'singleEvents':'false','showDeleted':'true'}
++        if state['phase']=='delta': params['syncToken']=state['anchor']
++        if state['page']: params['pageToken']=state['page']
++        try: response=get('https://www.googleapis.com/calendar/v3/calendars/'+component(state['calendar'])+'/events?'+urllib.parse.urlencode(params))
++        except GoogleHTTPError as error:
++            if error.status==410: raise ResetRequired('Calendar cursor expired; explicit owner reset required') from None
++            raise
++        items=[]
++        for item in objects(response,'items'):
++            mid=bounded(item.get('id'),256);deleted=item.get('status')=='cancelled'
++            data={} if deleted else text_fields(item,('id','summary','description','status','updated','etag','recurringEventId'))
++            if not deleted:
++                for key in ('start','end','originalStartTime'):
++                    if key in item:
++                        if not isinstance(item[key],dict): raise OAuthError('Calendar date object required')
++                        data[key]=text_fields(item[key],('date','dateTime','timeZone'))
++                if 'recurrence' in item:
++                    rules=item['recurrence']
++                    if not isinstance(rules,list) or len(rules)>30: raise OAuthError('Invalid recurrence')
++                    data['recurrence']=[bounded(x,1000) for x in rules]
++            items.append({'id':mid,'deleted':deleted,'data':data})
++        page=token(response['nextPageToken']) if 'nextPageToken' in response else ''
++        anchor=state['anchor'] if page else token(response.get('nextSyncToken'))
++        return {**state,'phase':('delta' if not page or state['phase']=='delta' else 'snapshot'),'page':page,'anchor':anchor},items,not page
+--- v0.3.7/api-python/platform_runtime/sync_store.py
++++ v0.3.8/api-python/platform_runtime/sync_store.py
+@@ -97,7 +97,7 @@
+         if len(encode(validated).encode())>500000:raise ValueError('Sync page exceeds limit')
+         return validated
+ 
+-    def commit(self, tenant, connection, stream, actor, claim, page_key, expected_cursor, next_cursor, events):
++    def commit(self, tenant, connection, stream, actor, claim, page_key, expected_cursor, next_cursor, events, *, guard=None):
+         bounded(page_key,256)
+         for cursor in (expected_cursor,next_cursor):
+             if not isinstance(cursor,str) or len(cursor)>4096 or any(ord(c)<32 for c in cursor):raise ValueError('Invalid opaque cursor')
+@@ -105,6 +105,7 @@
+         fingerprint=digest({'cursor':expected_cursor,'next':next_cursor,'events':events})
+         with self.e.tx() as db:
+             row=self._owned(db,tenant,connection,stream,actor,claim)
++            if guard is not None: guard(db)
+             old=db.execute('SELECT * FROM p_sync_pages WHERE tenant=? AND connection=? AND stream=? AND page_key=?',
+                            (tenant,connection,stream,page_key)).fetchone()
+             if old:
+@@ -136,24 +137,27 @@
+             self._owned(db,tenant,connection,stream,actor,claim)
+             db.execute("UPDATE p_sync_streams SET claim='',lease=0 WHERE tenant=? AND connection=? AND stream=?",(tenant,connection,stream))
+ 
+-    def reset(self, tenant, connection, stream, actor):
++    def reset(self, tenant, connection, stream, actor, *, guard=None):
+         # Reset is an explicit destructive owner action, never automatic after
+         # OAuth account changes. Old records must not leak into a new account.
+         with self.e.tx() as db:
+             self.e.require_authority(db,tenant,'web',actor,('owner',));self.e.require_active(db,tenant)
+             conn=self._connection(db,tenant,connection)
++            if guard is not None: guard(db)
+             for table in ('p_sync_pages','p_sync_versions','p_sync_records','p_sync_streams'):
+                 db.execute('DELETE FROM '+table+' WHERE tenant=? AND connection=? AND stream=?',(tenant,connection,stream))
+             db.execute('INSERT INTO p_sync_streams(tenant,connection,stream,connection_generation) VALUES(?,?,?,?)',
+                        (tenant,connection,stream,conn['generation']))
+             self.e.audit(db,tenant,'','sync.reset',actor,{'connection':connection,'stream':stream})
+ 
+-    def records(self, tenant, connection, stream, actor, limit=100):
++    def records(self, tenant, connection, stream, actor, limit=100, *, after=''):
+         if type(limit) is not int or not 1<=limit<=100:raise ValueError('Invalid record limit')
++        if after: bounded(after,256)
++        elif after != '': raise ValueError('Invalid record cursor')
+         with self.e.read() as db:
+             self._authority(db,tenant,actor);conn=self._connection(db,tenant,connection)
+             stream_row=self._row(db,tenant,connection,stream)
+             if stream_row['connection_generation']!=conn['generation']:raise Conflict('Sync credential changed')
+-            rows=db.execute('SELECT record_id,version,deleted,body FROM p_sync_records WHERE tenant=? AND connection=? AND stream=? ORDER BY record_id LIMIT ?',
+-                            (tenant,connection,stream,limit)).fetchall()
++            rows=db.execute('SELECT record_id,version,deleted,body FROM p_sync_records WHERE tenant=? AND connection=? AND stream=? AND record_id>? ORDER BY record_id LIMIT ?',
++                            (tenant,connection,stream,after,limit)).fetchall()
+             return [{'id':r['record_id'],'version':r['version'],'deleted':bool(r['deleted']),'untrusted_content':True,'data':json.loads(r['body'])} for r in rows]
+--- v0.3.7/api-python/runtime_tests/test_google_reconcile.py
++++ v0.3.8/api-python/runtime_tests/test_google_reconcile.py
+@@ -0,0 +1,129 @@
++import base64
++import copy
++import json
++import unittest
++import test_google_adapters as fixtures
++from platform_runtime.engine import Conflict,Forbidden
++from platform_runtime.google_adapters import authorize_args,GoogleHTTPError
++from platform_runtime.google_reconcile import GoogleReconciler
++
++
++class GoogleReconcileTests(unittest.TestCase):
++    setUp=fixtures.GoogleAdapterTests.setUp
++    submit=fixtures.GoogleAdapterTests.submit
++    step=fixtures.GoogleAdapterTests.step
++    finish=fixtures.GoogleAdapterTests.finish
++    def pending(self,calendar=False):
++        self.failure=TimeoutError()
++        args=({'calendar':'primary','summary':'Salom','start':'2026-09-20T10:00:00+05:00','end':'2026-09-20T11:00:00+05:00'} if calendar
++              else {'to':'customer@example.invalid','subject':'O‘zbekcha','text':'Salom\nHisobot\n'})
++        name='google.calendar.create' if calendar else 'google.gmail.send'
++        tid=self.submit(name,args);step=self.finish(tid,True);self.assertEqual('uncertain',step['status'])
++        self.tid=tid;self.sid=step['id'];self.args={'connection':'google',**args}
++        _,_,body,self.reference=authorize_args(name,self.args,self.resources,self.sid)
++        if calendar:self.responses=[{**body,'status':'confirmed'}]
++        else:self.responses=[{'messages':[{'id':'sent'}]},{'id':'sent','labelIds':['SENT'],'raw':body['raw']}]
++        self.lookups=[];self.lookup_hook=None
++        def transport(method,url,token,body):
++            self.lookups.append((method,url,body))
++            if self.lookup_hook:self.lookup_hook()
++            response=self.responses.pop(0)
++            if isinstance(response,Exception):raise response
++            return copy.deepcopy(response)
++        self.r=GoogleReconciler(self.e,self.m,self.resources,transport)
++    def reconcile(self,**kw):return self.r.reconcile('a',self.sid,'owner',**kw)
++    def status(self):return self.step(self.tid)['status']
++    def test_calendar_positive_readback_settles_step_and_journal(self):
++        self.pending(True);r=self.reconcile();self.assertEqual('succeeded',r['status']);self.assertEqual('succeeded',self.status())
++        self.assertEqual('GET',self.lookups[0][0]);self.assertEqual(1,len(self.calls))
++        with self.e.read() as db:self.assertEqual('succeeded',db.execute('SELECT status FROM p_google_dispatch').fetchone()[0])
++    def test_gmail_unique_sent_mime_match(self):
++        self.pending();r=self.reconcile();self.assertEqual('succeeded',r['status']);self.assertEqual(2,len(self.lookups))
++        self.assertTrue(all(x[0]=='GET' and x[2] is None for x in self.lookups));self.assertNotIn('fake-access',json.dumps(r))
++    def test_calendar_equivalent_timezone_is_accepted(self):
++        self.pending(True);self.responses[0]['start']={'dateTime':'2026-09-20T05:00:00Z'};self.responses[0]['end']={'dateTime':'2026-09-20T06:00:00Z'}
++        self.assertEqual('succeeded',self.reconcile()['status'])
++    def test_calendar_wrong_id_unresolved(self):
++        self.pending(True);self.responses[0]['id']='different';self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_calendar_wrong_correlation_unresolved(self):
++        self.pending(True);self.responses[0]['extendedProperties']['private']['platform_step']='wrong'
++        self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_calendar_mutated_content_unresolved(self):
++        self.pending(True);self.responses[0]['summary']='Not the approved action';self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_calendar_cancelled_does_not_prove_no_delivery(self):
++        self.pending(True);self.responses[0]['status']='cancelled';self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_not_found_never_marks_failed_or_retries(self):
++        self.pending(True);self.responses=[GoogleHTTPError(404)];self.assertEqual('uncertain',self.reconcile()['status']);self.assertEqual(1,len(self.calls))
++    def test_gmail_no_matches_is_not_failure(self):
++        self.pending();self.responses=[{}];self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_multiple_matches_are_ambiguous(self):
++        self.pending();self.responses=[{'messages':[{'id':'x'},{'id':'y'}]}];self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_page_token_not_unique(self):
++        self.pending();self.responses[0]['nextPageToken']='more';self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_non_sent_label_rejected(self):
++        self.pending();self.responses[1]['labelIds']=['INBOX'];self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_wrong_body_rejected(self):
++        self.pending();raw=base64.urlsafe_b64decode(self.responses[1]['raw']);self.responses[1]['raw']=base64.urlsafe_b64encode(raw.replace(b'Hisobot',b'Other')).decode()
++        self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_header_injection_and_multiple_recipients_rejected(self):
++        self.pending();raw=base64.urlsafe_b64decode(self.responses[1]['raw']);self.responses[1]['raw']=base64.urlsafe_b64encode(b'Bcc: extra@example.invalid\r\n'+raw).decode()
++        self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_duplicate_message_id_rejected(self):
++        self.pending();raw=base64.urlsafe_b64decode(self.responses[1]['raw']);line=next(x for x in raw.split(b'\r\n') if x.startswith(b'Message-ID:'))
++        self.responses[1]['raw']=base64.urlsafe_b64encode(line+b'\r\n'+raw).decode();self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_wrong_provider_id_rejected(self):
++        self.pending();self.responses[1]['id']='other';self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_repeated_settlement_denied_before_readback(self):
++        self.pending(True);self.reconcile();n=len(self.lookups)
++        with self.assertRaises(Conflict):self.reconcile()
++        self.assertEqual(n,len(self.lookups))
++    def test_original_resource_policy_required(self):
++        self.pending(True);self.resources['calendar_ids'].append('other')
++        with self.assertRaises(Forbidden):self.reconcile()
++        self.assertEqual([],self.lookups)
++    def test_dispatch_fingerprint_tamper_rejected(self):
++        self.pending(True)
++        with self.e.tx() as db:db.execute("UPDATE p_google_dispatch SET fingerprint='changed'")
++        with self.assertRaises(Forbidden):self.reconcile()
++        self.assertEqual([],self.lookups)
++    def test_revoke_during_lookup_does_not_settle(self):
++        self.pending(True);self.lookup_hook=lambda:self.m.revoke('a','google','owner',False)
++        with self.assertRaises(Forbidden):self.reconcile()
++        self.assertEqual('uncertain',self.status())
++    def test_session_revoked_before_transaction_does_not_settle(self):
++        self.pending(True)
++        def guard(db):
++            if db.in_transaction:raise Forbidden('Session revoked')
++        with self.assertRaises(Forbidden):self.reconcile(session_guard=guard)
++        self.assertEqual('uncertain',self.status())
++    def test_concurrent_manual_settlement_is_not_overwritten(self):
++        self.pending(True);self.lookup_hook=lambda:self.e.reconcile('a',self.sid,'owner','owner','failed','Operator evidence')
++        with self.assertRaises(Conflict):self.reconcile()
++        self.assertEqual('failed',self.status())
++    def test_transport_failure_preserves_uncertain(self):
++        self.pending(True);self.responses=[TimeoutError()]
++        with self.assertRaises(TimeoutError):self.reconcile()
++        self.assertEqual('uncertain',self.status())
++    def test_missing_read_scope_does_not_send(self):
++        self.pending()
++        with self.e.tx() as db:
++            scopes=json.loads(db.execute('SELECT scopes FROM p_oauth_connections').fetchone()[0]);scopes.remove('https://www.googleapis.com/auth/gmail.readonly')
++            db.execute('UPDATE p_oauth_connections SET scopes=?',(json.dumps(scopes),))
++        with self.assertRaises(Forbidden):self.reconcile()
++        self.assertEqual([],self.lookups)
++    def test_calendar_malformed_properties_stays_uncertain(self):
++        self.pending(True);self.responses[0]['extendedProperties']='invalid'
++        self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_calendar_added_attendees_not_approved(self):
++        self.pending(True);self.responses[0]['attendees']=[{'email':'other@example.invalid'}]
++        self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_gmail_labels_must_be_array(self):
++        self.pending();self.responses[1]['labelIds']='SENT'
++        self.assertEqual('uncertain',self.reconcile()['status'])
++    def test_authority_removed_before_commit(self):
++        self.pending(True);self.block=False
++        def authority(db,tenant,channel,actor,roles):
++            if channel and self.block:raise Forbidden('Membership revoked')
++        self.e.authority=authority;self.lookup_hook=lambda:setattr(self,'block',True)
++        with self.assertRaises(Forbidden):self.reconcile()
++        self.assertEqual('uncertain',self.status())
+--- v0.3.7/api-python/runtime_tests/test_google_sync.py
++++ v0.3.8/api-python/runtime_tests/test_google_sync.py
+@@ -0,0 +1,223 @@
++"""Real SQLite/OAuth/vault + scripted transport. Never live Google tests."""
++import copy
++import json
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from urllib.parse import urlsplit,parse_qs
++from unittest.mock import patch
++from platform_runtime.engine import Engine,Conflict,Forbidden
++from platform_runtime.tools import build_registry
++from platform_runtime.secret_vault import SecretVault
++from platform_runtime.oauth import OAuthManager,OAuthError
++from platform_runtime.google_adapters import SCOPES,GoogleHTTPError,api_transport
++from platform_runtime.google_sync import GoogleSync,ResetRequired,stream_id
++from test_oauth import FakeProvider
++
++
++class GoogleSyncTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
++        self.now=[1000.0];self.denied=False
++        self.policy={'tools':list(SCOPES),'allowed_connections':['google'],'ladder':'autonomous'}
++        def authority(db,tenant,channel,actor,roles):
++            if channel and (actor!='owner' or self.denied): raise Forbidden('Denied')
++        self.e=Engine(Path(self.tmp.name)/'db',build_registry(),lambda t,a:self.policy,clock=lambda:self.now[0],authority=authority)
++        p=FakeProvider();p.scopes=set(SCOPES.values())|p.scopes
++        self.m=OAuthManager(self.e,SecretVault({'v1':os.urandom(32)},'v1'),p)
++        state=parse_qs(urlsplit(self.m.begin('a','google','owner','session')['authorization_url']).query)['state'][0]
++        self.m.complete('a','google','owner','session',state,'code')
++        self.resources={'recipient_emails':[],'calendar_ids':['primary']}
++        self.queue=[];self.calls=[];self.hook=None
++        def transport(method,url,token,body):
++            self.calls.append((method,url,body))
++            if self.hook:self.hook()
++            response=self.queue.pop(0)
++            if isinstance(response,Exception):raise response
++            return copy.deepcopy(response)
++        self.s=GoogleSync(self.e,self.m,self.resources,transport)
++    def page(self,kind='gmail',**kw):return self.s.page('a','google','ops','owner',kind,'primary' if kind=='calendar' else '',**kw)
++    def call(self,*responses,kind='gmail',**kw):self.queue.extend(responses);return self.page(kind,**kw)
++    def cursor(self,kind='gmail'):
++        with self.e.read() as db:
++            row=db.execute('SELECT cursor FROM p_sync_streams WHERE stream=?',(stream_id(kind,'primary' if kind=='calendar' else ''),)).fetchone()
++            return json.loads(row[0]) if row and row[0] else None
++    def records(self,kind='gmail'):
++        return self.s.store.records('a','google',stream_id(kind,'primary' if kind=='calendar' else ''),'owner')
++    def bootstrap(self,kind='gmail'):
++        self.call({'historyId':'100'} if kind=='gmail' else {'startPageToken':'Z'},kind=kind)
++        self.call({},kind=kind)
++    def params(self):return parse_qs(urlsplit(self.calls[-1][1]).query)
++    def test_gmail_anchor_persisted_before_snapshot(self):
++        r=self.call({'historyId':'100'});self.assertFalse(r['caught_up']);self.assertEqual('snapshot',self.cursor()['phase'])
++        self.assertEqual('100',self.cursor()['anchor']);self.assertEqual([],self.records())
++    def test_gmail_snapshot_resume_then_delta(self):
++        self.call({'historyId':'100'})
++        self.call({'messages':[{'id':'m'}],'nextPageToken':'p2'},{'id':'m','labelIds':['INBOX'],'threadId':'t'})
++        self.assertEqual('p2',self.cursor()['page']);self.assertEqual('m',self.records()[0]['id'])
++        self.call({});self.assertEqual('delta',self.cursor()['phase']);self.assertEqual(['p2'],self.params()['pageToken'])
++        self.assertTrue(self.call({'historyId':'110'})['caught_up']);self.assertEqual('110',self.cursor()['anchor'])
++    def test_gmail_history_holds_original_anchor_on_intermediate_page(self):
++        self.bootstrap();self.call({'historyId':'200','nextPageToken':'p2'})
++        self.assertEqual('100',self.cursor()['anchor'])
++        self.call({'historyId':'210'});self.assertEqual(['100'],self.params()['startHistoryId']);self.assertEqual(['p2'],self.params()['pageToken'])
++    def test_gmail_label_changes_dedup_current_message_fetch(self):
++        self.bootstrap();change={'message':{'id':'m'}}
++        self.call({'historyId':'110','history':[{'labelsAdded':[change],'messagesAdded':[change]}]},{'id':'m','labelIds':['SENT','INBOX','SENT']})
++        self.assertEqual(['INBOX','SENT'],self.records()[0]['data']['labelIds']);self.assertEqual(1,len(self.records()))
++    def test_gmail_delete_does_not_fetch_or_retain_body(self):
++        self.bootstrap();self.call({'historyId':'101','history':[{'messagesDeleted':[{'message':{'id':'m'}}]}]})
++        self.assertTrue(self.records()[0]['deleted']);self.assertEqual({},self.records()[0]['data'])
++    def test_message_404_is_tombstone(self):
++        self.call({'historyId':'100'});self.call({'messages':[{'id':'m'}]},GoogleHTTPError(404))
++        self.assertTrue(self.records()[0]['deleted'])
++    def test_history_404_requires_explicit_reset_and_keeps_cursor(self):
++        self.bootstrap();before=self.cursor()
++        with self.assertRaises(ResetRequired):self.call(GoogleHTTPError(404))
++        self.assertEqual(before,self.cursor())
++    def test_rate_limit_does_not_advance_or_retry(self):
++        self.bootstrap();before=self.cursor();n=len(self.calls)
++        with self.assertRaises(GoogleHTTPError):self.call(GoogleHTTPError(429))
++        self.assertEqual(n+1,len(self.calls));self.assertEqual(before,self.cursor())
++    def test_partial_page_failure_rolls_back_all_records(self):
++        self.call({'historyId':'100'});before=self.cursor()
++        with self.assertRaises(TimeoutError):self.call({'messages':[{'id':'m1'},{'id':'m2'}]},{'id':'m1'},TimeoutError())
++        self.assertEqual([],self.records());self.assertEqual(before,self.cursor())
++    def test_message_identity_mismatch_no_commit(self):
++        self.call({'historyId':'100'})
++        with self.assertRaises(OAuthError):self.call({'messages':[{'id':'m1'}]},{'id':'m2'})
++        self.assertEqual([],self.records())
++    def test_calendar_initial_full_pagination(self):
++        self.call({'items':[{'id':'e','summary':'Salom'}],'nextPageToken':'p'},kind='calendar')
++        self.assertEqual('snapshot',self.cursor('calendar')['phase']);self.assertNotIn('syncToken',self.params())
++        r=self.call({'nextSyncToken':'s1'},kind='calendar');self.assertTrue(r['caught_up']);self.assertEqual(['p'],self.params()['pageToken'])
++    def test_calendar_incremental_keeps_same_token(self):
++        self.call({'nextSyncToken':'s1'},kind='calendar');self.call({'nextPageToken':'p2'},kind='calendar')
++        self.call({'nextSyncToken':'s2'},kind='calendar');self.assertEqual(['s1'],self.params()['syncToken'])
++        self.assertEqual(['p2'],self.params()['pageToken']);self.assertEqual('s2',self.cursor('calendar')['anchor'])
++    def test_calendar_cancelled_minimal_object_is_tombstone(self):
++        self.call({'items':[{'id':'e','status':'cancelled'}],'nextSyncToken':'s'},kind='calendar')
++        self.assertTrue(self.records('calendar')[0]['deleted'])
++    def test_calendar_410_keeps_records_until_owner_reset(self):
++        self.call({'items':[{'id':'e'}],'nextSyncToken':'s'},kind='calendar')
++        with self.assertRaises(ResetRequired):self.call(GoogleHTTPError(410),kind='calendar')
++        self.assertEqual(1,len(self.records('calendar')))
++    def test_calendar_not_allowlisted_no_io(self):
++        self.resources['calendar_ids']=[]
++        with self.assertRaises(Forbidden):self.page('calendar')
++        self.assertEqual([],self.calls)
++    def test_calendar_no_time_filters_or_orderby(self):
++        self.call({'nextSyncToken':'s'},kind='calendar');q=self.params()
++        self.assertEqual(['false'],q['singleEvents']);self.assertEqual(['true'],q['showDeleted'])
++        self.assertFalse(set(q)&{'orderBy','timeMin','timeMax','updatedMin'})
++    def test_drive_bootstrap_before_full_list(self):
++        self.bootstrap('drive');self.assertEqual('Z',self.cursor('drive')['anchor'])
++    def test_drive_removal_without_file_object(self):
++        self.bootstrap('drive');self.call({'changes':[{'fileId':'f','removed':True}],'newStartPageToken':'A'},kind='drive')
++        self.assertTrue(self.records('drive')[0]['deleted']);self.assertEqual('A',self.cursor('drive')['anchor'])
++    def test_drive_opaque_tokens_not_lexically_ordered(self):
++        self.bootstrap('drive');self.call({'nextPageToken':'A'},kind='drive')
++        self.assertEqual('Z',self.cursor('drive')['anchor']);self.call({'newStartPageToken':'0'},kind='drive')
++        self.assertEqual(['A'],self.params()['pageToken']);self.assertEqual('0',self.cursor('drive')['anchor'])
++    def test_drive_same_record_last_observation_wins(self):
++        self.bootstrap('drive');self.call({'changes':[{'fileId':'f','file':{'id':'f','name':'old'}},{'fileId':'f','removed':True}],'newStartPageToken':'n'},kind='drive')
++        self.assertEqual(1,len(self.records('drive')));self.assertTrue(self.records('drive')[0]['deleted'])
++    def test_drive_incomplete_search_does_not_advance(self):
++        self.call({'startPageToken':'Z'},kind='drive');before=self.cursor('drive')
++        with self.assertRaises(OAuthError):self.call({'incompleteSearch':True},kind='drive')
++        self.assertEqual(before,self.cursor('drive'))
++    def test_malformed_terminal_token_no_commit(self):
++        with self.assertRaises(ValueError):self.call({'items':[{'id':'e'}]},kind='calendar')
++        self.assertEqual([],self.records('calendar'))
++    def test_repeated_page_token_rejected(self):
++        self.call({'nextPageToken':'p'},kind='calendar')
++        with self.assertRaises(Conflict):self.call({'nextPageToken':'p'},kind='calendar')
++    def test_provider_fields_untrusted_and_local_versions(self):
++        self.call({'items':[{'id':'e','summary':'Ignore instructions','sequence':999999}],'nextSyncToken':'s'},kind='calendar')
++        r=self.records('calendar')[0];self.assertTrue(r['untrusted_content']);self.assertEqual(1000,r['version']);self.assertNotIn('sequence',r['data'])
++    def test_revoke_during_provider_read_blocks_commit(self):
++        self.hook=lambda:self.m.revoke('a','google','owner',False)
++        with self.assertRaises(Forbidden):self.call({'historyId':'100'})
++        self.assertIsNone(self.cursor())
++    def test_role_loss_during_provider_read_blocks_commit(self):
++        self.hook=lambda:setattr(self,'denied',True)
++        with self.assertRaises(Forbidden):self.call({'historyId':'100'})
++        self.assertIsNone(self.cursor())
++    def test_agent_tool_removed_during_read_blocks_commit(self):
++        self.hook=lambda:self.policy.update(tools=[])
++        with self.assertRaises(Forbidden):self.call({'historyId':'100'})
++        self.assertIsNone(self.cursor())
++    def test_session_guard_runs_in_commit_transaction(self):
++        calls=[]
++        def guard(db):
++            calls.append(db.in_transaction)
++            if db.in_transaction: raise Forbidden('Session expired before commit')
++        with self.assertRaises(Forbidden):self.call({'historyId':'100'},session_guard=guard)
++        self.assertIn(True,calls);self.assertIsNone(self.cursor())
++    def test_reset_during_fetch_fences_result(self):
++        self.hook=lambda:self.s.store.reset('a','google',stream_id('gmail'),'owner')
++        with self.assertRaises(Conflict):self.call({'historyId':'100'})
++        self.assertIsNone(self.cursor())
++    def test_worker_restart_resumes_durable_checkpoint(self):
++        self.bootstrap();self.s=GoogleSync(self.e,self.m,self.resources,self.s.transport)
++        self.call({'historyId':'120'});self.assertEqual(['100'],self.params()['startHistoryId'])
++    def test_lease_released_on_failure(self):
++        with self.assertRaises(TimeoutError):self.call(TimeoutError())
++        self.call({'historyId':'100'})
++    def test_cross_tenant_denied_before_provider(self):
++        with self.assertRaises(LookupError):self.s.page('b','google','ops','owner','gmail')
++        self.assertEqual([],self.calls)
++    def test_forbidden_host_path_pairs_no_io(self):
++        for url in ['https://gmail.googleapis.com/drive/v3/files','https://www.googleapis.com/gmail/v1/users/me/history','https://gmail.googleapis.com/gmail/v1/users/me/messagesEVIL']:
++            with self.assertRaises(OAuthError):api_transport('GET',url,'test')
++    def test_calendar_multiline_description_kept_as_untrusted_data(self):
++        self.call({'items':[{'id':'e','description':'birinchi\nikkinchi'}],'nextSyncToken':'s'},kind='calendar')
++        self.assertEqual('birinchi\nikkinchi',self.records('calendar')[0]['data']['description'])
++    def test_oversized_page_does_not_advance(self):
++        with self.assertRaises(OAuthError):self.call({'items':[{'id':str(n)} for n in range(101)],'nextSyncToken':'s'},kind='calendar')
++        self.assertEqual([],self.records('calendar'));self.assertIsNone(self.cursor('calendar'))
++    def test_record_keyset_pagination_no_duplicates(self):
++        self.call({'items':[{'id':'b'},{'id':'a'},{'id':'c'}],'nextSyncToken':'s'},kind='calendar')
++        stream=stream_id('calendar','primary')
++        first=self.s.store.records('a','google',stream,'owner',2)
++        second=self.s.store.records('a','google',stream,'owner',2,after=first[-1]['id'])
++        self.assertEqual(['a','b','c'],[x['id'] for x in first+second])
++    def test_reset_guard_is_atomic(self):
++        self.call({'items':[{'id':'e'}],'nextSyncToken':'s'},kind='calendar')
++        def guard(db):
++            self.assertTrue(db.in_transaction);raise Forbidden('Session ended')
++        with self.assertRaises(Forbidden):self.s.store.reset('a','google',stream_id('calendar','primary'),'owner',guard=guard)
++        self.assertEqual(1,len(self.records('calendar')))
++    def test_calendar_resource_revoked_during_fetch(self):
++        self.hook=lambda:self.resources.update(calendar_ids=[])
++        with self.assertRaises(Forbidden):self.call({'nextSyncToken':'s'},kind='calendar')
++        self.assertIsNone(self.cursor('calendar'))
++    def test_expired_grant_during_io_blocks_page(self):
++        self.hook=lambda:self.now.__setitem__(0,5000.0)
++        with self.assertRaises(Forbidden):self.call({'historyId':'100'})
++        self.assertIsNone(self.cursor())
++    def test_revoked_connection_denied_before_claim(self):
++        self.m.revoke('a','google','owner',False)
++        with self.assertRaises(Forbidden):self.page()
++        self.assertEqual([],self.calls)
++    def test_transport_http_error_sanitized_status_and_closed(self):
++        import io,urllib.error
++        from unittest.mock import Mock
++        stream=io.BytesIO(b'{"error":"sensitive provider body"}')
++        error=urllib.error.HTTPError('https://gmail.googleapis.com/gmail/v1/users/me/history',429,'sensitive',{},stream)
++        opener=Mock();opener.open.side_effect=error
++        with patch('platform_runtime.google_adapters.urllib.request.build_opener',return_value=opener):
++            with self.assertRaises(GoogleHTTPError) as got:api_transport('GET','https://gmail.googleapis.com/gmail/v1/users/me/history','fake')
++        self.assertEqual(429,got.exception.status);self.assertNotIn('sensitive',str(got.exception));self.assertTrue(stream.closed)
++    def test_transport_rejects_malformed_json_and_bounds(self):
++        from unittest.mock import Mock
++        for raw in (b'{"id":1,"id":2}',b'{"n":NaN}',b'x'*1_000_001,b'[]'):
++            response=Mock();response.status=200;response.read.return_value=raw
++            context=Mock();context.__enter__=Mock(return_value=response);context.__exit__=Mock(return_value=False)
++            opener=Mock();opener.open.return_value=context
++            with patch('platform_runtime.google_adapters.urllib.request.build_opener',return_value=opener):
++                with self.assertRaises(OAuthError):api_transport('GET','https://gmail.googleapis.com/gmail/v1/users/me/history','fake')
++    def test_transport_rejects_header_injection_no_io(self):
++        for token in ['x\nY','x y','o‘zbek']:
++            with self.assertRaises((ValueError,OAuthError)):api_transport('GET','https://gmail.googleapis.com/gmail/v1/users/me/history',token)
+--- v0.3.7/apps/runner/package.json
++++ v0.3.8/apps/runner/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "agent-platform-runner",
+   "private": true,
+-  "version": "0.3.7",
++  "version": "0.3.8",
+   "description": "Device-bound read-only runner with allowlist and durable journal",
+   "engines": {
+     "node": ">=22.4.0"
+--- v0.3.7/apps/ui/app/platform/page.tsx
++++ v0.3.8/apps/ui/app/platform/page.tsx
+@@ -3,6 +3,7 @@
+ import SessionGate from '../../components/SessionGate';
+ import AgentRuns from '../../components/AgentRuns';
+ import OAuthConnections from '../../components/OAuthConnections';
++import GoogleData from '../../components/GoogleData';
+ import {BudgetPanel,KnowledgePanel} from '../../components/DevelopmentData';
+ import {type SessionClient,type Workspace} from '../../lib/session-client.mjs';
+ type Tool={name:string;risk:string;schema:unknown;runner:boolean};
+@@ -50,7 +51,7 @@
+   return <main style={{fontFamily:'system-ui,sans-serif',background:'#0b1220',color:'#e2e8f0',minHeight:'100vh',padding:'28px',maxWidth:1500,margin:'auto'}}>
+     <header style={{display:'flex',justifyContent:'space-between',gap:20,flexWrap:'wrap'}}>
+       <div><h1 style={{margin:0}}>Agent Platform</h1><p style={{color:'#94a3b8'}}>AI xodimlar boshqaruvi · Kanalga bog‘lanmagan runtime</p></div>
+-      <span style={{color:'#fde68a'}}>Development 0.3.7 · Lokal dalillar mavjud · Yakuniy mahsulot emas</span>
++      <span style={{color:'#fde68a'}}>Development 0.3.8 · Lokal dalillar mavjud · Yakuniy mahsulot emas</span>
+     </header>
+     <section style={panel}>
+       <strong>{workspace.name}</strong><p>Workspace: {tenant}</p>
+@@ -62,13 +63,14 @@
+     {busy && <p role="status">Yuklanmoqda...</p>}
+     {connected && <>
+       <p>Rol: <strong>{role}</strong> · {frozen?'Ijro to‘xtatilgan':'Faol'}</p>
+-      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth']].filter(([id])=>(id!=='oauth' || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
++      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
+         setTab(id);if(id==='audit')setAudit((await req<{events:Audit[]}>('/audit')).events);
+         if(id==='customers')setCustomers((await req<{customers:Customer[]}>('/customers')).customers);
+         if(id==='connections')setConnections((await req<{connections:typeof connections}>('/connections')).connections);
+         if(id==='devices')setDevices((await req<{devices:Device[]}>('/devices')).devices);
+         if(id==='inbox')setInbox((await req<{events:Inbox[]}>('/inbox')).events);
+       })}>{label}</button>)}</nav>
++      {tab==='google-data' && isOwner && <GoogleData client={client} tenant={tenant} agents={agents} frozen={frozen}/>}
+       {tab==='oauth' && isOwner && <OAuthConnections client={client} tenant={tenant} frozen={frozen}/>}
+       {tab==='budget' && <BudgetPanel client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}/>}
+       {tab==='knowledge' && <KnowledgePanel client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}/>}
+--- v0.3.7/apps/ui/components/GoogleData.tsx
++++ v0.3.8/apps/ui/components/GoogleData.tsx
+@@ -0,0 +1,60 @@
++'use client';
++import {useEffect,useRef,useState} from 'react';
++import {type SessionClient} from '../lib/session-client.mjs';
++import {syncRequest,googlePath,type SyncKind} from '../lib/google-data-client.mjs';
++type Agent={id:string;name:string};
++type SyncResult={revision:number;changed_records:number;phase:string;caught_up:boolean};
++type Records={records:unknown[];next_after:string|null};
++export default function GoogleData({client,tenant,agents,frozen}:{client:SessionClient;tenant:string;agents:Agent[];frozen:boolean}){
++  const [connection,setConnection]=useState('google');const [agent,setAgent]=useState(agents[0]?.id||'');
++  const [kind,setKind]=useState<SyncKind>('gmail');const [calendar,setCalendar]=useState('primary');
++  const [step,setStep]=useState('');const [confirm,setConfirm]=useState(false);const [busy,setBusy]=useState(false);
++  const [message,setMessage]=useState('');const [rows,setRows]=useState<unknown[]>([]);const [after,setAfter]=useState<string|null>(null);
++  const mounted=useRef(true);const generation=useRef(0);
++  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
++  useEffect(()=>{generation.current++;setRows([]);setAfter(null);setMessage('');setConfirm(false);},[tenant,connection,agent,kind,calendar]);
++  async function action(name:'page'|'records'|'reset'|'reconcile',next=false){
++    if(busy||frozen)return;
++    const current=generation.current;setBusy(true);setMessage('');
++    const valid=()=>mounted.current&&current===generation.current;
++    try{
++      const body=syncRequest(connection,agent,kind,kind==='calendar'?calendar:'');
++      if(name==='reconcile'){
++        if(!/^[A-Za-z0-9_.-]{1,128}$/.test(step))throw new Error('Step ID yaroqsiz');
++        const r=await client.request<{status:string}>(`/platform/${encodeURIComponent(tenant)}/google/steps/${encodeURIComponent(step)}/reconcile`,{});
++        if(valid())setMessage(`Tekshiruv: ${r.status}. Providerga qayta yozish yuborilmadi.`);
++      }else if(name==='records'){
++        const r=await client.request<Records>(googlePath(tenant,connection,name),{...body,limit:50,after:next?(after||''):''});
++        if(valid()){setRows(r.records);setAfter(r.next_after);}
++      }else if(name==='reset'){
++        if(!confirm)throw new Error('Lokal sync resetini tasdiqlang');
++        await client.request(googlePath(tenant,connection,name),{...body,confirm_reset:true});
++        if(valid()){setRows([]);setAfter(null);setConfirm(false);setMessage('Lokal nusxa tozalandi. Google ma’lumotlari o‘chirilmadi.');}
++      }else{
++        const r=await client.request<SyncResult>(googlePath(tenant,connection,name),body);
++        if(valid())setMessage(`Revision ${r.revision}; ${r.changed_records} yozuv; ${r.phase}; ${r.caught_up?'joriy o‘zgarishlar olindi':'keyingi sahifa mavjud'}.`);
++      }
++    }catch{if(valid())setMessage('Amal tasdiqlanmadi. Ruxsat, scope, konfiguratsiya yoki cursor holatini tekshiring. Yozish avtomatik takrorlanmaydi.');}
++    finally{if(mounted.current)setBusy(false);}
++  }
++  return <section><h2>Google ma’lumotlari va reconciliation</h2>
++    <p>Owner uchun metadata sync. Xat matni, fayl kontenti va attachment olinmaydi. Lokal tekshiruvlar live Google acceptance o‘rnini bosmaydi.</p>
++    <fieldset disabled={busy||frozen}><legend>Sync manbasi</legend>
++      <label>Ulanish ID <input value={connection} onChange={e=>setConnection(e.target.value)}/></label>{' '}
++      <label>Agent <select value={agent} onChange={e=>setAgent(e.target.value)}>{agents.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>{' '}
++      <label>Tur <select value={kind} onChange={e=>setKind(e.target.value as SyncKind)}><option value="gmail">Gmail</option><option value="drive">Drive</option><option value="calendar">Calendar</option></select></label>
++      {kind==='calendar'&&<label>Calendar ID <input value={calendar} onChange={e=>setCalendar(e.target.value)}/></label>}
++      <p><button onClick={()=>void action('page')}>Bitta sync sahifasini bajarish</button>{' '}<button onClick={()=>void action('records')}>Lokal metadata</button>{' '}
++      <button disabled={!after} onClick={()=>void action('records',true)}>Keyingi yozuvlar</button></p>
++      <label><input type="checkbox" checked={confirm} onChange={e=>setConfirm(e.target.checked)}/> Lokal nusxa va cursor tozalanishini tasdiqlayman</label>{' '}
++      <button disabled={!confirm} onClick={()=>void action('reset')}>Lokal sync reset</button>
++    </fieldset>
++    <fieldset disabled={busy||frozen}><legend>Noaniq Google write</legend>
++      <label>Step ID <input value={step} onChange={e=>setStep(e.target.value)}/></label>{' '}
++      <button disabled={!step} onClick={()=>void action('reconcile')}>Provider dalilini tekshirish</button>
++      <p>Gmail uchun gmail.readonly ham talab etiladi. Natija topilmasa uncertain saqlanadi; xat yoki tadbir qayta yaratilmaydi.</p>
++    </fieldset>
++    {message&&<p role="status">{message}</p>}
++    {rows.length>0&&<pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(rows,null,2)}</pre>}
++  </section>;
++}
+--- v0.3.7/apps/ui/lib/google-data-client.d.mts
++++ v0.3.8/apps/ui/lib/google-data-client.d.mts
+@@ -0,0 +1,3 @@
++export type SyncKind='gmail'|'drive'|'calendar';
++export function syncRequest(connection:string,agent:string,kind:SyncKind,calendar?:string):{agent:string;kind:SyncKind;calendar:string};
++export function googlePath(tenant:string,connection:string,action:'page'|'records'|'reset'):string;
+--- v0.3.7/apps/ui/lib/google-data-client.mjs
++++ v0.3.8/apps/ui/lib/google-data-client.mjs
+@@ -0,0 +1,13 @@
++const identifier=value=>typeof value==='string'&&value.length>=1&&value.length<=128&&!/[^A-Za-z0-9_.-]/.test(value);
++export function syncRequest(connection,agent,kind,calendar='') {
++  if(!identifier(connection)||!identifier(agent))throw new Error('Ulanish va agent ID kerak');
++  if(!['gmail','drive','calendar'].includes(kind))throw new Error('Noto‘g‘ri sync turi');
++  if(typeof calendar!=='string'||calendar.length>256||/[\x00-\x1f\x7f]/.test(calendar))throw new Error('Calendar ID yaroqsiz');
++  if(kind==='calendar'&&!calendar)throw new Error('Calendar ID kerak');
++  if(kind!=='calendar'&&calendar)throw new Error('Bu turda Calendar ID mumkin emas');
++  return {agent,kind,calendar};
++}
++export function googlePath(tenant,connection,action) {
++  if(!identifier(tenant)||!identifier(connection)||!['page','records','reset'].includes(action))throw new Error('Noto‘g‘ri endpoint');
++  return `/platform/${encodeURIComponent(tenant)}/google/${encodeURIComponent(connection)}/sync/${action}`;
++}
+--- v0.3.7/apps/ui/lib/google-data-client.test.mjs
++++ v0.3.8/apps/ui/lib/google-data-client.test.mjs
+@@ -0,0 +1,19 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {syncRequest,googlePath} from './google-data-client.mjs';
++test('Gmail metadata payload',()=>assert.deepEqual(syncRequest('mail','ops.assistant','gmail'),{agent:'ops.assistant',kind:'gmail',calendar:''}));
++test('Calendar ID stays data',()=>assert.equal(syncRequest('mail','ops','calendar','team@example.invalid').calendar,'team@example.invalid'));
++test('Calendar needs ID',()=>assert.throws(()=>syncRequest('mail','ops','calendar')));
++test('Non calendar rejects ID',()=>assert.throws(()=>syncRequest('mail','ops','drive','primary')));
++test('Reject unknown provider',()=>assert.throws(()=>syncRequest('mail','ops','custom')));
++test('Reject connection URL',()=>assert.throws(()=>syncRequest('https://evil.invalid','ops','gmail')));
++test('Reject agent path traversal',()=>assert.throws(()=>syncRequest('mail','../ops','gmail')));
++test('Reject calendar control chars',()=>assert.throws(()=>syncRequest('mail','ops','calendar','x\nY')));
++test('Reject oversized calendar',()=>assert.throws(()=>syncRequest('mail','ops','calendar','x'.repeat(257))));
++test('Pinned app route',()=>assert.equal(googlePath('tenant','google','page'),'/platform/tenant/google/google/sync/page'));
++test('Reject caller endpoint',()=>assert.throws(()=>googlePath('tenant','google','../../send')));
++test('Reject bad tenant',()=>assert.throws(()=>googlePath('../t','google','page')));
++test('Reject non-string identities',()=>{for(const value of [undefined,null,22,{},['mail']])assert.throws(()=>syncRequest(value,'ops','gmail'));});
++test('Reject trailing newline identity',()=>assert.throws(()=>syncRequest('mail\n','ops','gmail')));
++test('Reject non-string tenant',()=>assert.throws(()=>googlePath(undefined,'google','page')));
++test('Reject missing agent',()=>assert.throws(()=>syncRequest('mail',undefined,'gmail')));
+--- v0.3.7/apps/ui/package-lock.json
++++ v0.3.8/apps/ui/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "agent-platform-ui",
+-  "version": "0.3.7",
++  "version": "0.3.8",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "agent-platform-ui",
+-      "version": "0.3.7",
++      "version": "0.3.8",
+       "dependencies": {
+         "next": "14.2.5",
+         "react": "18.3.1",
+--- v0.3.7/apps/ui/package.json
++++ v0.3.8/apps/ui/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "agent-platform-ui",
+   "private": true,
+-  "version": "0.3.7",
++  "version": "0.3.8",
+   "scripts": {
+     "dev": "next dev",
+     "build": "next build",
+--- v0.3.7/scripts/verify_offline.py
++++ v0.3.8/scripts/verify_offline.py
+@@ -83,9 +83,10 @@
+                 ('node_runner', [node, '--test', 'apps/runner/test.js'], root),
+                 ('browser_session_client', [node, '--test', 'apps/ui/lib/session-client.test.mjs'], root),
+                 ('browser_oauth_client', [node, '--test', 'apps/ui/lib/oauth-client.test.mjs'], root),
++                ('browser_google_data_client', [node, '--test', 'apps/ui/lib/google-data-client.test.mjs'], root),
+             ]
+         else:
+-            for name in ['node_runner', 'browser_session_client', 'browser_oauth_client']:
++            for name in ['node_runner', 'browser_session_client', 'browser_oauth_client', 'browser_google_data_client']:
+                 results.append({'name': name, 'status': 'BLOCKED', 'reason': 'Node unavailable'})
+         bun = shutil.which('bun')
+         if bun:
+@@ -150,7 +151,7 @@
+     summary = run(root, output.resolve())
+     print('Evidence:', output)
+     print('Production: NO-GO. Read summary.json for blocked and unperformed checks.')
+-    required = {'python_runtime', 'release_tools', 'manifest_tools', 'sqlite_demo', 'managed_database_demo', 'node_runner', 'browser_session_client', 'python_syntax'}
++    required = {'python_runtime', 'release_tools', 'manifest_tools', 'sqlite_demo', 'managed_database_demo', 'node_runner', 'browser_session_client', 'browser_oauth_client', 'browser_google_data_client', 'python_syntax'}
+     failed = any(row['status'] == 'FAIL' or (row['name'] in required and row['status'] != 'PASS')
+                  for row in summary['results'])
+     return 1 if failed else 0

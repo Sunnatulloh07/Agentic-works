@@ -1,0 +1,52 @@
+{
+  "demo-retail": {
+    "llm": {
+      "base_url": "https://api.openai.com/v1",
+      "model": "SET_YOUR_AVAILABLE_MODEL_ID",
+      "key_env": "PLATFORM_LLM_KEY",
+      "agent_loop_enabled": false
+    },
+    "telegram": {
+      "token_env": "DEMO_TELEGRAM_TOKEN"
+    },
+    "instagram": {
+      "account_id": "SET_INSTAGRAM_ACCOUNT_ID",
+      "graph_version": "SET_CURRENT_GRAPH_VERSION",
+      "token_env": "DEMO_INSTAGRAM_TOKEN"
+    },
+    "sheets": {
+      "spreadsheet_id": "SET_SPREADSHEET_ID",
+      "range": "Sheet1!A:D",
+      "token_env": "DEMO_GOOGLE_ACCESS_TOKEN"
+    },
+    "mcp": {
+      "url": "https://your-trusted-mcp-server.example/mcp",
+      "token_env": "DEMO_MCP_TOKEN",
+      "allowed_tools": [
+        "crm.lookup"
+      ],
+      "tool_schemas": {
+        "crm.lookup": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "connections": {},
+    "speech": {
+      "aisha": {
+        "key_env": "DEMO_AISHA_API_KEY"
+      }
+    }
+  }
+}

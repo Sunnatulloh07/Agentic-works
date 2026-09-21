@@ -1,0 +1,34 @@
+{
+  "_comment": "Supervisor routing mapping (P10b). A manager asks one question in their own words; this file declares which section agent answers which kind of question. Copy the section list into config/integrations.json as the 'supervisor' block under the tenant key, then declare the same sections through PUT /{tenant}/supervisor/{section} so the change is audited and owner-only. This file is the readable copy of that mapping, not a secret store.",
+  "_note_authority": "The target agent runs with ITS OWN policy. The supervisor's authority is never inherited: a supervisor that cannot read the CRM cannot reach the CRM by routing to an agent that can. Authority flows to the executor, not to the asker.",
+  "_note_chain": "Chains are bounded. max_hops defaults to 1 (a single delegation) and is counted from the ledger, so it survives a restart. Routing to an agent that is itself a router is refused by default, which is what stops supervisor -> supervisor -> ...",
+  "_note_keywords": "Keywords are matched literally and case-folded, longest first, then declaration order. They are deliberately not regular expressions: an operator writes a word, and a typo cannot silently widen a match. A question that matches no section is REFUSED by name rather than sent to a default agent, because the wrong agent answering a payroll question is worse than no answer.",
+  "_note_limits": "A section whose agent has lost its policy is skipped rather than offered, so routing can never create a run the target itself could not authorise.",
+  "demo-retail": {
+    "supervisor": {
+      "sections": [
+        {
+          "section": "sales",
+          "agent": "sales.360",
+          "title": "Sotuv",
+          "keywords": ["mijoz", "lid", "sotuv", "bitrix", "kelishuv"],
+          "enabled": true
+        },
+        {
+          "section": "logistics",
+          "agent": "ops.logistics",
+          "title": "Logistika",
+          "keywords": ["yetkazib berish", "yuk", "ombor", "smena"],
+          "enabled": true
+        },
+        {
+          "section": "finance",
+          "agent": "fin.ledger",
+          "title": "Moliya",
+          "keywords": ["qarz", "hisob-faktura", "to'lov", "marja"],
+          "enabled": true
+        }
+      ]
+    }
+  }
+}

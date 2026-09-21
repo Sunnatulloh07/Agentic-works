@@ -1,0 +1,87 @@
+{
+  "version": "0.3.0-hardening-preview",
+  "date": "2026-09-14",
+  "scope": "local-only; no production acceptance",
+  "gates": {
+    "python_runtime": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/python-runtime.log"
+    },
+    "node_runner": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/node-runner.log"
+    },
+    "browser_session_client": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/browser-session.log"
+    },
+    "release_tools": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/release-tools.log"
+    },
+    "python_syntax": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/python-syntax.log"
+    },
+    "ui_syntax_only": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/ui-syntax-only.log"
+    },
+    "session_declaration_types": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/session-declaration-types.log"
+    },
+    "offline_demo": {
+      "status": "PASS",
+      "evidence": "docs/verification/v03/offline-demo.log"
+    },
+    "http_integration": {
+      "status": "BLOCKED_MISSING_DEPENDENCIES",
+      "evidence": null
+    },
+    "ui_typecheck": {
+      "status": "BLOCKED_MISSING_DEPENDENCIES",
+      "evidence": null
+    },
+    "ui_production_build": {
+      "status": "BLOCKED_MISSING_DEPENDENCIES",
+      "evidence": null
+    },
+    "dependency_security_review": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "postgres_live_two_tenant": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "crm_oauth_sync_write_reconcile": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "mcp_live": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "oidc_mfa": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "secret_vault": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "load_fault_injection": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "encrypted_offsite_restore": {
+      "status": "NOT_RUN",
+      "evidence": null
+    },
+    "staging_pilot": {
+      "status": "NOT_RUN",
+      "evidence": null
+    }
+  }
+}

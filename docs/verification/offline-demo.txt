@@ -1,0 +1,4 @@
+Before approval: waiting_approval
+After approval: succeeded
+Persisted records: 1
+Replay reuses same task: True

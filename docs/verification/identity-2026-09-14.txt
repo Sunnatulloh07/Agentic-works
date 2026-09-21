@@ -1,0 +1,21 @@
+Identity/workspace phase verification, 2026-09-14
+
+Scope:
+- local users with scrypt password hashes
+- workspace and membership directory
+- one-time expiring invite tokens
+- last-owner protection and membership revoke
+- opaque refresh-token hashing and rotation/reuse rejection
+- optional IDENTITY_DIRECTORY membership enforcement in platform routes
+
+Evidence:
+- Python runtime unittest: 125 passed, 0 failed
+- Python compileall: passed
+- static review: no raw password or refresh token persistence, SQL calls parameterized
+
+Not run in Computer:
+- FastAPI HTTP tests, because FastAPI/Pydantic dependencies are not installed
+- OIDC/JWKS/MFA provider integration
+- production KMS, email delivery, TLS and deployment
+
+Release status: FOUNDATION / IMPLEMENTED_LOCAL, not production-ready.

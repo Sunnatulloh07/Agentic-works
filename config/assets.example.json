@@ -1,0 +1,14 @@
+{
+  "_comment": "Asset model (P11). The asset register already lives in operator-owned Google Sheets, so this block adds no adapter and no new transport: it declares only the SHAPE of the hierarchy and which graph entity backs it. Copy the 'assets' block below into config/integrations.json, merged under the tenant key next to 'sheets_registers' and 'business_graph', and replace SET_... values. Three keys are accepted and nothing else: an unknown key is refused rather than ignored.",
+  "_note_levels": "levels is the hierarchy from the root down, and it is the whole contract. A path must have exactly this many segments, and each segment is matched to one level name. Names are labels for people, not a vocabulary the code matches on. 'zavod / sex / liniya / stanok' means every asset id in the register must look like 'zavod-1/sex-2/liniya-3/stanok-7'. A path of the wrong depth is refused rather than reinterpreted, because two assets sharing an identity would silently merge their history.",
+  "_note_entity": "entity names the business_graph entity that holds the assets. It must already be declared under business_graph.entities, and it must have 'id' as its identity, because the path IS the id. The source behind it must be a read tool (sheets.rows, sheets.read, connectors.read, database.read) — the platform reads the asset model, it never writes it.",
+  "_note_measurements": "measurements is a declared, validated vocabulary that later blocks bind to (cycle_time, idle_time, and so on). P11 does not read them yet; declaring them here means a typo in a measurement name is caught where it is written, not when a report silently comes back empty.",
+  "_note_prefix": "An intern node (a plant, a shop, a line) has no identity of its own — nothing observes it — but it is a valid filter. asset.children and asset.descendants accept a path of any depth up to the full depth, and subtree bounding in asset.tree works the same way. Matching is by segment, never by string prefix, so 'zavod-1' is never an ancestor of 'zavod-10'.",
+  "demo-plant": {
+    "assets": {
+      "entity": "asset",
+      "levels": ["zavod", "sex", "liniya", "stanok"],
+      "measurements": ["cycle_time", "idle_time", "output_count"]
+    }
+  }
+}

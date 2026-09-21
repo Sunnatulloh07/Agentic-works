@@ -1,0 +1,974 @@
+--- a/.github/workflows/verify.yml
++++ b/.github/workflows/verify.yml
+@@ -41,3 +41,12 @@
+           node-version: '22'
+       - run: npm ci && npm run typecheck && npm run build
+         working-directory: apps/ui
++  ui_dependency_security:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: '22'
++      - run: npm ci --ignore-scripts && npm audit --audit-level=high
++        working-directory: apps/ui
+--- a/api-python/app/platform_api.py
++++ b/api-python/app/platform_api.py
+@@ -80,7 +80,7 @@
+     e=engine()
+     pack_agents=agents(tenant)
+     assigned={name for agent in pack_agents for name in agent['tools']}
+-    return {'agents':pack_agents,'tools':e.registry.describe(assigned),'version':'0.3.2-agent-loop-source-preview'}
++    return {'agents':pack_agents,'tools':e.registry.describe(assigned),'version':'0.3.3-connector-authority-preview'}
+ 
+ 
+ @router.post('/{tenant}/tasks')
+@@ -334,43 +334,19 @@
+     except (ValueError,LookupError) as exc:raise HTTPException(422,str(exc))
+ 
+ 
++class ConnectionVerifyRequest(StrictRequest):
++    agent:str | None=Field(default=None,min_length=1,max_length=128)
++
++
+ @router.post('/{tenant}/connections/{connection_id}/verify')
+-def verify_connection(tenant:str,connection_id:str,request:Request):
+-    identity(request,tenant,('owner','integrator'))
+-    e=engine()
+-    with e.read() as c:call(e.require_active,c,tenant)
+-    from platform_runtime.connector_contract import descriptor, public_descriptor, SUPPORTED_LOCAL_DRIVERS
+-    from platform_runtime.connectors import config
++def verify_connection(tenant:str,connection_id:str,request:Request,req:ConnectionVerifyRequest | None=None):
++    who=identity(request,tenant,('owner','integrator'))
++    from platform_runtime.connectors import probe_read_connection
+     try:
+-        raw=config(tenant).get('connections',{}).get(connection_id)
+-        if not isinstance(raw,dict):raise HTTPException(404,'Connection not found')
+-        d=descriptor(connection_id,raw,live_drivers=SUPPORTED_LOCAL_DRIVERS)
+-        if d.status in {'unsupported_driver','adapter_required','disabled'}:
+-            raise HTTPException(422,'Connector adapter is not available')
+-        if raw['driver']=='sqlite_readonly':
+-            from platform_runtime.connectors import connection
+-            connection(tenant,connection_id)
+-        else:
+-            from platform_runtime.postgres_connector import validate_config
+-            validate_config(raw)
+-        tables=raw.get('tables',{})
+-        if not isinstance(tables,dict):raise ValueError('Invalid table mapping')
+-        table=next(iter(tables),None)
+-        columns=tables.get(table,[])[:1] if isinstance(tables,dict) and table else []
+-        if not table or not columns:
+-            raise ValueError('Connector table allowlist missing')
+-        sample={'connection':connection_id,'table':table,'columns':columns,'limit':1}
+-        if raw.get('driver')=='sqlite_readonly':
+-            from platform_runtime.connectors import read_rows
+-            read_rows(tenant,sample,engine().path)
+-        elif raw.get('driver')=='postgres_readonly':
+-            from platform_runtime.connectors import read_postgres_rows
+-            read_postgres_rows(tenant,sample)
+-        else:
+-            raise HTTPException(422,'Connector adapter is not available')
+-        return {'ok':True,'connection':{**public_descriptor(d),'status':'probe_succeeded'},'verified_at':time.time(),'scope':'single_table_read_probe','persisted':False}
++        return probe_read_connection(engine(),tenant,connection_id,actor=who['sub'],
++                                     agent=req.agent if req else None)
+     except HTTPException:raise
+-    except Forbidden:raise HTTPException(403,'Connector permission denied')
++    except (Forbidden, AuthenticationError):raise HTTPException(403,'Connector permission denied')
+     except RuntimeError:raise HTTPException(503,'Connector dependency or provider unavailable')
+     except (ValueError,LookupError,OSError) as exc:raise HTTPException(422,'Connector configuration invalid') from exc
+ 
+--- /dev/null
++++ b/api-python/integration_tests/test_connector_authority_http.py
+@@ -0,0 +1,71 @@
++"""Dependency-backed connector HTTP regressions. NOT RUN in the offline Computer."""
++import json
++import sqlite3
++import pytest
++from app import platform_api
++from app.storage import tx
++from test_control_plane_hardening_http import control_client
++
++
++@pytest.fixture
++def connector(control_client, tmp_path, monkeypatch):
++    root = tmp_path / 'exports'
++    root.mkdir()
++    path = root / 'customer.db'
++    db = sqlite3.connect(path)
++    try:
++        db.executescript("CREATE TABLE contacts(id INTEGER, name TEXT); INSERT INTO contacts VALUES(1,'private-customer');")
++        db.commit()
++    finally:
++        db.close()
++    raw = {'driver': 'sqlite_readonly', 'path': str(path), 'tables': {'contacts': ['id', 'name']},
++           'agent_ids': ['ops.assistant']}
++    monkeypatch.setenv('PLATFORM_DB_ROOTS', json.dumps([str(root)]))
++    monkeypatch.setattr('platform_runtime.connectors.config', lambda tenant: {'connections': {'crm': raw}})
++    monkeypatch.setattr(platform_api, 'policy', lambda tenant, agent: {
++        'tools': ['connectors.read'], 'allowed_connections': ['crm'], 'ladder': 'autonomous'})
++    return raw
++
++
++def test_probe_with_scoped_agent_returns_only_receipt(control_client, connector):
++    client, headers, _ = control_client
++    response = client.post('/platform/demo-retail/connections/crm/verify', headers=headers,
++                           json={'agent': 'ops.assistant'})
++    assert response.status_code == 200
++    assert response.json()['connection']['status'] == 'probe_succeeded'
++    assert response.json()['persisted'] is False
++    assert 'private-customer' not in response.text and connector['path'] not in response.text
++
++
++@pytest.mark.parametrize('body', [{}, {'agent': 'other'}])
++def test_probe_scoped_connection_requires_matching_agent(control_client, connector, body):
++    client, headers, _ = control_client
++    response = client.post('/platform/demo-retail/connections/crm/verify', headers=headers, json=body)
++    assert response.status_code == 403
++
++
++@pytest.mark.parametrize('body', [{'agent': True}, {'agent': 1}, {'agent': ''},
++                                  {'agent': 'ops.assistant', 'role': 'owner'}])
++def test_probe_strict_body(control_client, connector, body):
++    client, headers, _ = control_client
++    assert client.post('/platform/demo-retail/connections/crm/verify', headers=headers, json=body).status_code == 422
++
++
++def test_revoked_connector_is_not_probed(control_client, connector):
++    connector['lifecycle'] = 'revoked'
++    client, headers, _ = control_client
++    assert client.post('/platform/demo-retail/connections/crm/verify', headers=headers,
++                       json={'agent': 'ops.assistant'}).status_code == 403
++
++
++def test_probe_rechecks_actor_after_http_auth(control_client, connector, monkeypatch):
++    client, headers, owner = control_client
++    original = platform_api.identity
++    def demote(*args, **kwargs):
++        claims = original(*args, **kwargs)
++        with tx() as c:
++            c.execute("UPDATE p_memberships SET role='viewer' WHERE user_id=?", (owner,))
++        return claims
++    monkeypatch.setattr(platform_api, 'identity', demote)
++    assert client.post('/platform/demo-retail/connections/crm/verify', headers=headers,
++                       json={'agent': 'ops.assistant'}).status_code == 403
+--- /dev/null
++++ b/api-python/platform_runtime/connector_authority.py
+@@ -0,0 +1,26 @@
++"""Fail-closed read authority shared by metadata-independent DB entry points.
++
++An empty connection agent_ids list adds no restriction to the required pack
++allowlist. A nonempty list requires an explicit matching runtime agent. Provider
++OAuth scopes remain metadata until a provider adapter enforces its own contract.
++"""
++from .connector_contract import descriptor, SUPPORTED_LOCAL_DRIVERS
++from .engine import Forbidden
++
++
++READ_LIFECYCLES = frozenset({'configured', 'healthy', 'degraded'})
++
++
++def require_read_access(raw, *, agent=None):
++    if not isinstance(raw, dict) or raw.get('enabled', True) is False:
++        raise Forbidden('Connection unavailable')
++    info = descriptor('connection', raw, live_drivers=SUPPORTED_LOCAL_DRIVERS)
++    if info.lifecycle not in READ_LIFECYCLES:
++        raise Forbidden('Connection lifecycle does not permit execution')
++    if info.driver not in SUPPORTED_LOCAL_DRIVERS:
++        raise Forbidden('Read adapter unavailable')
++    if 'read' not in info.capabilities:
++        raise Forbidden('Connection does not permit read')
++    if info.agent_ids and (not isinstance(agent, str) or agent not in info.agent_ids):
++        raise Forbidden('Connection not allowed for this agent')
++    return info
+--- a/api-python/platform_runtime/connector_contract.py
++++ b/api-python/platform_runtime/connector_contract.py
+@@ -39,37 +39,48 @@
+ 
+ 
+ def _string(value: Any, name: str, maximum: int = 128) -> str:
+-    if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum:
++    if (not isinstance(value, str) or value != value.strip()
++            or not 1 <= len(value) <= maximum or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+         raise ValueError(f"{name} invalid")
+-    return value.strip()
++    return value
++
++
++def _strings(value: Any, name: str, maximum: int = 100) -> list[str]:
++    if not isinstance(value, list) or len(value) > maximum:
++        raise ValueError(f"{name} must be a bounded list")
++    checked = [_string(item, name) for item in value]
++    if len(set(checked)) != len(checked):
++        raise ValueError(f"{name} must not contain duplicates")
++    return checked
+ 
+ 
+ def descriptor(connection_id: str, raw: dict, *, live_drivers: set[str] | None = None) -> ConnectorDescriptor:
+     connection_id = _string(connection_id, "connection_id", 128)
+     if not isinstance(raw, dict):
+         raise ValueError("connection config must be object")
++    if type(raw.get('enabled', True)) is not bool:
++        raise ValueError('enabled must be a boolean')
+     driver = _string(raw.get("driver", ""), "driver", 64)
+     contract = raw.get("contract_version", CONTRACT_VERSION)
+     if contract != CONTRACT_VERSION:
+         raise ValueError("unsupported connector contract version")
+     lifecycle = raw.get("lifecycle", "configured")
+-    if lifecycle not in LIFECYCLES:
++    if not isinstance(lifecycle, str) or lifecycle not in LIFECYCLES:
+         raise ValueError("invalid connector lifecycle")
+-    caps = raw.get("capabilities", ["discover", "validate", "read"])
+-    if not isinstance(caps, list) or not caps or any(c not in CAPABILITIES for c in caps):
++    caps = _strings(raw.get("capabilities", ["discover", "validate", "read"]),
++                    'connector capabilities', len(CAPABILITIES))
++    if not caps or any(c not in CAPABILITIES for c in caps):
+         raise ValueError("invalid connector capabilities")
+-    scopes = raw.get("scopes", [])
+-    agents = raw.get("agent_ids", [])
+-    if not isinstance(scopes, list) or any(not isinstance(x, str) or len(x) > 128 for x in scopes):
+-        raise ValueError("invalid connector scopes")
+-    if not isinstance(agents, list) or any(not isinstance(x, str) or len(x) > 128 for x in agents):
+-        raise ValueError("invalid connector agent scope")
++    scopes = _strings(raw.get("scopes", []), 'connector scopes')
++    agents = _strings(raw.get("agent_ids", []), 'connector agent scope')
+     live = live_drivers or set()
++    if driver in live and set(caps) - {'discover', 'validate', 'read'}:
++        raise ValueError('Read-only adapter cannot advertise write capability')
+     if not raw.get("enabled", True):
+         status = "disabled"
++    elif lifecycle == 'revoked':
++        status = 'revoked'
+     elif driver in live:
+-        if set(caps) - {'discover','validate','read'}:
+-            raise ValueError('Read-only adapter cannot advertise write capability')
+         # Config declarations are not evidence of live health.
+         status = "configured_not_live_verified"
+     elif driver in DECLARATIVE_DRIVERS:
+--- a/api-python/platform_runtime/connectors.py
++++ b/api-python/platform_runtime/connectors.py
+@@ -12,6 +12,7 @@
+ from .engine import encode, Forbidden
+ from .tools import config
+ from .connector_contract import descriptor, public_descriptor, SUPPORTED_LOCAL_DRIVERS
++from .connector_authority import require_read_access
+ 
+ IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
+ 
+@@ -22,9 +23,26 @@
+     return '"' + value + '"'
+ 
+ 
+-def connection(tenant, name):
+-    item = config(tenant).get('connections', {}).get(name)
+-    if not isinstance(item, dict) or item.get('enabled', True) is not True:
++def authorize_read_connection(tenant, name, *, agent=None):
++    if not isinstance(name, str) or not 1 <= len(name) <= 128:
++        raise ValueError('Invalid connection')
++    try:
++        tenant_config = config(tenant)
++    except (OSError, ValueError, RuntimeError):
++        raise Forbidden('Connection configuration unavailable') from None
++    if not isinstance(tenant_config, dict):
++        raise Forbidden('Connection configuration unavailable')
++    entries = tenant_config.get('connections', {})
++    if not isinstance(entries, dict):
++        raise ValueError('Invalid connection catalog')
++    item = entries.get(name)
++    require_read_access(item, agent=agent)
++    return item
++
++
++def connection(tenant, name, *, agent=None):
++    item = authorize_read_connection(tenant, name, agent=agent)
++    if item.get('enabled', True) is not True:
+         raise Forbidden('Connection unavailable')
+     if item.get('driver') != 'sqlite_readonly':
+         raise ValueError('Connector driver is not implemented')
+@@ -72,15 +90,16 @@
+     resolved = Path(raw).resolve(strict=True)
+     if not resolved.is_file() or not any(resolved.is_relative_to(Path(r).resolve(strict=True)) for r in roots):
+         raise Forbidden('Database outside approved mounts')
+-    if internal_path and resolved == Path(internal_path).resolve():
++    if internal_path and (resolved == Path(internal_path).resolve()
++                          or (Path(internal_path).exists() and resolved.samefile(internal_path))):
+         raise Forbidden('Platform database cannot be a customer connection')
+     return resolved
+ 
+ 
+-def read_rows(tenant, request, internal_path=None):
++def read_rows(tenant, request, internal_path=None, *, agent=None):
+     if not isinstance(request, dict) or set(request) - {'connection', 'table', 'columns', 'limit', 'where'}:
+         raise ValueError('Invalid query fields')
+-    item = connection(tenant, request.get('connection'))
++    item = connection(tenant, request.get('connection'), agent=agent)
+     table = request.get('table')
+     approved = item['tables'].get(table)
+     columns = request.get('columns')
+@@ -146,12 +165,14 @@
+ 
+ def tool_read(engine, tenant, agent, args, step):
+     # Repeat agent scope at dispatch, including for direct internal invocations.
++    if not isinstance(args, dict) or not isinstance(args.get('connection'), str):
++        raise ValueError('Invalid connection request')
+     if args['connection'] not in engine.policy(tenant, agent).get('allowed_connections', []):
+         raise Forbidden('Connection not allowed for this agent')
+-    raw = config(tenant).get('connections', {}).get(args['connection'], {})
++    raw = authorize_read_connection(tenant, args['connection'], agent=agent)
+     if raw.get('driver') == 'postgres_readonly':
+-        return read_postgres_rows(tenant, args)
+-    return read_rows(tenant, args, engine.path)
++        return read_postgres_rows(tenant, args, agent=agent)
++    return read_rows(tenant, args, engine.path, agent=agent)
+ 
+ 
+ def _postgres_config(item):
+@@ -159,8 +180,53 @@
+     return validate_config(item)
+ 
+ 
+-def read_postgres_rows(tenant, request):
++def read_postgres_rows(tenant, request, *, agent=None):
+     from .postgres_connector import read
+     if not isinstance(request,dict) or not isinstance(request.get('connection'),str):raise ValueError('Invalid connection')
+-    raw=config(tenant).get('connections',{}).get(request['connection'])
+-    return read(tenant,raw,request)
++    raw=authorize_read_connection(tenant,request['connection'],agent=agent)
++    return read(tenant,raw,request,agent=agent)
++
++
++def probe_read_connection(engine, tenant, name, *, actor, agent=None):
++    """Owner/integrator-only single-table probe; never return sampled customer data.
++
++    Scoped connections require a matching explicitly selected agent and its pack
++    permission. This is a read probe, not a persisted lifecycle/health transition.
++    Caller must also validate its session, as the engine only knows actor authority.
++    """
++    if not isinstance(actor, str) or not actor:
++        raise Forbidden('Probe actor required')
++    if agent is not None and (not isinstance(agent, str) or not 1 <= len(agent) <= 128):
++        raise ValueError('Invalid probe agent')
++
++    def authorized():
++        with engine.read() as c:
++            engine.require_authority(c, tenant, 'web', actor, ('owner', 'integrator'))
++            engine.require_active(c, tenant)
++        raw = authorize_read_connection(tenant, name, agent=agent)
++        if agent is not None:
++            policy = engine.policy(tenant, agent)
++            if ('connectors.read' not in policy.get('tools', [])
++                    or name not in policy.get('allowed_connections', [])):
++                raise Forbidden('Probe agent not allowed for this connection')
++        return raw
++
++    raw = authorized()
++    tables = raw.get('tables')
++    if not isinstance(tables, dict) or not tables:
++        raise ValueError('Connector table allowlist missing')
++    table = next(iter(tables))
++    columns = tables[table]
++    if not isinstance(columns, list) or not columns:
++        raise ValueError('Connector column allowlist missing')
++    sample = {'connection': name, 'table': table, 'columns': columns[:1], 'limit': 1}
++    raw = authorized()  # Repeat actor, freeze, lifecycle and pack checks before IO.
++    if raw['driver'] == 'sqlite_readonly':
++        read_rows(tenant, sample, engine.path, agent=agent)
++    elif raw['driver'] == 'postgres_readonly':
++        read_postgres_rows(tenant, sample, agent=agent)
++    else:
++        raise Forbidden('Read adapter unavailable')
++    info = descriptor(name, raw, live_drivers=SUPPORTED_LOCAL_DRIVERS)
++    return {'ok': True, 'connection': {**public_descriptor(info), 'status': 'probe_succeeded'},
++            'verified_at': engine.clock(), 'scope': 'single_table_read_probe', 'persisted': False}
+--- a/api-python/platform_runtime/engine.py
++++ b/api-python/platform_runtime/engine.py
+@@ -183,6 +183,10 @@
+             spec.validate(args)
+             if name=='connectors.read' and args['connection'] not in policy.get('allowed_connections',[]):
+                 raise Forbidden('Connection not allowed for agent')
++            if name == 'connectors.read':
++                # Rechecked at submission and claim; handler checks again before IO.
++                from .connectors import authorize_read_connection
++                authorize_read_connection(tenant, args['connection'], agent=agent)
+             needed = (spec.risk != 'read' or policy['ladder'] == 'human_led'
+                       or name in policy.get('approval', []))
+             device = step.get('device', '')
+--- a/api-python/platform_runtime/postgres_connector.py
++++ b/api-python/platform_runtime/postgres_connector.py
+@@ -11,6 +11,7 @@
+ import os
+ import re
+ from .engine import Forbidden
++from .connector_authority import require_read_access
+ 
+ NAME=re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
+ 
+@@ -20,7 +21,8 @@
+     return '"'+value+'"'
+ 
+ 
+-def validate_config(raw):
++def validate_config(raw, *, agent=None):
++    require_read_access(raw, agent=agent)
+     if not isinstance(raw,dict) or raw.get('driver')!='postgres_readonly' or raw.get('enabled',True) is not True:
+         raise Forbidden('Connection unavailable')
+     host=raw.get('host');hosts=raw.get('allowed_hosts')
+@@ -56,8 +58,8 @@
+     return {**raw,'port':port,'schema':schema}
+ 
+ 
+-def compile_read(tenant,raw,request):
+-    item=validate_config(raw)
++def compile_read(tenant,raw,request,*,agent=None):
++    item=validate_config(raw,agent=agent)
+     if not isinstance(request,dict) or set(request)-{'connection','table','columns','limit','where'}:
+         raise ValueError('Invalid read fields')
+     table=request.get('table');columns=request.get('columns')
+@@ -94,8 +96,8 @@
+     raise ValueError('Unsupported database type')
+ 
+ 
+-def read(tenant,raw,request):
+-    item,sql,params=compile_read(tenant,raw,request)
++def read(tenant,raw,request,*,agent=None):
++    item,sql,params=compile_read(tenant,raw,request,agent=agent)
+     password=os.environ.get(item['password_env'],'')
+     if not password:raise RuntimeError('Database credential unavailable')
+     try:import psycopg
+--- a/api-python/runtime_tests/test_agent_loop.py
++++ b/api-python/runtime_tests/test_agent_loop.py
+@@ -1,4 +1,4 @@
+-"""Agent-loop regression source. No tests in this file were run by the agent."""
++"""Agent-loop regression source. Offline execution evidence is recorded in docs/verification/v033/."""
+ import concurrent.futures
+ import json
+ import multiprocessing
+--- /dev/null
++++ b/api-python/runtime_tests/test_connector_authority.py
+@@ -0,0 +1,303 @@
++"""Offline regressions: revocation, agent binding, capability and strict metadata."""
++import json
++import os
++import sqlite3
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++from platform_runtime.agent_loop import AgentLoop
++from platform_runtime.connector_contract import descriptor
++from platform_runtime.connectors import describe, read_rows, tool_read, probe_read_connection
++from platform_runtime.engine import Engine, Forbidden
++from platform_runtime.postgres_connector import compile_read
++from platform_runtime.tools import build_registry
++
++
++class ConnectorAuthorityTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.root = Path(self.tmp.name)
++        self.customer = self.root / 'customer.db'
++        db = sqlite3.connect(self.customer)
++        try:
++            db.executescript("CREATE TABLE contacts(id INTEGER, name TEXT); INSERT INTO contacts VALUES(1,'Ali');")
++            db.commit()
++        finally:
++            db.close()
++        self.raw = {'driver': 'sqlite_readonly', 'path': str(self.customer),
++                    'tables': {'contacts': ['id', 'name']}}
++        self.cfg = {'connections': {'crm': self.raw}}
++        self.req = {'connection': 'crm', 'table': 'contacts', 'columns': ['id', 'name']}
++        self.env = patch.dict(os.environ, {'PLATFORM_DB_ROOTS': json.dumps([str(self.root)])})
++        self.env.start()
++        self.config_patch = patch('platform_runtime.connectors.config',
++                                  side_effect=lambda tenant: self.cfg if tenant == 'a' else {})
++        self.config_patch.start()
++        self.e = Engine(self.root / 'platform.db', build_registry(), self.policy)
++
++    def tearDown(self):
++        self.config_patch.stop()
++        self.env.stop()
++        self.tmp.cleanup()
++
++    def policy(self, tenant, agent):
++        return {'tools': ['connectors.read'], 'allowed_connections': ['crm'], 'ladder': 'autonomous'}
++
++    def submit(self, key='1', agent='ops'):
++        return self.e.submit('a', 'web', key, agent,
++                             [{'tool': 'connectors.read', 'args': self.req}], 'owner')
++
++    def test_revoked_sqlite_denied_before_database_path(self):
++        self.raw['lifecycle'] = 'revoked'
++        with patch('platform_runtime.connectors.database_path') as path, self.assertRaises(Forbidden):
++            read_rows('a', self.req)
++        path.assert_not_called()
++
++    def test_non_executable_lifecycles_denied(self):
++        for state in ['draft', 'authorizing', 'verifying', 'revoked']:
++            self.raw['lifecycle'] = state
++            with self.subTest(state=state), self.assertRaises(Forbidden):
++                read_rows('a', self.req)
++
++    def test_executable_lifecycles_read_without_claiming_health(self):
++        for state in ['configured', 'healthy', 'degraded']:
++            self.raw['lifecycle'] = state
++            with self.subTest(state=state):
++                self.assertEqual('Ali', read_rows('a', self.req)['rows'][0]['name'])
++                self.assertEqual('configured_not_live_verified', describe('a')[0]['status'])
++
++    def test_revoked_status_is_visible_and_not_configured(self):
++        self.raw['lifecycle'] = 'revoked'
++        self.assertEqual('revoked', describe('a')[0]['status'])
++
++    def test_revoked_connection_rejected_at_submit(self):
++        self.raw['lifecycle'] = 'revoked'
++        with self.assertRaises(Forbidden):
++            self.submit()
++        self.assertEqual([], self.e.list_tasks('a'))
++
++    def test_revocation_after_queue_prevents_claim(self):
++        tid = self.submit()
++        self.raw['lifecycle'] = 'revoked'
++        with patch('platform_runtime.connectors.database_path') as path:
++            self.assertFalse(self.e.tick('a'))
++        path.assert_not_called()
++        self.assertEqual('failed', self.e.get('a', tid)['status'])
++
++    def test_revocation_after_claim_prevents_dispatch_read(self):
++        tid = self.submit()
++        original = self.e.claim
++        def claim_then_revoke(*args, **kwargs):
++            step = original(*args, **kwargs)
++            self.raw['lifecycle'] = 'revoked'
++            return step
++        with patch.object(self.e, 'claim', side_effect=claim_then_revoke), \
++             patch('platform_runtime.connectors.database_path') as path:
++            self.e.tick('a')
++        path.assert_not_called()
++        self.assertEqual('failed', self.e.get('a', tid)['status'])
++
++    def test_connection_agent_scope_rejected_at_submit(self):
++        self.raw['agent_ids'] = ['finance']
++        with self.assertRaises(Forbidden):
++            self.submit(agent='ops')
++
++    def test_connection_agent_scope_rechecked_at_dispatch(self):
++        self.raw['agent_ids'] = ['finance']
++        with patch('platform_runtime.connectors.database_path') as path, self.assertRaises(Forbidden):
++            tool_read(self.e, 'a', 'ops', self.req, 'step')
++        path.assert_not_called()
++
++    def test_matching_agent_allowed(self):
++        self.raw['agent_ids'] = ['ops']
++        tid = self.submit()
++        self.assertTrue(self.e.tick('a'))
++        self.assertEqual('succeeded', self.e.get('a', tid)['status'])
++
++    def test_agent_scope_tightened_after_queue(self):
++        self.raw['agent_ids'] = ['ops']
++        tid = self.submit()
++        self.raw['agent_ids'] = ['finance']
++        self.assertFalse(self.e.tick('a'))
++        self.assertEqual('failed', self.e.get('a', tid)['status'])
++
++    def test_nonempty_agent_scope_requires_direct_adapter_context(self):
++        self.raw['agent_ids'] = ['ops']
++        with self.assertRaises(Forbidden):
++            read_rows('a', self.req)
++
++    def test_empty_agent_scope_preserves_pack_policy(self):
++        self.raw['agent_ids'] = []
++        self.e.policy = lambda tenant, agent: {**self.policy(tenant, agent), 'allowed_connections': []}
++        with self.assertRaises(Forbidden):
++            tool_read(self.e, 'a', 'ops', self.req, 'step')
++
++    def test_capability_without_read_denied(self):
++        self.raw['capabilities'] = ['discover', 'validate']
++        with self.assertRaises(Forbidden):
++            read_rows('a', self.req)
++
++    def test_contract_version_checked_before_read(self):
++        self.raw['contract_version'] = '99'
++        with self.assertRaises(ValueError):
++            read_rows('a', self.req)
++
++    def test_write_capability_cannot_bypass_readonly_contract(self):
++        self.raw['capabilities'] = ['read', 'execute_write']
++        with self.assertRaises(ValueError):
++            read_rows('a', self.req)
++
++    def test_cross_tenant_dispatch_denied(self):
++        with self.assertRaises(Forbidden):
++            tool_read(self.e, 'b', 'ops', self.req, 'step')
++
++    def test_invalid_connection_entry_fails_closed(self):
++        for raw in [None, [], 'oops', 1]:
++            self.cfg['connections']['crm'] = raw
++            with self.subTest(raw=raw), self.assertRaises((Forbidden, ValueError)):
++                tool_read(self.e, 'a', 'ops', self.req, 'step')
++
++    def test_postgres_revocation_applies_before_compiling_sql(self):
++        raw = {'driver': 'postgres_readonly', 'host': 'db.example', 'allowed_hosts': ['db.example'],
++               'database': 'db', 'user': 'reader', 'password_env': 'TEST_ONLY_PG_PASSWORD',
++               'sslmode': 'verify-full', 'isolation': 'dedicated_database',
++               'tables': {'contacts': ['id', 'name']}, 'lifecycle': 'revoked'}
++        with self.assertRaises(Forbidden):
++            compile_read('a', raw, self.req)
++
++    def test_postgres_nonempty_agent_scope_requires_context(self):
++        raw = {'driver': 'postgres_readonly', 'host': 'db.example', 'allowed_hosts': ['db.example'],
++               'database': 'db', 'user': 'reader', 'password_env': 'TEST_ONLY_PG_PASSWORD',
++               'sslmode': 'verify-full', 'isolation': 'dedicated_database',
++               'tables': {'contacts': ['id', 'name']}, 'agent_ids': ['ops']}
++        with self.assertRaises(Forbidden):
++            compile_read('a', raw, self.req)
++
++    def test_platform_database_hardlink_alias_denied(self):
++        alias = self.root / 'alias.db'
++        os.link(self.customer, alias)
++        self.raw['path'] = str(alias)
++        with self.assertRaises(Forbidden):
++            read_rows('a', self.req, self.customer)
++
++    def test_scoped_probe_requires_explicit_matching_agent(self):
++        self.raw['agent_ids'] = ['ops']
++        for agent in [None, 'finance']:
++            with self.subTest(agent=agent), self.assertRaises(Forbidden):
++                probe_read_connection(self.e, 'a', 'crm', actor='owner', agent=agent)
++
++    def test_scoped_probe_succeeds_without_disclosing_rows_or_path(self):
++        self.raw['agent_ids'] = ['ops']
++        result = probe_read_connection(self.e, 'a', 'crm', actor='owner', agent='ops')
++        self.assertTrue(result['ok'])
++        self.assertFalse(result['persisted'])
++        self.assertEqual('probe_succeeded', result['connection']['status'])
++        self.assertNotIn('Ali', json.dumps(result))
++        self.assertNotIn(str(self.customer), json.dumps(result))
++        self.assertNotIn('rows', result)
++        self.assertNotIn('lifecycle', self.raw)
++
++    def test_unscoped_admin_probe_still_supported(self):
++        self.assertTrue(probe_read_connection(self.e, 'a', 'crm', actor='owner')['ok'])
++
++    def test_probe_cannot_bypass_pack_allowlist(self):
++        self.e.policy = lambda tenant, agent: {**self.policy(tenant, agent), 'allowed_connections': []}
++        with self.assertRaises(Forbidden):
++            probe_read_connection(self.e, 'a', 'crm', actor='owner', agent='ops')
++
++    def test_probe_cannot_bypass_pack_tool_scope(self):
++        self.e.policy = lambda tenant, agent: {**self.policy(tenant, agent), 'tools': []}
++        with self.assertRaises(Forbidden):
++            probe_read_connection(self.e, 'a', 'crm', actor='owner', agent='ops')
++
++    def test_probe_denied_when_frozen(self):
++        self.e.freeze('a', True, 'owner')
++        with self.assertRaises(Forbidden):
++            probe_read_connection(self.e, 'a', 'crm', actor='owner')
++
++    def test_probe_requires_actor(self):
++        for actor in ['', None, 1]:
++            with self.subTest(actor=actor), self.assertRaises(Forbidden):
++                probe_read_connection(self.e, 'a', 'crm', actor=actor)
++
++    def test_probe_rechecks_actor_before_io(self):
++        checks = []
++        def authority(c, tenant, channel, actor, roles):
++            if channel == 'web':
++                checks.append((actor, roles))
++                if len(checks) == 2:
++                    raise Forbidden('Actor revoked')
++        self.e.authority = authority
++        with patch('platform_runtime.connectors.database_path') as path, self.assertRaises(Forbidden):
++            probe_read_connection(self.e, 'a', 'crm', actor='owner')
++        path.assert_not_called()
++        self.assertEqual([('owner', ('owner', 'integrator'))] * 2, checks)
++
++    def test_agent_loop_uses_actual_sqlite_result_with_stub_planner(self):
++        self.raw['agent_ids'] = ['ops']
++        loop = AgentLoop(self.e)
++        run_id = loop.create('a', 'loop-read', 'ops', 'Mijozni top', 'owner')
++        loop.tick('a', lambda tenant, context: {'action': 'tool', 'tool': 'connectors.read', 'args': self.req})
++        self.assertTrue(self.e.tick('a'))
++        observed = []
++        def final(tenant, context):
++            observed.extend(context['observations'])
++            return {'action': 'final', 'answer': context['observations'][0]['result']['rows'][0]['name'],
++                    'evidence_ids': [context['observations'][0]['evidence_id']]}
++        loop.tick('a', final)
++        result = loop.get('a', run_id)
++        self.assertEqual('succeeded', result['status'])
++        self.assertEqual('Ali', result['answer'])
++        self.assertEqual('connectors.read', observed[0]['tool'])
++        self.assertEqual('not_performed', result['semantic_fact_check'])
++
++    def test_agent_loop_rejects_revoked_connector_without_creating_task(self):
++        loop = AgentLoop(self.e)
++        run_id = loop.create('a', 'loop-revoked', 'ops', 'Mijozni top', 'owner')
++        self.raw['lifecycle'] = 'revoked'
++        loop.tick('a', lambda tenant, context: {'action': 'tool', 'tool': 'connectors.read', 'args': self.req})
++        self.assertEqual('escalated', loop.get('a', run_id)['status'])
++        self.assertEqual([], self.e.list_tasks('a'))
++
++    def test_agent_loop_rechecks_connection_agent_scope_after_planning(self):
++        loop = AgentLoop(self.e)
++        run_id = loop.create('a', 'loop-scope', 'ops', 'Mijozni top', 'owner')
++        def planner(tenant, context):
++            self.raw['agent_ids'] = ['finance']
++            return {'action': 'tool', 'tool': 'connectors.read', 'args': self.req}
++        loop.tick('a', planner)
++        self.assertEqual('escalated', loop.get('a', run_id)['status'])
++        self.assertEqual([], self.e.list_tasks('a'))
++
++
++class StrictConnectorMetadataTests(unittest.TestCase):
++    def test_enabled_requires_json_boolean(self):
++        for enabled in ['false', 'true', 0, 1, None, [], {}]:
++            with self.subTest(enabled=enabled), self.assertRaises(ValueError):
++                descriptor('crm', {'driver': 'sqlite_readonly', 'enabled': enabled})
++
++    def test_bad_lifecycle_is_validation_error_not_type_error(self):
++        for state in [[], {}, True, 1, None, 'unknown']:
++            with self.subTest(state=state), self.assertRaises(ValueError):
++                descriptor('crm', {'driver': 'sqlite_readonly', 'lifecycle': state})
++
++    def test_capability_list_is_unique_bounded_and_typed(self):
++        for caps in [['read', 'read'], [None], [{}], 'read', [], ['read'] * 100]:
++            with self.subTest(caps=caps), self.assertRaises(ValueError):
++                descriptor('crm', {'driver': 'sqlite_readonly', 'capabilities': caps})
++
++    def test_agent_and_scope_lists_are_strict(self):
++        for key in ['agent_ids', 'scopes']:
++            for value in [[''], [' '], ['ops', 'ops'], [None], 'ops', ['ops'] * 101]:
++                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
++                    descriptor('crm', {'driver': 'sqlite_readonly', key: value})
++
++    def test_driver_whitespace_is_not_silently_rewritten(self):
++        with self.assertRaises(ValueError):
++            descriptor('crm', {'driver': ' sqlite_readonly '})
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- a/apps/ui/app/platform/page.tsx
++++ b/apps/ui/app/platform/page.tsx
+@@ -20,7 +20,9 @@
+ }
+ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspace:Workspace;exit:()=>void}){
+   const tenant=workspace.id;
+-  const [connections,setConnections]=useState<{id:string;driver:string;mode:string;status:string;tables?:Record<string,string[]>}[]>([]);
++  const [connections,setConnections]=useState<{id:string;driver:string;mode:string;status:string;lifecycle?:string;agent_ids?:string[];tables?:Record<string,string[]>}[]>([]);
++  const [probeAgents,setProbeAgents]=useState<Record<string,string>>({});
++  const [probeResults,setProbeResults]=useState<Record<string,{verified_at:number}>>({});
+   const [role,setRole]=useState('');const [frozen,setFrozen]=useState(false);
+   const [connected,setConnected]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+   const [agents,setAgents]=useState<Agent[]>([]);const [tools,setTools]=useState<Tool[]>([]);const [tasks,setTasks]=useState<Task[]>([]);
+@@ -46,7 +48,7 @@
+   return <main style={{fontFamily:'system-ui,sans-serif',background:'#0b1220',color:'#e2e8f0',minHeight:'100vh',padding:'28px',maxWidth:1500,margin:'auto'}}>
+     <header style={{display:'flex',justifyContent:'space-between',gap:20,flexWrap:'wrap'}}>
+       <div><h1 style={{margin:0}}>Agent Platform</h1><p style={{color:'#94a3b8'}}>AI xodimlar boshqaruvi · Kanalga bog‘lanmagan runtime</p></div>
+-      <span style={{color:'#fde68a'}}>Code preview 0.3.2 · Test/build bajarilmagan</span>
++      <span style={{color:'#fde68a'}}>Preview 0.3.3 · Offline testlar bajarildi · Production NO-GO</span>
+     </header>
+     <section style={panel}>
+       <strong>{workspace.name}</strong><p>Workspace: {tenant}</p>
+@@ -112,7 +114,31 @@
+         <p>SQLite lokal o‘qish testlangan. PostgreSQL adapteri contract-test bosqichida, live tekshiruv talab qilinadi. Boshqa CRM/ERP driverlari adapter_required sifatida ko‘rsatiladi.</p>
+         <p>Ulanishlar operatorning server konfiguratsiyasidan olinadi. Secret va baza manzili brauzerga yuborilmaydi.</p>
+         {connections.length===0 && <p>Ulanish sozlanmagan.</p>}
+-        {connections.map(c=><article key={c.id}><h3>{c.id}</h3><p>{c.driver} · {c.mode} · {c.status}</p><pre style={pre}>{JSON.stringify(c.tables,null,2)}</pre></article>)}
++        {connections.map(c=><article key={c.id} style={{borderBottom:'1px solid #334155',padding:12}}>
++          <h3>{c.id}</h3><p>{c.driver} · {c.mode} · {c.status} · {c.lifecycle || 'configured'}</p>
++          <pre style={pre}>{JSON.stringify(c.tables,null,2)}</pre>
++          {c.mode==='read_only' && <>
++            <label>Tekshiruv agenti <select aria-label={`${c.id} tekshiruv agenti`} style={input}
++              value={probeAgents[c.id] || ''}
++              onChange={event=>setProbeAgents(current=>({...current,[c.id]:event.target.value}))}>
++              <option value="">{c.agent_ids?.length?'Agentni tanlang':'Admin tekshiruvi'}</option>
++              {agents.filter(a=>!c.agent_ids?.length || c.agent_ids.includes(a.id)).map(a=>
++                <option key={a.id} value={a.id}>{a.name}</option>)}
++            </select></label>
++            <button style={button} disabled={busy || frozen || !['owner','integrator'].includes(role)
++              || !['configured','healthy','degraded'].includes(c.lifecycle || 'configured')
++              || Boolean(c.agent_ids?.length && !probeAgents[c.id])}
++              onClick={()=>run(async()=>{
++                setProbeResults(current=>{const next={...current};delete next[c.id];return next;});
++                const result=await req<{verified_at:number}>(`/connections/${encodeURIComponent(c.id)}/verify`,
++                  probeAgents[c.id]?{agent:probeAgents[c.id]}:{});
++                setProbeResults(current=>({...current,[c.id]:result}));
++              })}>Bitta jadvalni xavfsiz tekshirish</button>
++            {probeResults[c.id] && <p>Bir jadval o‘qish tekshiruvi o‘tdi: {new Date(probeResults[c.id].verified_at*1000).toLocaleString()}.
++              Mijoz satrlari brauzerga berilmadi. Bu barcha jadvallar yoki production tayyorligi tasdig‘i emas;
++              health holati doimiy saqlanmadi.</p>}
++          </>}
++        </article>)}
+       </section>}
+       {tab==='devices' && <section style={panel}><h2>Qurilma nazorati</h2><p>Hozir faqat Linux’da allowlist doirasida fayl o‘qish va ro‘yxatlash. Printer, ekran va app launch o‘chirilgan.</p>
+         <input aria-label="Device ID" style={input} value={deviceId} onChange={e=>setDeviceId(e.target.value)}/>
+--- a/apps/ui/components/AgentRuns.tsx
++++ b/apps/ui/components/AgentRuns.tsx
+@@ -65,7 +65,7 @@
+     <p>Kod preview. Agent har bir haqiqiy tool natijasidan keyin navbatdagi bitta qadamni tanlaydi.
+       Tashqi va ichki write amallari odatdagi task tasdig‘ini kutadi. Bu cheksiz yoki tasdiqsiz ijro emas.</p>
+     <p style={{color:'#fde68a'}}>LLM operator konfiguratsiyasida alohida yoqiladi. Tool natijalari sozlangan
+-      modelga yuborilishi mumkin. Secret kiritmang. Test va production build tasdiqlanmagan.</p>
++      modelga yuborilishi mumkin. Secret kiritmang. Runtime offline testlari bajarildi; API/UI va live provider tekshiruvlari tugallanmagan.</p>
+     {error && <p role="alert" style={{color:'#fca5a5'}}>{error}</p>}
+     <label>Agent <select style={input} value={agent} onChange={event=>setAgent(event.target.value)}>
+       {agents.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+--- /dev/null
++++ b/scripts/verify_offline.py
+@@ -0,0 +1,154 @@
++"""Reproducible offline verification using stdlib, Node and optionally Bun.
++
++No package installation, real credentials, provider calls or deployment. This
++runs project code and is a verification harness, not a hostile-code sandbox.
++HTTP/UI builds remain separate dependency-backed release gates.
++"""
++from __future__ import annotations
++
++import argparse
++import datetime
++import importlib.util
++import json
++import os
++from pathlib import Path
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++import time
++
++
++PYTHON_GUARD = """import sys
++
++def block(event, args):
++    if event in {'socket.connect', 'socket.getaddrinfo', 'socket.sendto'}:
++        raise RuntimeError('Offline verification: network disabled')
++
++sys.addaudithook(block)
++"""
++NODE_GUARD = """const deny=()=>{throw new Error('Offline verification: network disabled')};
++for(const name of ['node:net','node:tls']) {
++  const module=require(name);module.connect=deny;module.createConnection=deny;
++}
++for(const name of ['node:http','node:https']) {
++  const module=require(name);module.request=deny;module.get=deny;
++}
++globalThis.fetch=deny;
++globalThis.WebSocket=class {constructor(){deny()}};
++require('node:module').syncBuiltinESMExports();
++"""
++BUN_SYNTAX = """const fs=require('node:fs');const path=require('node:path');
++const root=process.argv[2];let checked=0;const errors=[];
++function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})) {
++  if(['node_modules','.next'].includes(entry.name))continue;
++  const file=path.join(dir,entry.name);
++  if(entry.isDirectory()){walk(file);continue;}
++  if(!/\\.(tsx?|mts|mjs|js)$/.test(entry.name))continue;
++  const loader=entry.name.endsWith('.tsx')?'tsx':/\\.(ts|mts)$/.test(entry.name)?'ts':'js';
++  try{new Bun.Transpiler({loader}).transformSync(fs.readFileSync(file,'utf8'));checked++;}
++  catch(error){errors.push({file:path.relative(root,file),message:String(error.message)});}
++}}
++walk(root);
++console.log(JSON.stringify({kind:'syntax_only_not_typecheck_or_build',checked,errors},null,2));
++process.exitCode=errors.length?1:0;
++"""
++
++
++def run(root: Path, output: Path) -> dict:
++    output.mkdir(parents=True, exist_ok=False)
++    results = []
++    with tempfile.TemporaryDirectory(prefix='platform-offline-') as tmp:
++        temp = Path(tmp)
++        home = temp / 'home'
++        home.mkdir()
++        (temp / 'sitecustomize.py').write_text(PYTHON_GUARD)
++        (temp / 'node-guard.cjs').write_text(NODE_GUARD)
++        (temp / 'syntax.cjs').write_text(BUN_SYNTAX)
++        # Deliberately do not inherit environment secrets, proxies or provider config.
++        env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home),
++               'LANG': 'C.UTF-8', 'PYTHONPATH': str(temp), 'PYTHONDONTWRITEBYTECODE': '1',
++               'NODE_OPTIONS': '--require=' + str(temp / 'node-guard.cjs')}
++        jobs = [
++            ('python_runtime', [sys.executable, '-m', 'unittest', 'discover', '-s', 'runtime_tests', '-v'], root / 'api-python'),
++            ('release_tools', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_release_tools.py', '-v'], root),
++            ('sqlite_demo', [sys.executable, 'scripts/demo_runtime.py'], root),
++        ]
++        node = shutil.which('node')
++        if node:
++            jobs += [
++                ('node_runner', [node, '--test', 'apps/runner/test.js'], root),
++                ('browser_session_client', [node, '--test', 'apps/ui/lib/session-client.test.mjs'], root),
++            ]
++        else:
++            for name in ['node_runner', 'browser_session_client']:
++                results.append({'name': name, 'status': 'BLOCKED', 'reason': 'Node unavailable'})
++        bun = shutil.which('bun')
++        if bun:
++            jobs.append(('javascript_typescript_syntax', [bun, str(temp / 'syntax.cjs'), str(root / 'apps')], root))
++        else:
++            results.append({'name': 'javascript_typescript_syntax', 'status': 'BLOCKED', 'reason': 'Bun unavailable; optional syntax-only check'})
++        for name, command, cwd in jobs:
++            start = time.monotonic()
++            try:
++                result = subprocess.run(command, cwd=cwd, env=env, text=True,
++                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
++                code, text = result.returncode, result.stdout
++            except subprocess.TimeoutExpired as exc:
++                code = 124
++                text = exc.stdout or ''
++                if isinstance(text, bytes):
++                    text = text.decode('utf-8', errors='replace')
++                text += '\nVerification command timed out.\n'
++            (output / (name + '.log')).write_text(text, encoding='utf-8')
++            row = {'name': name, 'status': 'PASS' if code == 0 else 'FAIL', 'exit_code': code,
++                   'command': command, 'seconds': round(time.monotonic() - start, 3), 'log': name + '.log'}
++            count = re.search(r'Ran (\d+) tests?', text) or re.search(r'(?:ℹ|#) tests (\d+)', text)
++            if count:
++                row['tests'] = int(count.group(1))
++            results.append(row)
++            print(json.dumps(row, ensure_ascii=False))
++
++    failures, checked = [], 0
++    for file in root.rglob('*.py'):
++        if any(part in {'node_modules', '.venv', '__pycache__'} for part in file.parts):
++            continue
++        try:
++            compile(file.read_bytes(), str(file), 'exec', dont_inherit=True)
++            checked += 1
++        except (ValueError, SyntaxError) as exc:
++            failures.append({'file': str(file.relative_to(root)), 'error': str(exc)})
++    syntax = {'name': 'python_syntax', 'status': 'FAIL' if failures else 'PASS', 'checked': checked, 'errors': failures}
++    (output / 'python_syntax.json').write_text(json.dumps(syntax, ensure_ascii=False, indent=2) + '\n')
++    results.append(syntax)
++    missing = [name for name in ['pytest', 'fastapi', 'httpx', 'pydantic', 'jwt', 'yaml', 'psycopg', 'redis']
++               if importlib.util.find_spec(name) is None]
++    summary = {'kind': 'offline_verification_only', 'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
++               'python': sys.version.split()[0], 'results': results,
++               'http_dependencies_missing': missing,
++               'not_performed': ['dependency-backed HTTP tests', 'Next/React typecheck', 'Next production build',
++                                 'live providers', 'production dependency audit', 'deployment'],
++               'release': 'NO_GO'}
++    (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n')
++    return summary
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, help='New directory; existing evidence is not overwritten')
++    args = parser.parse_args()
++    root = Path(__file__).resolve().parents[1]
++    stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
++    output = args.output or root / 'docs' / 'verification' / ('local-' + stamp)
++    summary = run(root, output.resolve())
++    print('Evidence:', output)
++    print('Production: NO-GO. Read summary.json for blocked and unperformed checks.')
++    required = {'python_runtime', 'release_tools', 'sqlite_demo', 'node_runner', 'browser_session_client', 'python_syntax'}
++    failed = any(row['status'] == 'FAIL' or (row['name'] in required and row['status'] != 'PASS')
++                 for row in summary['results'])
++    return 1 if failed else 0
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())

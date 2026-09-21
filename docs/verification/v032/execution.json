@@ -1,0 +1,59 @@
+{
+  "checkpoint": "0.3.2-agent-loop-source-preview",
+  "date": "2026-09-14",
+  "work_mode": "SOURCE_EDIT_AND_MANUAL_REVIEW_ONLY",
+  "release": "NO_GO",
+  "project_commands_executed": [],
+  "test_collection_performed": false,
+  "project_runtime_imported": false,
+  "tests": {
+    "status": "NOT_RUN",
+    "reason": "USER_REQUEST",
+    "exit_code": null,
+    "passed": null,
+    "failed": null
+  },
+  "ui_build_typecheck_lint_compile_demo": {
+    "status": "NOT_RUN",
+    "reason": "USER_REQUEST",
+    "exit_code": null
+  },
+  "migration_restore_archive_source_rerun": {
+    "status": "NOT_RUN",
+    "reason": "USER_REQUEST",
+    "exit_code": null
+  },
+  "ci_deployment_live_services": {
+    "status": "NOT_RUN",
+    "reason": "OUT_OF_AGENT_SCOPE"
+  },
+  "manual_review_scope": [
+    "loop state transitions",
+    "transaction/savepoint boundaries",
+    "planner reservation and stale response fencing",
+    "task approval/claim/dispatch parent checks",
+    "actual directory callback integration",
+    "HTTP shapes",
+    "UI state and response rendering",
+    "test source and fixtures"
+  ],
+  "authoring_incidents": [
+    {
+      "kind": "file-writing-script SyntaxError",
+      "impact": "Script failed before project files changed; corrected file-writing script completed. Not a project test or compile."
+    },
+    {
+      "kind": "temporary Computer tool unavailable",
+      "impact": "One attempted source-write call did not create its file; existing tree remained accessible and the write was split into smaller calls."
+    }
+  ],
+  "historical_evidence": "v03 and v031 apply only to their snapshots; no prior PASS transferred",
+  "feature_default": "llm.agent_loop_enabled=false",
+  "not_claimed": [
+    "semantic factual verification",
+    "monetary spend enforcement",
+    "live provider compatibility",
+    "production safety",
+    "mixed-version rollback safety"
+  ]
+}

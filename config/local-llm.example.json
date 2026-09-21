@@ -1,0 +1,14 @@
+{
+  "llm": {
+    "provider_mode": "local_loopback",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "REPLACE_WITH_INSTALLED_TOOL_CAPABLE_MODEL",
+    "agent_loop_enabled": true,
+    "usage_budget_required": true,
+    "usage_budget": {
+      "currency": "USD",
+      "input_micro_per_million": 0,
+      "output_micro_per_million": 0
+    }
+  }
+}

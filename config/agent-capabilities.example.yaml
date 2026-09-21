@@ -1,0 +1,323 @@
+# Bu faqat qo‘shimcha agent konfiguratsiyasi, avtomatik yoqilmaydi.
+# Tenantning mavjud pack.yaml agents ro‘yxatiga keraklisini qo‘shing.
+- id: data.crm_reader
+  name: "CRM eksportini o‘quvchi"
+  tools: [connectors.read]
+  allowed_connections: [crm-export]
+  ladder: human_assisted
+- id: voice.uzbek_tts
+  name: "O‘zbekcha ovoz yaratuvchi"
+  tools: [voice.tts]
+  ladder: human_assisted
+  approval:
+    required_for: [voice.tts]
+    approver_role: owner
+    independent: true
+# Re-engagement misoli: feed faqat o‘qiydi, haqiqiy aloqa har doim tasdiqdan o‘tadi.
+# Agent qaysi CRM (Bitrix24, Kommo, 1C, custom HTTP) ekanini bilmaydi —
+# routing connection konfiguratsiyasiga bog‘langan.
+- id: sales.reengager
+  name: "Qayta aloqa agenti"
+  tools: [crm.lead.stalled, crm.lead.search, crm.timeline.attach_message]
+  allowed_connections: [crm_main]
+  ladder: human_assisted
+  approval:
+    required_for: [crm.timeline.attach_message]
+    approver_role: owner
+    independent: true
+# Business Graph misoli: bir savol, hamma tizimdan javob, manba ko'rsatilgan holda.
+# Agent faqat o'qishni biladi; manba tool'lari (connectors.read, sheets.rows)
+# ham uning ro'yxatida bo'lishi shart — graph o'zi vakolat bermaydi.
+# Yozish yo'li bu yerda yo'q: kross-tizim yozuv alohida approval + reconcile talab qiladi.
+- id: sales.360
+  name: "Tovar va mijoz 360"
+  tools: [graph.entities, graph.entity, graph.search, graph.timeline, graph.conflicts,
+          graph.explain, connectors.read, sheets.rows]
+  allowed_connections: [moysklad_export, onec_export]
+  ladder: human_assisted
+
+# Agent oversight misoli (PRD v0.5, P9/T3): rahbar o'z agentlari haqida so'raydi.
+# Uchta tool ham READ — agent o'zini yoki boshqa agentni O'ZGARTIRA OLMAYDI.
+# Sabab: o'zini boshqaradigan agent audit zanjirini buzadi, chunki kim
+# o'zgargan bo'lsa, u o'zgarish yozuvini ham yozgan bo'lardi.
+# O'zgartirish operator ishi bo'lib qoladi: pack.yaml va budget endpointlari orqali.
+- id: mgmt.agent_supervisor
+  name: "Agentlar nazoratchisi"
+  tools: [agent.activity, agent.cost, agent.health]
+  ladder: human_assisted
+
+# Briefing misoli (PRD v0.5, P10): kunlik brifing, jadval bo'yicha.
+# Manba — Business Graph, ya'ni kanal uchun tool'lar agent ro'yxatida bo'lishi shart.
+# Yagona yozuv tool'i — telegram.send: brifing menejerga aytadi, mijozga yozmaydi,
+# shuning uchun approval talab qilinmaydi (approval navbatini o'rgatmaydi).
+# Qabul qiluvchi (recipient) — OPERATOR konfiguratsiyasi, model chiqishi emas:
+# ma'lumot hech qachon brifingni boshqa chat'ga yo'naltira olmaydi.
+- id: mgmt.briefer
+  name: "Kunlik brifing agenti"
+  tools: [graph.search, graph.conflicts, connectors.read, sheets.rows, telegram.send]
+  allowed_connections: [crm_main, erp_main]
+  ladder: human_assisted
+
+# Workforce oversight misoli (PRD v0.5, P9b/T3): xodimlar bo'yicha FAKT.
+# Uchta tool ham READ. Reestr, range va ustun nomlari — OPERATOR konfiguratsiyasi;
+# model faqat ko'rinishni so'raydi.
+# MUHIM: bu modul xodimni BAHOLAMAYDI — ball, reyting, samaradorlik ko'rsatkichi
+# yo'q. U faktlarni (kim yo'q, kim kechikkan ish bilan band) ko'rsatadi va
+# menejerga eskalatsiya qiladi. Sababni menejer tekshiradi, platforma emas.
+- id: mgmt.hr_officer
+  name: "Xodimlar nazoratchisi"
+  tools: [workforce.attendance, workforce.shifts, workforce.workload, sheets.rows]
+  allowed_connections: [hr]
+  ladder: human_assisted
+
+# Kechikkan ish eskalatsiyasi misoli (PRD v0.5, P6). Bu P9b'ning YETKAZIB BERISH
+# yarmi: `workforce.workload` kechikkan ishni ANIQLAYDI, bu agent esa uni
+# MENEJERGA xabar qiladi. Ikki tool ham READ — xabar yuborish coordinatorda
+# (`EscalationLoop.tick`), model tool'i emas. Aks holda xabar ishlab chiqarish
+# har qanday agent qo'lida bo'lardi va dedup/cooldown faqat promptga tayanardi.
+#
+# MUHIM: xuddi P9b kabi, bu modul xodimni BAHOLAMAYDI — ball, reyting yo'q. U
+# faqat faktni aytadi: "Ali — Hisobot (muddat: 2026-01-20, holat: ochiq)".
+# Sababni menejer tekshiradi. Dedup kaliti — ISH OB'YEKTI, xodim emas.
+- id: mgmt.escalator
+  name: "Kechikkan ish eskalatori"
+  tools: [workforce.workload, sheets.rows, telegram.send,
+          escalation.preview, escalation.schedules]
+  allowed_connections: [hr]
+  allowed_recipients: ["123456789"]
+  ladder: human_assisted
+
+# Supervisor router misoli (PRD v0.5, P10b/T2): rahbar savoli → to'g'ri bo'lim agenti.
+# Ikkita tool ham READ: supervisor.route faqat xaritani KO'RSATADI, run yaratmaydi.
+# Run yaratish — control-plane amali (POST /{tenant}/supervisor/route), model tool'i
+# emas. Aks holda har qanday agent o'zi run yasab, hop chegarasi faqat promptga
+# tayanib qolardi.
+#
+# MUHIM (UPA qoidasi): maqsad agent O'Z policy'si bilan ishlaydi. Supervisor vakolati
+# MEROS QILINMAYDI. Ya'ni CRM o'qiy olmaydigan supervisor, CRM o'qiy oladigan agentga
+# yo'naltirib, o'zi o'sha ma'lumotni qo'lga kiritolmaydi: vakolat bajaruvchiga
+# o'tadi, so'rovchiga emas. Buni testlar va `probe_supervisor_authority.py` isbotlaydi.
+#
+# Zanjir chegaralangan: standart `max_hops=1` (bitta hop), va o'zi router bo'lgan
+# agentga yo'naltirish standart holatda RAD ETILADI (supervisor → supervisor →
+# ... cheksiz zanjir bo'lardi).
+- id: mgmt.router
+  name: "Bo'limlarga yo'naltiruvchi"
+  tools: [supervisor.route, supervisor.sections]
+  ladder: human_assisted
+
+# Asset model misoli (PRD v0.5, P11): uskuna ierarxiyasi — "teg emas, aktiv modeli".
+# Beshta tool ham READ. Ierarxiya va aktiv reestri OPERATOR konfiguratsiyasi; model
+# faqat daraxtni, bolalarni, avlodlarni yoki bitta aktivni so'raydi.
+#
+# MUHIM: bu modul ierarxiyani YARATMAYDI va TAHRIRLAMAYDI. Yo'q yozish yo'li — chunki
+# modelni tahrirlay oladigan tizim har bir hodisa, o'lchov va hisobot tayanadigan
+# IDENTITETNING muallifiga aylanadi. UNS operatorniki; platforma uni O'QIYDI.
+#
+# Camerani boshqarish bu yerda YO'Q: bu P11b (`vision_events`). P11 faqat aktiv
+# mavjud bo'lishini ta'minlaydi — kamera hodisasi bog'lanadigan narsa bo'lishi uchun.
+- id: mgmt.plant_ops
+  name: "Uskuna modeli operatori"
+  tools: [asset.tree, asset.children, asset.descendants, asset.resolve,
+          asset.levels, sheets.rows]
+  allowed_connections: [plant]
+  ladder: human_assisted
+
+# Vision hodisalari misoli (PRD v0.5, P11b/T4). Uchta tool ham READ.
+# MUHIM: **frame hech qachon platformaga kelmaydi** — faqat hodisa
+# ({stansiya, hodisa, sana, ishonch}). Bu ovoz (P5) qoidasi bilan bir xil, va
+# kamera uchun huquqiy jihatdan MAJBURIY: O'zbekiston qonuni O'RQ-1125
+# (26.03.2026) bo'yicha biometrik ma'lumot lokal saqlanishi va davlat
+# reestriga kiritilishi shart, ya'ni kadrni bulutga chiqarish mijozni
+# qonunbuzarga aylantiradi.
+#
+# Tool'lar ikki sinfga bo'lingan (PRD talabi):
+#   vision.station_event — shaxssiz (nuqson, sikl, bekor, SOP), chegara yumshoq
+#   vision.person_event  — **biometrik**, `human_led` MAJBURIY
+# `summary` faqat shaxssiz hodisalarni sanaydi: aniqlangan odamlar SONI ham
+# biometrik ishlovdir.
+#
+# Bu agent ATAYLAB `human_assisted` — ya'ni shaxsni aniqlaydigan hodisani
+# o'qiy OLMAYDI. Kamera operatori odatda shaxssiz hodisalar bilan ishlaydi.
+- id: ops.vision
+  name: "Kamera hodisalari operatori"
+  tools: [vision.station_event, vision.summary, sheets.rows]
+  allowed_connections: [plant]
+  ladder: human_assisted
+
+# Shaxsni aniqlaydigan hodisalar uchun alohida agent, va yagona `human_led`.
+# Sabab: qonuniy majburiyatni avtonom agent bajara olmaydi, shuning uchun bu
+# o'qish inson qarori ostida qoladi. `biometric_ack` operator tomonidan
+# konfiguratsiyada berilishi shart — usiz platforma o'qishni rad etadi.
+- id: sec.access_reviewer
+  name: "Kirish nazorati tekshiruvchisi"
+  tools: [vision.person_event, vision.station_event, sheets.rows]
+  allowed_connections: [plant]
+  ladder: human_led
+
+# WhatsApp kanali misoli (PRD v0.5, P8/T1). IKKI read + BITTA write.
+#   whatsapp.window    — 24 soatlik oyna: qaysi kontaktda ochiq, qachon yopiladi
+#   whatsapp.templates — operator e'lon qilgan shablonlar (nom + til + toifa)
+#   whatsapp.send      — WRITE, approval talab qiladi
+#
+# MUHIM: WhatsApp Telegram emas. Meta'ning qoidasi bizning approval naqshimizni
+# QONUNIY majburiyatga aylantiradi: oyna yopilganda erkin matn **hech qachon**
+# yetib bormaydi (xato 131047) va mijoz javobsiz qoladi. Shuning uchun
+# `whatsapp.send` oynani provider I/O dan OLDIN tekshiradi va yopiq oynada
+# erkin matnni rad etadi — shablonga JIMGINA tushirmaydi, chunki toifani
+# modelga tanlatish akkaunt sifat reytingini tushiradigan yo'lning o'zi.
+#
+# Shablon operator konfiguratsiyasi: model uni FAQAT nomi bo'yicha tanlaydi,
+# tilini ham, toifasini ham o'zi bera olmaydi (schema'da bunday maydon yo'q).
+#
+# `allowed_recipients` endi engine darajasida tekshiriladi: bu ro'yxatda
+# bo'lmagan kontaktga to'g'ridan-to'g'ri yuborish submission'danoq rad etiladi.
+- id: sales.whatsapp
+  name: "WhatsApp sotuv agenti"
+  tools: [whatsapp.window, whatsapp.templates, whatsapp.send, sheets.rows]
+  allowed_connections: [sales]
+  allowed_recipients: [ali, dilnoza]
+  ladder: human_assisted
+
+# Oynani faqat O'QIYDIGAN agent: sotuvchi "mijoz javob berishi mumkinmi?"
+# degan savolga javob oladi, lekin yubora olmaydi.
+- id: sales.support_view
+  name: "WhatsApp oyna kuzatuvchisi"
+  tools: [whatsapp.window, whatsapp.templates]
+  allowed_connections: [sales]
+  ladder: human_assisted
+
+# Hujjat qabul qilish va hisob-kitob nazorati (PRD v0.5, P8b). TO'RT read +
+# BITTA write — va write hech qanday to'lov qilmaydi.
+#   document.parse        — WRITE: ajratib olingan hujjatni qayd etadi
+#   document.match        — read: uch tomonlama solishtirish (invoice / PO / delivery)
+#   document.duplicates   — read: takroriy hujjatni va o'zgargan summani topadi
+#   document.fraud_signals— read: firibgarlik BELGILARINI dalili bilan ko'rsatadi
+#   document.posting_plan — WRITE: rejani yozadi. Reja — taklif, to'lov emas.
+#
+# MUHIM: platforma pul harakatlantirmaydi. Bu modulda to'lov qiladigan funksiya,
+# tool yoki konfiguratsiya kaliti YO'Q — eng uzoq nuqta `posting_plan`, ya'ni
+# buxgalterga ko'rsatiladigan taklif. PRD v0.5 8-bo'limi buni mahsulotning o'z
+# ko'lami deb belgilaydi ("hujjatni tayyorlaydi, to'lovni tasdiqqa qo'yadi").
+# Yo'qligi va'da emas: uni testlar tuzilma bo'yicha, `probe_document_no_payment.py`
+# esa o'lchov bilan isbotlaydi (5 tool x 3 ladder = 15 katak, hammasida 0 ta
+# provider chaqiruvi).
+#
+# Ikkita write, ikkalasi ham approval talab qiladi. Reja write paytida QAYTA
+# hisoblanadi, argumentdan olinmaydi: tasdiqlangan qadam argumentini takrorlaydi,
+# shuning uchun toza rejani tasdiqlab, keyin iflos rejani yuborish yo'li yopiq.
+- id: finance.ap_clerk
+  name: "Hisob-kitob xodimi (AP)"
+  tools: [document.parse, document.match, document.duplicates, document.fraud_signals, document.posting_plan]
+  allowed_connections: []
+  ladder: human_assisted
+
+# Faqat nazorat: solishtiradi, takroriylikni qidiradi, firibgarlik belgilarini
+# ko'rsatadi — lekin hujjatni qayd eta olmaydi va reja yoza olmaydi. Bu ajratish
+# ataylab: retseptsiya xodimi bilib turib hujjat qabul qilishi nazoratni
+# kuchsizlantiradi, shuning uchun tekshiruvchi o'qish huquqidan boshqa narsa
+# olmaydi.
+#
+# DIQQAT: `fraud_signals` hech qachon hukm chiqarmaydi va bloklamaydi — u
+# belgini dalili bilan ko'rsatadi, qaror insonda qoladi. Material belgilar
+# (o'zgargan dublikat, chetlangan summa, o'zgargan bank hisobi) rejani ushlab
+# turadi; kuchsiz belgilar (yumaloq summa, dam olish kuni sanasi, tarix yo'q)
+# faqat xabar qilinadi, chunki aks holda operator ogohlantirishni o'qimay
+# qo'yishni o'rganadi.
+- id: finance.ap_reviewer
+  name: "Hisob-kitob tekshiruvchisi"
+  tools: [document.match, document.duplicates, document.fraud_signals]
+  allowed_connections: []
+  ladder: human_assisted
+
+# Ishlab chiqarish o'qishlari (PRD v0.5, P12 / T4). UCHTA tool, UCHALASI ham READ.
+#   manufacturing.bom   — mahsulot tarkibi (mijozning master ma'lumoti)
+#   manufacturing.cycle — o'lchangan sikl vaqti, deklaratsiya qilingan standartga nisbatan
+#   manufacturing.yield — chiqim, nuqson va ular orasidagi nisbat
+#
+# Yozish yo'li YO'Q. BOM — mijozning master ma'lumoti: uni tahrirlay oladigan
+# sub'ekt o'zi hisobot berayotgan retseptning muallifi bo'lib qolardi, va har bir
+# chiqim va sikl ko'rsatkichi u o'zgartira oladigan modelga nisbatan hisoblanardi.
+#
+# Manba tool'i (`sheets.rows`) ham agent ro'yxatida bo'lishi shart: o'qish
+# registr deklaratsiyasi, A1 allowlist, agent tool ruxsati va connection
+# allowlist orqali o'tadi, ya'ni oddiy qo'lda chaqiruvdan farq qilmaydi.
+#
+# UCHTA RAD ETISH, kodda majburiy (docstring emas):
+#   1. OEE YO'Q. Availability va performance uchun rejalashtirilgan ish vaqti va
+#      ideal sikl vaqti kerak — bu registrlarda yo'q. vision.summary ham buni
+#      rad etadi ("bu P13 ishi"); bu modul o'sha rad etishni saqlaydi. P13 egasi.
+#   2. CHIQIM BIRTA SONDAN HISOBLANMAYDI. Nuqson o'qilmasa — yield:null va
+#      yield_computable:false, 100% emas. Aks holda yarmini brakka chiqarayotgan
+#      liniya 100% ko'rsatardi.
+#   3. XODIM BO'YICHA KO'RSATKICH YO'Q. operator_column degan kalit mavjud emas:
+#      odamga bog'langan chiqim raqami — sababi platformada bo'lmagan jazo.
+#
+# Bo'sh katak va 0 — ikki xil fakt. Bo'sh katak "yozilmagan", matnli katak
+# "o'qilmagan"; ikkalasi ham alohida sanaladi va hech biri nolga aylanmaydi.
+# Chiqim o'qilmaydigan qator umuman stansiya yaratmaydi — "liniya hech narsa
+# ishlab chiqarmadi" degan yolg'on raqam chiqmasligi uchun.
+- id: ops.production
+  name: "Ishlab chiqarish o'quvchisi"
+  tools: [manufacturing.bom, manufacturing.cycle, manufacturing.yield, sheets.rows]
+  allowed_connections: [plant]
+  ladder: human_assisted
+
+# ---------------------------------------------------------------------------
+# P13 — OEE va andon (T4 ning oxirgi bo'lagi)
+#
+# P12 OEE ni nomlab rad etib, shu yerga topshirgan edi: "availability va
+# performance uchun rejaviy ish vaqti va ideal sikl vaqti kerak, bular bu
+# registrlarda yo'q. OEE — P13 ishi." Bu agent — o'sha topshiriqning bajarilishi.
+#
+# OEE uchta nisbatning ko'paytmasi:
+#   availability = ish / reja
+#   performance  = (ideal * chiqim) / ish
+#   quality      = yaxshi / chiqim
+#
+# Uchta faktordan biri hisoblanmasa — oee: null, va not_computable aynan qaysi
+# kiritma yo'qligini nomlaydi. Qisman OEE raqam sifatida ko'rsatilmaydi: yarmi
+# to'qilgan indeks to'liq ko'rinadi va hech kim uni so'roq qilmaydi.
+#
+# reja va ideal — o'lchov emas, STANDART. Shuning uchun ular deklaratsiya:
+# planned_run_column yoki planned_run_seconds (konstanta), ideal_cycle_column.
+#
+# ANDON — bu yerda faqat ANIQLASH yarmi. Yetkazish P6 eskalatsiya
+# koordinatoridan qayta ishlatiladi; shu modul ikkinchi xabar yo'lini o'stirmaydi.
+# Chegara operator konfiguratsiyasi: platforma 85% ni "yomon" deb hal qilmaydi.
+# OEE hisoblanmaydigan stansiya — ogohlantirish emas, "not_evaluated".
+#
+# XODIM BO'YICHA KO'RSATKICH YO'Q. Stanokga bog'langan OEE — texnik xizmat
+# signali; o'sha raqam smenadagi operatorga bog'lansa — jazo bo'ladi.
+#
+# Ikkala tool ham faqat o'qish. Modulda yozish yo'li umuman yo'q.
+- id: ops.oee
+  name: "OEE va andon o'quvchisi"
+  tools: [oee.report, oee.andon, sheets.rows]
+  allowed_connections: [plant]
+  ladder: human_assisted
+
+# QO'NG'IROQ HODISALARI VA ROZILIK DARVOZASI (P14 A bosqich).
+#
+# Audio hech qachon platformaga yetib kelmaydi: na yozuv, na transkript, na
+# havola. Registr — operator yozadigan QO'NG'IROQ JURNALI, media ombori emas.
+# Media yo'liga o'xshagan katak ushlanadi va ``withheld_outcomes`` da sanaladi.
+#
+# Qo'ng'iroq qilish — bu TOOL EMAS, ataylab. Bu odamga chiquvchi yozish
+# bo'lardi va rozilik darvozasi kodda, provayderga yeta oladigan yagona yo'lda
+# majburlanishi kerak — promptda emas.
+#
+# XODIM BO'YICHA KO'RSATKICH YO'Q: qo'ng'iroq soni — telefon liniyasi haqidagi
+# fakt; agent bo'yicha qo'ng'iroq soni — ko'rib chiqishda ishlatiladigan raqam.
+#
+# `telegram.send` + `allowed_recipients` shu yerda, chunki P14 C bosqichida
+# telefoniya navbati menejerga eskalatsiya qilinadi — va u ham P6
+# koordinatorining O'Z yetkazish yo'li orqali (`telegram.send`), ikkinchi
+# bildirishnoma yo'li EMAS. Agent manba o'quvchisiga (`telephony.queue`) va
+# yuboruvchiga birga ega bo'lmasa, `configure` vaqtida rad etiladi.
+- id: ops.telephony
+  name: "Qo'ng'iroq hodisalari va rozilik o'quvchisi"
+  tools: [telephony.consent, telephony.call_events, telephony.summary, telephony.queue, telephony.retention, sheets.rows, telegram.send, escalation.preview, escalation.schedules]
+  allowed_connections: [plant]
+  allowed_recipients: ["123456789"]
+  ladder: human_assisted

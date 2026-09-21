@@ -1,0 +1,20 @@
+{
+  "release": "NO_GO",
+  "blockers": [
+    "browser_oauth_acceptance",
+    "crm_oauth_sync_write_reconcile",
+    "dependency_security_review",
+    "encrypted_offsite_restore",
+    "google_provider_acceptance",
+    "http_integration",
+    "load_fault_injection",
+    "mcp_live",
+    "oauth_lifecycle",
+    "oidc_mfa",
+    "postgres_live_two_tenant",
+    "secret_vault",
+    "staging_pilot",
+    "ui_production_build",
+    "ui_typecheck"
+  ]
+}

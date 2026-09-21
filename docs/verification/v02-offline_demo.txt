@@ -1,0 +1,6 @@
+COMMAND: python scripts/demo_runtime.py
+EXIT: 0
+Before approval: waiting_approval
+After approval: succeeded
+Persisted records: 1
+Replay reuses same task: True

@@ -1,0 +1,25 @@
+# Re-engagement loop (v0.3.10)
+#
+# Owner-only. `crm.lead.stalled` faqat o'qiydi; haqiqiy xabar har doim
+# `crm.timeline.attach_message` orqali ketadi va approval talab qiladi.
+#
+# Sozlash: PUT /platform/{tenant}/reengagement/{policy}
+# Ledger:  GET /platform/{tenant}/reengagement/{policy}/ledger
+# Sync:    POST /platform/{tenant}/reengagement/{policy}/sync
+#
+# Barcha chegaralar platformada ham majburiy (model: ReengagementPolicy).
+reengagement:
+  main:
+    agent: sales.reengager           # pack.yaml dagi agent id
+    connection: crm_main             # integrations.json dagi connection
+    inactive_minutes: 120            # 1..20160
+    cooldown_seconds: 86400          # 300..2592000
+    max_attempts: 2                  # 1..10  (bir mijozga avtomatik urinish)
+    max_per_cycle: 5                 # 1..20  (bir siklda nechta lid)
+    interval_seconds: 3600           # 300..604800
+    max_steps: 4                     # 1..12
+    max_seconds: 1800                # 60..86400
+    enabled: true
+#
+# Talab: llm.agent_loop_enabled=true va llm.model o'rnatilgan bo'lishi shart,
+# aks holda run'lar escalated bo'ladi (ResultPlanner explicit opt-in).

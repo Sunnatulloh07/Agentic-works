@@ -1,0 +1,45 @@
+{
+  "_comment": "WhatsApp channel mapping (P8). The customer already has a Meta WhatsApp Business account; this block adds no vendor and no migration. It only names which number sends, which recipients exist, which templates are approved, and where the last inbound message time can be read. Copy the 'whatsapp' and 'whatsapp_tokens' blocks below into config/integrations.json, merged under the tenant key next to 'sheets_registers', 'business_graph', 'assets' and 'vision'. Only the Cloud API exists: the On-Premises API was sunset on 2025-10-23 and a config naming it is refused rather than silently treated as Cloud.",
+  "_note_window": "The 24-hour service window is the whole point of this block. Meta opens it when the CUSTOMER writes and refreshes it on every new inbound message; inside it a free-form reply is allowed and is not charged, outside it only a Meta-approved template may be sent, and free-form text outside it is refused with error 131047 and never delivered. The platform therefore READS the window instead of assuming it: whatsapp.window computes the closing time from the last inbound timestamp and our own clock, so the answer can be shown to an operator. The timestamp must carry a timezone (Z or +05:00) or be an epoch number. A naive '2026-09-19 10:00:00' is refused rather than read as UTC, because Uzbekistan is UTC+5 and a five-hour error places a send outside the window.",
+  "_note_tokens": "Two credentials, never one. Meta grants whatsapp_business_messaging (send) and whatsapp_business_management (account) as separate scopes, and the platform keeps them as separate environment references so a send credential can never inspect the account and vice versa. Both entries are the NAME of an environment variable, never the secret itself: secrets stay in the environment, as everywhere else in this platform. Only the messaging credential is used by any registered tool; the management credential exists so the operator can wire account-level health checks, because an agent needs to message and has no business reading the account.",
+  "_note_templates": "Templates are operator configuration, not model output. Each is declared with the Meta template name, the language code and the category (marketing / utility / authentication). The model selects a declared template BY KEY and can supply neither the language nor the category, because reclassifying a marketing template as utility to slip past a restriction is exactly the abuse Meta punishes with a quality-rating drop. Submitting a template is a Meta review process with the operator's legal responsibility attached, so there is no tool to create, edit or submit one.",
+  "_note_contacts": "Every recipient is operator-declared: a stable id mapped to an E.164 number without a leading '+'. A raw phone number is never accepted as a tool argument, because a model-supplied number is an unbounded send surface. One contact per call: there is no list-send and no broadcast anywhere in this block.",
+  "_note_send": "whatsapp.send is 'write', so the engine requires a human approval before anything reaches a customer. The window rule sits on top of that approval rather than replacing it: an approved message the provider will refuse is still a broken promise, so free-form text outside the window is refused BEFORE any provider I/O and is never silently downgraded to a template. The engine also checks the destination against the agent's allowed_recipients, so a direct send to an undeclared contact is refused at submission.",
+  "_note_telegram": "Telegram has no such window, and this difference belongs in the pack documentation: a worker will ask why a reply works in Telegram and not in WhatsApp. The answer is that Telegram has no service-window rule and WhatsApp does, so WhatsApp needs a template outside it while Telegram does not. Same platform, different channel law.",
+  "demo-sales": {
+    "whatsapp": {
+      "registers": {
+        "support": {
+          "api": "cloud",
+          "connection": "sales",
+          "phone_number_id": "123456789012345",
+          "contacts": {
+            "ali": "998901234567",
+            "dilnoza": "998907654321"
+          },
+          "templates": {
+            "order_update": {
+              "name": "order_update_uz",
+              "language": "uz",
+              "category": "utility"
+            },
+            "promo": {
+              "name": "promo_uz",
+              "language": "uz",
+              "category": "marketing"
+            }
+          },
+          "window_register": "sales",
+          "window_range": "windows",
+          "last_inbound_column": "oxirgi_xabar"
+        }
+      }
+    },
+    "whatsapp_tokens": {
+      "support": {
+        "messaging": "WHATSAPP_SUPPORT_MESSAGING_TOKEN",
+        "management": "WHATSAPP_SUPPORT_MANAGEMENT_TOKEN"
+      }
+    }
+  }
+}

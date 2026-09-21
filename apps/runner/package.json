@@ -1,0 +1,15 @@
+{
+  "name": "agent-platform-runner",
+  "private": true,
+  "version": "0.3.8",
+  "description": "Device-bound read-only runner with allowlist and durable journal",
+  "engines": {
+    "node": ">=22.4.0"
+  },
+  "scripts": {
+    "start": "node runner.js",
+    "test": "node --test test.js",
+    "self-test": "node --test test.js"
+  },
+  "type": "commonjs"
+}

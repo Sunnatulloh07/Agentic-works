@@ -1,0 +1,2 @@
+COMMAND: python -m compileall -q api-python scripts
+EXIT: 0

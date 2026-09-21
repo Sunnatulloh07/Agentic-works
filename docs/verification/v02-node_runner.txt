@@ -1,0 +1,25 @@
+COMMAND: node --test apps/runner/test.js
+EXIT: 0
+✔ real file read (2.891328ms)
+✔ real directory listing (0.505477ms)
+✔ outside allowlist denied (0.359553ms)
+✔ relative path denied (0.149761ms)
+✔ prefix lookalike denied (0.282473ms)
+✔ symlink escape denied (0.333989ms)
+✔ secret files denied (0.26696ms)
+✔ disabled physical tool denied (0.196644ms)
+✔ arbitrary shell denied (0.223895ms)
+✔ large text denied (0.54966ms)
+✔ binary file denied (0.543231ms)
+✔ durable journal result survives reload (2.006171ms)
+✔ journal traversal denied (0.203767ms)
+✔ listing omits denied filenames (0.821584ms)
+✔ listing omits symlink escape (0.674855ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 89.298962

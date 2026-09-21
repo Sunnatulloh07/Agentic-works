@@ -1,0 +1,183 @@
+{
+  "connections": {
+    "dynamodb_customer": {
+      "driver": "dynamodb_managed",
+      "contract_version": "1.1",
+      "generation": 1,
+      "enabled": false,
+      "lifecycle": "configured",
+      "agent_ids": [
+        "ops.assistant"
+      ],
+      "capabilities": [
+        "read",
+        "plan_write",
+        "execute_write"
+      ],
+      "isolation": "tenant_column",
+      "tenant_column": "tenant_id",
+      "resources": {
+        "contacts": {
+          "key_field": "id",
+          "version_field": "version",
+          "read_fields": [
+            "id",
+            "version",
+            "name",
+            "active"
+          ],
+          "insert_fields": [
+            "name",
+            "active"
+          ],
+          "update_fields": [
+            "name",
+            "active"
+          ]
+        }
+      },
+      "region": "us-east-1",
+      "aws_account_id": "000000000000",
+      "access_key_env": "CUSTOMER_AWS_ACCESS_KEY_ID",
+      "secret_key_env": "CUSTOMER_AWS_SECRET_ACCESS_KEY"
+    },
+    "cassandra_customer": {
+      "driver": "cassandra_managed",
+      "contract_version": "1.1",
+      "generation": 1,
+      "enabled": false,
+      "lifecycle": "configured",
+      "agent_ids": [
+        "ops.assistant"
+      ],
+      "capabilities": [
+        "read",
+        "plan_write",
+        "execute_write"
+      ],
+      "isolation": "tenant_column",
+      "tenant_column": "tenant_id",
+      "resources": {
+        "contacts": {
+          "key_field": "id",
+          "version_field": "version",
+          "read_fields": [
+            "id",
+            "version",
+            "name",
+            "active"
+          ],
+          "insert_fields": [
+            "name",
+            "active"
+          ],
+          "update_fields": [
+            "name",
+            "active"
+          ]
+        }
+      },
+      "host": "cassandra.example",
+      "allowed_hosts": [
+        "cassandra.example"
+      ],
+      "port": 9142,
+      "database": "customer",
+      "user": "writer",
+      "password_env": "CUSTOMER_DB_PASSWORD",
+      "tls": true
+    },
+    "neo4j_customer": {
+      "driver": "neo4j_managed",
+      "contract_version": "1.1",
+      "generation": 1,
+      "enabled": false,
+      "lifecycle": "configured",
+      "agent_ids": [
+        "ops.assistant"
+      ],
+      "capabilities": [
+        "read",
+        "plan_write",
+        "execute_write"
+      ],
+      "isolation": "tenant_column",
+      "tenant_column": "tenant_id",
+      "resources": {
+        "contacts": {
+          "key_field": "id",
+          "version_field": "version",
+          "read_fields": [
+            "id",
+            "version",
+            "name",
+            "active"
+          ],
+          "insert_fields": [
+            "name",
+            "active"
+          ],
+          "update_fields": [
+            "name",
+            "active"
+          ]
+        }
+      },
+      "host": "database.example",
+      "allowed_hosts": [
+        "database.example"
+      ],
+      "port": 7687,
+      "database": "customer",
+      "user": "writer",
+      "password_env": "CUSTOMER_DB_PASSWORD",
+      "tls": true
+    },
+    "elasticsearch_customer": {
+      "driver": "elasticsearch_managed",
+      "contract_version": "1.1",
+      "generation": 1,
+      "enabled": false,
+      "lifecycle": "configured",
+      "agent_ids": [
+        "ops.assistant"
+      ],
+      "capabilities": [
+        "read",
+        "plan_write",
+        "execute_write"
+      ],
+      "isolation": "tenant_column",
+      "tenant_column": "tenant_id",
+      "resources": {
+        "contacts": {
+          "key_field": "id",
+          "version_field": "version",
+          "read_fields": [
+            "id",
+            "version",
+            "name",
+            "active"
+          ],
+          "insert_fields": [
+            "name",
+            "active"
+          ],
+          "update_fields": [
+            "name",
+            "active"
+          ]
+        }
+      },
+      "host": "database.example",
+      "allowed_hosts": [
+        "database.example"
+      ],
+      "port": 9200,
+      "database": "customer",
+      "user": "writer",
+      "password_env": "CUSTOMER_DB_PASSWORD",
+      "tls": true
+    }
+  }
+}

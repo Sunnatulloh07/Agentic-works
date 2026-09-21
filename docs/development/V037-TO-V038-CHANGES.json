@@ -1,0 +1,132 @@
+[
+  {
+    "path": ".github/workflows/verify.yml",
+    "kind": "modified",
+    "sha256": "c39eb6dc68719e3bde99a63bb0fa4073c574d5e6d1147468384cb1bd4e9cb65c"
+  },
+  {
+    "path": "README.md",
+    "kind": "modified",
+    "sha256": "590c4d41fe5abe307ac662f8499718ec4aafe61cec5fb0dae63a1799bc36f985"
+  },
+  {
+    "path": "api-python/app/google_data_api.py",
+    "kind": "new",
+    "sha256": "493568225299ae3c6d6c018e58e0974f1b2721a0ca12a4a89d451d5969a534d4"
+  },
+  {
+    "path": "api-python/app/main.py",
+    "kind": "modified",
+    "sha256": "3b428257e1cf9f6f0a9712796c0da11f2965bde99026f03dc19a76b7ba01d79b"
+  },
+  {
+    "path": "api-python/app/platform_api.py",
+    "kind": "modified",
+    "sha256": "e5869afa4f6f51f7c119f64848ca019f4fd46be3f327de6f122e14c53b716a6f"
+  },
+  {
+    "path": "api-python/integration_tests/test_google_data_http.py",
+    "kind": "new",
+    "sha256": "f02c493046802c3f2016d36e8f47620139191a1e3780a4564617333c23506607"
+  },
+  {
+    "path": "api-python/platform_runtime/google_adapters.py",
+    "kind": "modified",
+    "sha256": "dad5bcb1cf265f1b92dc88d1b9c5c45b7a35674f71ec9d46dac10b3e4841c659"
+  },
+  {
+    "path": "api-python/platform_runtime/google_reconcile.py",
+    "kind": "new",
+    "sha256": "f057187d2707a1b4d7ab5522a7fa742bd94ef13583ef5b3febd78fe9c6123000"
+  },
+  {
+    "path": "api-python/platform_runtime/google_sync.py",
+    "kind": "new",
+    "sha256": "0e8e31cab0f556974d13c36ab9c75e2d45124f1780ac2f6c16eb26e73dc937a2"
+  },
+  {
+    "path": "api-python/platform_runtime/sync_store.py",
+    "kind": "modified",
+    "sha256": "29746d196d76e95a2ee4520a8211b15a00effdcf76eff991ee010f2727aeae16"
+  },
+  {
+    "path": "api-python/runtime_tests/test_google_reconcile.py",
+    "kind": "new",
+    "sha256": "4223872e5e0652864a97127f80c8873ed5ba994907c95c0a740dfb164a624d14"
+  },
+  {
+    "path": "api-python/runtime_tests/test_google_sync.py",
+    "kind": "new",
+    "sha256": "2aaf3c0784396babd80cd66780c8200fbb72501e6b238ea8ec88f0ce2437311e"
+  },
+  {
+    "path": "apps/runner/package.json",
+    "kind": "modified",
+    "sha256": "b0401636b69c6fce219a603167c5d913af267463f0faf839221f5ce9ed03ca2a"
+  },
+  {
+    "path": "apps/ui/app/platform/page.tsx",
+    "kind": "modified",
+    "sha256": "c628c91bcff9aee7ff7690b2436c1470c582648a50059e9679ed2bec2dd90f4a"
+  },
+  {
+    "path": "apps/ui/components/GoogleData.tsx",
+    "kind": "new",
+    "sha256": "15d17931d8c2f616023b48c96b3ef22eec500815ef6ec7feadfe5b1d8f32e028"
+  },
+  {
+    "path": "apps/ui/lib/google-data-client.d.mts",
+    "kind": "new",
+    "sha256": "e9863256bb1ff35924ac6f20147d435c303430739f623f17a48dcc08e1646b56"
+  },
+  {
+    "path": "apps/ui/lib/google-data-client.mjs",
+    "kind": "new",
+    "sha256": "2bd738d8434517109054bd0cd062981e32bf0c8aca5f62dc2e8ed03b50ade2a1"
+  },
+  {
+    "path": "apps/ui/lib/google-data-client.test.mjs",
+    "kind": "new",
+    "sha256": "b97d49560beee4c881ca4c9430693953cf03519c4a69eaaeaa9b74983c257a63"
+  },
+  {
+    "path": "apps/ui/package-lock.json",
+    "kind": "modified",
+    "sha256": "293f997c0e219d0e707bf34d0d4d8dfb93590c31eb2923c91f7a14340ac82a48"
+  },
+  {
+    "path": "apps/ui/package.json",
+    "kind": "modified",
+    "sha256": "ddea249d38971266dc8e30487b69974fb11142943c3dfbd1e65188287fbe61c8"
+  },
+  {
+    "path": "docs/IMPLEMENTATION-STATUS.md",
+    "kind": "modified",
+    "sha256": "ba9e335e33be6a1c329561e725d958e18f0f4d4940592c3d8b75b0cb7da09449"
+  },
+  {
+    "path": "docs/development/BACKLOG.json",
+    "kind": "modified",
+    "sha256": "5818a8eec4c0c4c6ead5b0160cf3ae505ec83f0b16fc6d0e9a8c64532463fbf7"
+  },
+  {
+    "path": "docs/development/PROGRESS-UZ.md",
+    "kind": "modified",
+    "sha256": "24c72c54b3a97a2bcdd679fd1352c18ddb15993b675b683c9688ab6b71b560e0"
+  },
+  {
+    "path": "docs/development/PROGRESS-V037-ARCHIVE-UZ.md",
+    "kind": "new",
+    "sha256": "bd96d9a1365b7f90ff910d7dc8d43a2bcc5a073e368cf1aac718887b76eb687a"
+  },
+  {
+    "path": "docs/development/V038-IMPLEMENTATION-UZ.md",
+    "kind": "new",
+    "sha256": "f98d64b331eca8a3ec1e0c99ecfaf8da73b3834bf07f9743155f09eb7e9439ed"
+  },
+  {
+    "path": "scripts/verify_offline.py",
+    "kind": "modified",
+    "sha256": "9b1e369c08bd25c096677e29bcbe19cc5647be175e7a3fd6077ac3376860448b"
+  }
+]

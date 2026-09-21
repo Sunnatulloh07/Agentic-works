@@ -1,0 +1,34 @@
+{
+  "_comment": "Google Sheets registers: real SMB finance/HR data lives in operator-owned spreadsheets. Copy into config/integrations.json and replace SET_... values. The spreadsheet_id is not a secret but is never sent to a model.",
+  "demo-retail": {
+    "sheets_registers": {
+      "finance": {
+        "connection": "google",
+        "spreadsheet_id": "SET_FINANCE_SPREADSHEET_ID",
+        "header_row": true,
+        "max_rows": 200,
+        "ranges": {
+          "revenue": "Kunlik!A1:F",
+          "expenses": "Xarajat!A1:D",
+          "receivables": "Qarz!A1:H"
+        }
+      },
+      "hr": {
+        "connection": "google",
+        "spreadsheet_id": "SET_HR_SPREADSHEET_ID",
+        "header_row": true,
+        "max_rows": 100,
+        "ranges": {
+          "candidates": "Nomzodlar!A1:E",
+          "attendance": "Davomat!A1:D"
+        }
+      }
+    },
+    "google_resources": {
+      "google": {
+        "recipient_emails": [],
+        "calendar_ids": ["primary"]
+      }
+    }
+  }
+}

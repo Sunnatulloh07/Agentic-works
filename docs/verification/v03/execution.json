@@ -1,0 +1,128 @@
+[
+  {
+    "gate": "python_runtime",
+    "command": [
+      "python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "runtime_tests",
+      "-v"
+    ],
+    "cwd": "api-python",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/python-runtime.log",
+    "sha256": "a08b04f9403bcf1363555e73428738f7090dd0a6edd47f9e3c9eb0376126b496"
+  },
+  {
+    "gate": "node_runner",
+    "command": [
+      "node",
+      "--test",
+      "apps/runner/test.js"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/node-runner.log",
+    "sha256": "b2a5529659eabaa6a5c38554e64df2e0c44834b71c1e60ecc4c0ac6179de0167"
+  },
+  {
+    "gate": "browser_session_client",
+    "command": [
+      "node",
+      "--test",
+      "apps/ui/lib/session-client.test.mjs"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/browser-session.log",
+    "sha256": "cfff8b69caf7e458faad0b10a63383be2565af99c885a579b5245f1f1df594ee"
+  },
+  {
+    "gate": "release_tools",
+    "command": [
+      "python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts",
+      "-p",
+      "test_release_tools.py",
+      "-v"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/release-tools.log",
+    "sha256": "cf4d2cc76b1d61432f02e7b785be7c43dffcce7fc7246a903f58be683563cc5f"
+  },
+  {
+    "gate": "python_syntax",
+    "command": [
+      "python",
+      "-m",
+      "compileall",
+      "-q",
+      "api-python",
+      "scripts"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/python-syntax.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "gate": "ui_syntax_only",
+    "command": [
+      "node",
+      "/opt/npm-global/lib/node_modules/typescript/bin/tsc",
+      "--noCheck",
+      "--jsx",
+      "preserve",
+      "--target",
+      "es2022",
+      "--module",
+      "esnext",
+      "--outDir",
+      "/tmp/v03-ts-syntax",
+      "apps/ui/app/platform/page.tsx",
+      "apps/ui/components/SessionGate.tsx"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/ui-syntax-only.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "gate": "session_declaration_types",
+    "command": [
+      "node",
+      "/opt/npm-global/lib/node_modules/typescript/bin/tsc",
+      "--strict",
+      "--noEmit",
+      "--module",
+      "nodenext",
+      "--moduleResolution",
+      "nodenext",
+      "--lib",
+      "es2022,dom",
+      "apps/ui/lib/session-client.d.mts"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/session-declaration-types.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "gate": "offline_demo",
+    "command": [
+      "python",
+      "scripts/demo_runtime.py"
+    ],
+    "cwd": ".",
+    "exit_code": 0,
+    "evidence": "docs/verification/v03/offline-demo.log",
+    "sha256": "4b38f5f3cba932d7b4e84e60881e2d5b98d628faf2f177e5e4d215d8a377ffc3"
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "name": "baseline-python-runtime",
+    "command": [
+      "/opt/venv/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "runtime_tests",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 13.13,
+    "log": "baseline-python-runtime.log"
+  },
+  {
+    "name": "baseline-node-runner",
+    "command": [
+      "node",
+      "--test",
+      "apps/runner/test.js"
+    ],
+    "exit_code": 0,
+    "seconds": 0.32,
+    "log": "baseline-node-runner.log"
+  },
+  {
+    "name": "baseline-browser-session",
+    "command": [
+      "node",
+      "--test",
+      "apps/ui/lib/session-client.test.mjs"
+    ],
+    "exit_code": 0,
+    "seconds": 0.12,
+    "log": "baseline-browser-session.log"
+  },
+  {
+    "name": "baseline-release-tools",
+    "command": [
+      "/opt/venv/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts",
+      "-p",
+      "test_release_tools.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 0.39,
+    "log": "baseline-release-tools.log"
+  },
+  {
+    "name": "baseline-demo",
+    "command": [
+      "/opt/venv/bin/python",
+      "scripts/demo_runtime.py"
+    ],
+    "exit_code": 0,
+    "seconds": 0.36,
+    "log": "baseline-demo.log"
+  }
+]

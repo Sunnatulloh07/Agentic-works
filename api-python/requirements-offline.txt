@@ -1,0 +1,2 @@
+# Required by real AES-GCM tests. Install outside offline verification.
+cryptography==50.0.1

@@ -1,0 +1,103 @@
+{
+  "checkpoint": "0.3.1-code-review-preview",
+  "baseline_archive": "project-source.zip",
+  "baseline_archive_sha256": "ebc2ea5aa9d4aee95c5967b448f46d368036606322a0ef53022010f9adcfd665",
+  "execution_status": "NOT_RUN",
+  "changes": [
+    {
+      "path": "README.md",
+      "change": "modified",
+      "sha256": "d01084aabd2b137c5b472d07c542f32c5c378f2b0f38b29fd9b2c9b3125f2ea5",
+      "baseline_sha256": "ad636e2ab03f5afea16ec42c12a36ed73ee1ac2ef58c18f70843793e4c292951"
+    },
+    {
+      "path": "api-python/app/customer360.py",
+      "change": "modified",
+      "sha256": "dd5a6f730eb2c9d51870fb71a5fc7d0352fc27263d4d0509b6ff009551e2e958",
+      "baseline_sha256": "0c12b1c26918d1d097956a4e14185b5acb75240cc96425dc845067aec7250b19"
+    },
+    {
+      "path": "api-python/app/main.py",
+      "change": "modified",
+      "sha256": "fe48bbf4694593590b4abcb29cbc6e21585d9392d64a4582497eddc69c02b758",
+      "baseline_sha256": "86f4db2c6ee3cdca06289666e4cecfeeb9f5a57af45e8b88ce2e7d4af50add27"
+    },
+    {
+      "path": "api-python/app/platform_api.py",
+      "change": "modified",
+      "sha256": "2f22e2e90862a36f45acfc4b49f9eb419fc1419d010eba6b9e28049577f9fdcb",
+      "baseline_sha256": "14f609620d72d1a0f05b7308adb950e5cd8df663fbb9253bd3f41ed7c615c06d"
+    },
+    {
+      "path": "api-python/integration_tests/test_control_plane_hardening_http.py",
+      "change": "added",
+      "sha256": "fc9ad14994753d24e8e8f07857fe1b452f1e678f9da5ce8128d1413fdc305803",
+      "baseline_sha256": null
+    },
+    {
+      "path": "api-python/platform_runtime/engine.py",
+      "change": "modified",
+      "sha256": "dfe599dbbc77db719ad02835143d0f60844b80d4de2139748f1cccb725d84b00",
+      "baseline_sha256": "b9f6502339cf4b8d7692dc854f98529c1809085abd729762aa9703011c8a644e"
+    },
+    {
+      "path": "api-python/runtime_tests/test_control_plane_authority.py",
+      "change": "added",
+      "sha256": "d08fab8d5cc09fc8ded06f6c2ced9e62237aa9033999cbbba97579b77e447fd5",
+      "baseline_sha256": null
+    },
+    {
+      "path": "api-python/runtime_tests/test_customer360.py",
+      "change": "modified",
+      "sha256": "4b7b2436489aabfe449b87058a7d8ebb47d7ca56ff963623fb8d96fea1b06655",
+      "baseline_sha256": "7ce66ce9fcbbe5eb8024ff7075721e3b6fe46296e24f19576f3b46fb94b7bbb5"
+    },
+    {
+      "path": "api-python/runtime_tests/test_identity_hardening.py",
+      "change": "modified",
+      "sha256": "316e9ae8eb3e660a341330ed5af0d0c6438b283d80344187d9dcc812280466ef",
+      "baseline_sha256": "325d4394fd2559b14b4acaced1be85c7404be1e34180d38ffb420bc997db19fc"
+    },
+    {
+      "path": "docs/CHECKPOINT-V031-UZ.md",
+      "change": "added",
+      "sha256": "421349c3d8a8f41a5d573386953e74ec3524480174f78b4264b3db416a5e6c69",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/IMPLEMENTATION-STATUS.md",
+      "change": "modified",
+      "sha256": "cb005174539450da0126fbe3dba5f33740476a75c949b8ef4d3532ba2ecc8727",
+      "baseline_sha256": "0c6dcf475ac71934e63290213028bae69a064b2b1cc98cbee03eac5468e0d5f1"
+    },
+    {
+      "path": "docs/WORKING-AGREEMENT-UZ.md",
+      "change": "added",
+      "sha256": "5b6e7e801268fd1b4227db641f017ea652ea8b72a61f67e9c4593e15d615a4a2",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/verification/v031/baseline-v03-MANIFEST.sha256",
+      "change": "added",
+      "sha256": "a41c44b56769d73e67a69a8a41335bd48a1dd07fc20098d842da3ecb7d0be7b6",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/verification/v031/execution.json",
+      "change": "added",
+      "sha256": "2c3f1b41d4b9ee96baa9b715ce44bf3c0e07a8a81925805ac42b35693e018e9e",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/verification/v031/release-evidence.json",
+      "change": "added",
+      "sha256": "e894a44ca827d0833f4ae952f3d4ec2ad793ed207c21855c8c5633a2014201df",
+      "baseline_sha256": null
+    }
+  ],
+  "metadata_exclusions": [
+    "MANIFEST.sha256",
+    "docs/verification/v031/changes.json"
+  ],
+  "notes": "Manifest is regenerated separately; neither hashes nor diff constitute executed tests."
+}

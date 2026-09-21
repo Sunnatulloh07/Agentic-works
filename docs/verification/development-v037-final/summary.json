@@ -1,0 +1,176 @@
+{
+  "kind": "offline_verification_only",
+  "created_at": "2026-09-14T10:50:52.563931+00:00",
+  "python": "3.14.6",
+  "results": [
+    {
+      "name": "python_runtime",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "runtime_tests",
+        "-v"
+      ],
+      "seconds": 25.888,
+      "log": "python_runtime.log",
+      "tests": 763
+    },
+    {
+      "name": "release_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_release_tools.py",
+        "-v"
+      ],
+      "seconds": 0.417,
+      "log": "release_tools.log",
+      "tests": 3
+    },
+    {
+      "name": "manifest_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_manifest.py",
+        "-v"
+      ],
+      "seconds": 0.32,
+      "log": "manifest_tools.log",
+      "tests": 6
+    },
+    {
+      "name": "sqlite_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "scripts/demo_runtime.py"
+      ],
+      "seconds": 0.496,
+      "log": "sqlite_demo.log"
+    },
+    {
+      "name": "managed_database_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "scripts/demo_managed_database.py"
+      ],
+      "seconds": 0.752,
+      "log": "managed_database_demo.log"
+    },
+    {
+      "name": "node_runner",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/usr/local/bin/node",
+        "--test",
+        "apps/runner/test.js"
+      ],
+      "seconds": 0.17,
+      "log": "node_runner.log",
+      "tests": 24
+    },
+    {
+      "name": "browser_session_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/usr/local/bin/node",
+        "--test",
+        "apps/ui/lib/session-client.test.mjs"
+      ],
+      "seconds": 0.14,
+      "log": "browser_session_client.log",
+      "tests": 12
+    },
+    {
+      "name": "browser_oauth_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/usr/local/bin/node",
+        "--test",
+        "apps/ui/lib/oauth-client.test.mjs"
+      ],
+      "seconds": 0.133,
+      "log": "browser_oauth_client.log",
+      "tests": 12
+    },
+    {
+      "name": "javascript_typescript_syntax",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/bin/bun",
+        "/tmp/platform-offline-4njw7it0/syntax.cjs",
+        "/tmp/ap37/agent-platform/apps"
+      ],
+      "seconds": 0.028,
+      "log": "javascript_typescript_syntax.log"
+    },
+    {
+      "name": "python_syntax",
+      "status": "PASS",
+      "checked": 153,
+      "errors": []
+    }
+  ],
+  "http_dependencies_missing": [
+    "pytest",
+    "fastapi",
+    "httpx",
+    "pydantic",
+    "jwt",
+    "yaml",
+    "psycopg",
+    "redis"
+  ],
+  "optional_database_dependencies_missing": [
+    "psycopg",
+    "pymysql",
+    "pymongo",
+    "redis",
+    "pyodbc",
+    "oracledb",
+    "boto3",
+    "cassandra",
+    "neo4j",
+    "elasticsearch"
+  ],
+  "not_performed": [
+    "dependency-backed HTTP tests",
+    "Next/React typecheck",
+    "Next production build",
+    "live providers",
+    "live network databases including SQL Server, Oracle, DynamoDB, Cassandra, Neo4j and Elasticsearch",
+    "native macOS F_GETPATH/LaunchAgent",
+    "local model inference",
+    "UI browser acceptance",
+    "production dependency audit",
+    "deployment"
+  ],
+  "release": "NO_GO"
+}

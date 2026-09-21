@@ -1,0 +1,130 @@
+[
+  {
+    "file": ".github/workflows/verify.yml",
+    "change": "modified"
+  },
+  {
+    "file": "README.md",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/app/platform_api.py",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/platform_runtime/database/contract.py",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/platform_runtime/database/enterprise_common.py",
+    "change": "added"
+  },
+  {
+    "file": "api-python/platform_runtime/database/gateway.py",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/platform_runtime/database/oracle_backend.py",
+    "change": "added"
+  },
+  {
+    "file": "api-python/platform_runtime/database/sqlserver_backend.py",
+    "change": "added"
+  },
+  {
+    "file": "api-python/platform_runtime/database/transports.py",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/requirements-databases.txt",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/runtime_tests/test_managed_database.py",
+    "change": "modified"
+  },
+  {
+    "file": "api-python/runtime_tests/test_managed_enterprise_contracts.py",
+    "change": "added"
+  },
+  {
+    "file": "config/customer-managed.example.json",
+    "change": "modified"
+  },
+  {
+    "file": "docs/CHECKPOINT-V035-UZ.md",
+    "change": "added"
+  },
+  {
+    "file": "docs/ENTERPRISE-SQL-PREVIEW-UZ.md",
+    "change": "added"
+  },
+  {
+    "file": "docs/IMPLEMENTATION-STATUS.md",
+    "change": "modified"
+  },
+  {
+    "file": "docs/MANAGED-DATABASES-UZ.md",
+    "change": "modified"
+  },
+  {
+    "file": "docs/verification/source-v034/MANIFEST-v034.sha256",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/source-v034/integrity-report.json",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/browser_session_client.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/javascript_typescript_syntax.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/managed_database_demo.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/manifest_tools.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/node_runner.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/python_runtime.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/python_syntax.json",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/release_tools.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/sqlite_demo.log",
+    "change": "added"
+  },
+  {
+    "file": "docs/verification/v035/summary.json",
+    "change": "added"
+  },
+  {
+    "file": "scripts/test_manifest.py",
+    "change": "added"
+  },
+  {
+    "file": "scripts/verify_manifest.py",
+    "change": "added"
+  },
+  {
+    "file": "scripts/verify_offline.py",
+    "change": "modified"
+  }
+]

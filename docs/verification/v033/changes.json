@@ -1,0 +1,74 @@
+[
+  {
+    "path": ".github/workflows/verify.yml",
+    "change": "modified"
+  },
+  {
+    "path": "README.md",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/app/platform_api.py",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/integration_tests/test_connector_authority_http.py",
+    "change": "added"
+  },
+  {
+    "path": "api-python/platform_runtime/connector_authority.py",
+    "change": "added"
+  },
+  {
+    "path": "api-python/platform_runtime/connector_contract.py",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/platform_runtime/connectors.py",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/platform_runtime/engine.py",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/platform_runtime/postgres_connector.py",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/runtime_tests/test_agent_loop.py",
+    "change": "modified"
+  },
+  {
+    "path": "api-python/runtime_tests/test_connector_authority.py",
+    "change": "added"
+  },
+  {
+    "path": "apps/ui/app/platform/page.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "apps/ui/components/AgentRuns.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "docs/AUDIT-V033-UZ.md",
+    "change": "added"
+  },
+  {
+    "path": "docs/CHECKPOINT-V033-UZ.md",
+    "change": "added"
+  },
+  {
+    "path": "docs/WORKING-AGREEMENT-UZ.md",
+    "change": "modified"
+  },
+  {
+    "path": "docs/prd-v02/02-CONNECTORS-DATA.md",
+    "change": "modified"
+  },
+  {
+    "path": "scripts/verify_offline.py",
+    "change": "added"
+  }
+]

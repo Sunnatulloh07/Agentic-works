@@ -1,0 +1,21 @@
+products:
+  - { id: KB001, name: "Qizlar kurtkasi (qish)", price_uzs: 350000, sizes: [3, 4, 5, 6] }
+  - { id: KB002, name: "O'g'il bolalar kurtkasi", price_uzs: 330000, sizes: [4, 5, 6, 7] }
+  - { id: KB003, name: "Bolalar ko'ylagi (paxta)", price_uzs: 120000, sizes: [2, 3, 4, 5] }
+  - { id: KB004, name: "Bolalar shimmi (jinse)", price_uzs: 150000, sizes: [3, 4, 5, 6] }
+  - { id: KB005, name: "Qizlar ko'ylagi (bayram)", price_uzs: 220000, sizes: [4, 5, 6] }
+  - { id: KB006, name: "Sport kostyumi", price_uzs: 280000, sizes: [5, 6, 7, 8] }
+  - { id: KB007, name: "Yomg'irlik (plash)", price_uzs: 180000, sizes: [3, 4, 5] }
+  - { id: KB008, name: "Qishki shapka+sharf", price_uzs: 90000, sizes: ["S", "M"] }
+  - { id: KB009, name: "Bolalar krossovkasi", price_uzs: 310000, sizes: [28, 29, 30, 31] }
+  - { id: KB010, name: "Maktab formasi (o'g'il)", price_uzs: 400000, sizes: [6, 7, 8, 9] }
+  - { id: KB011, name: "Maktab formasi (qiz)", price_uzs: 420000, sizes: [6, 7, 8] }
+  - { id: KB012, name: "Futbolka (3 lik to'plam)", price_uzs: 140000, sizes: [4, 5, 6] }
+  - { id: KB013, name: "Kuzgi kurtka (yengil)", price_uzs: 260000, sizes: [4, 5, 6, 7] }
+  - { id: KB014, name: "Bolalar paltosi", price_uzs: 480000, sizes: [5, 6, 7] }
+  - { id: KB015, name: "Jinsi sarafan", price_uzs: 190000, sizes: [4, 5, 6] }
+  - { id: KB016, name: "Pijama to'plami", price_uzs: 110000, sizes: [3, 4, 5, 6] }
+  - { id: KB017, name: "Qishki botinka", price_uzs: 360000, sizes: [29, 30, 31, 32] }
+  - { id: KB018, name: "Bosh kiyim (kepka)", price_uzs: 60000, sizes: ["S", "M"] }
+  - { id: KB019, name: "Bolalar sumkasi (maktab)", price_uzs: 210000, sizes: ["ST"] }
+  - { id: KB020, name: "Paypoq (5 juft)", price_uzs: 45000, sizes: [22, 24, 26] }

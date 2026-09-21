@@ -1,0 +1,86 @@
+{
+  "_comment": "Inventory read (PRD v0.4 P4). The customer named this problem twice: 'Sotuvchi narxni olib yurmasin' -- the seller must not carry the price around. This block declares NO connection, NO register and NO column of its own. It names an ENTITY in the Business Graph, an identity attribute, and a mapping from ROLES to graph attributes. The graph already resolves which systems disagree, so inventory does not hold a second opinion about sources. Copy the 'inventory' block into config/integrations.json under the tenant key, next to 'business_graph', and replace SET_... values.",
+  "demo-retail": {
+    "inventory": {
+      "entity": "product",
+      "identity": "sku",
+      "attributes": {
+        "price": "price",
+        "cost": "cost",
+        "currency": "currency",
+        "stock": "stock_quantity",
+        "unit": "unit",
+        "name": "name",
+        "category": "category"
+      }
+    },
+    "_business_graph_note": "The block below is the graph this inventory block reads. It is shown so the two read together, and it validates as a real business_graph block because it is one: an operator copies both into config/integrations.json under the same tenant key. The per-attribute priority is the PRD 6.3 rule -- the operator decides which system is authoritative for which attribute, because both numbers are legitimate: the accountant knows the 1C number, the seller knows the MoySklad number.",
+    "business_graph": {
+      "conflict_policy": "report",
+      "source_priority": {
+        "price": { "primary": "moysklad", "fallback": ["onec_docs", "finance"] },
+        "cost": { "primary": "moysklad", "fallback": ["onec_docs"] },
+        "stock_quantity": { "primary": "moysklad" },
+        "tax_category": { "primary": "onec_docs" },
+        "margin": { "primary": "finance" }
+      },
+      "entities": {
+        "product": {
+          "identity": "sku",
+          "sources": {
+            "moysklad": {
+              "tool": "connectors.read",
+              "args": {
+                "connection": "SET_MOYSKLAD_CONNECTION",
+                "table": "products",
+                "columns": ["sku", "name", "price", "cost", "stock", "unit",
+                            "category", "currency"],
+                "limit": 100
+              },
+              "key": "sku",
+              "map": {
+                "name": "name",
+                "price": "price",
+                "cost": "cost",
+                "stock_quantity": "stock",
+                "unit": "unit",
+                "category": "category",
+                "currency": "currency"
+              }
+            },
+            "onec_docs": {
+              "tool": "connectors.read",
+              "args": {
+                "connection": "SET_ONEC_CONNECTION",
+                "table": "nomenclature",
+                "columns": ["code", "price_with_vat", "tax_category"],
+                "limit": 100
+              },
+              "key": "code",
+              "map": {
+                "price": "price_with_vat",
+                "tax_category": "tax_category"
+              }
+            },
+            "finance": {
+              "tool": "sheets.rows",
+              "args": { "register": "finance", "range": "margins" },
+              "key": "SKU",
+              "map": { "margin": "Foyda" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "_notes": [
+    "attributes maps a ROLE to a graph attribute. A role is a meaning -- 'the unit price' -- and the operator decides which attribute carries it. Naming the graph attribute directly in a tool argument would let a model choose which number it calls a price.",
+    "The roles are: price, cost, currency, stock, unit, name, category. An unknown role is refused rather than ignored, because a mistyped role would silently configure nothing and 'the system has no price' looks exactly like 'we looked for the wrong attribute'.",
+    "A role the operator omits is not an error. A customer whose register has no cost column has not misconfigured anything: 'inventory.margin' reports metric not computable and names the missing input, rather than failing the whole read.",
+    "inventory.price returns every observed value with its source. When MoySklad, 1C and the finance sheet disagree the conflict is reported and, under the default conflict_policy 'report', NOTHING is selected. Under 'primary_wins' the declared priority selects one and the conflict is still reported.",
+    "A margin is computed ONLY when price and cost are both readable. 'not_computable' names missing or unusable data (not_declared / blank / unread); 'margin_blocked_by_conflict' names a refusal to CHOOSE. The two send an operator to different places: one is their registers, the other is one line of configuration.",
+    "Stock is the quantity the register holds and is NEVER translated into 'available'. The platform does not know about reservations, quarantine, backorder, or a warehouse the register does not track.",
+    "Nothing here writes. A price and a stock level are inventory master data: an entity able to edit the price it reports on would be the author of the number a salesperson quotes. There is also no tool that reserves stock, quotes, discounts or orders.",
+    "No figure is attributed to a person. There is no per-seller price or per-seller discount figure, because the same number attributed to the salesperson who quoted it is a sanction waiting to happen."
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "_comment": "Vision event mapping (P11b). The customer already owns cameras and an edge model; this block adds no adapter, no transport and no storage. It only names which existing register holds the events and which column means what. Copy the 'vision' block below into config/integrations.json, merged under the tenant key next to 'sheets_registers', 'assets' and 'business_graph'. The register and range names below are examples: they must already exist in that tenant's sheets_registers block, and 'assets.levels' must be declared, because an event with nothing to bind to has no owner.",
+  "_note_frames": "Frames never reach the platform. Only {station, event, timestamp, confidence} is read, and there is no tool here that accepts a frame, image, stream, RTSP URL or base64 blob. This is the same rule as voice in v0.4 ('audio never reaches the planner, only the transcript'), and for vision it is also legally required: under Uzbekistan Law No. O'RQ-1125 (26.03.2026) biometric data must stay local and be entered in a state register, so carrying frames to the cloud would put the customer in breach. Keeping the frame on the edge is a requirement, not an optimisation.",
+  "_note_sensitivity": "sensitivity splits the tool surface in two, exactly as the PRD requires. 'station' = impersonal events (defect, cycle time, idle, SOP deviation) read by vision.station_event. 'person' = person-identifying events (face detection) read by vision.person_event, which is BIOMETRIC and therefore human_led only. There is no third option, and a register declared person-identifying must name the classes that are: an empty person_classes list would let every row be read on the impersonal path while the register claims to be sensitive.",
+  "_note_person_classes": "person_classes is the tenant-wide vocabulary of identifying event classes, not a per-register setting. A class is a property of the EVENT, not of the sheet it happens to sit in: if 'yuz' is identifying in the access register it is identifying in the shop-floor register too. This matters because a face-detection row landing in the wrong sheet would otherwise be read as an ordinary event.",
+  "_note_biometric_ack": "biometric_ack must be true before any person-identifying event is read. It is the operator's acknowledgement of the local-storage and state-register obligation, and the platform refuses until it is given. It is deliberately a separate flag rather than an implicit consequence of setting sensitivity, so the acknowledgement is an explicit act and not a side effect.",
+  "_note_window": "The event stream is continuous, so every read is windowed and bounded: 'since' and 'until' are ISO dates (YYYY-MM-DD) and 'limit' is capped. A non-ISO cell such as 19.09.2026 is counted in 'undated' rather than guessed, because guessing includes or excludes the wrong day. 'truncated' is always present so a bounded answer cannot look complete.",
+  "_note_confidence": "The confidence column is optional and its value is reported verbatim as text. It is never converted into a correctness claim: the PRD's own warning applies, that vendor accuracy figures depend on camera angle and lighting. A blank confidence cell is omitted rather than reported as zero, because a blank cell and a confident zero are different facts.",
+  "_note_binding": "Each event binds to an ASSET (a leaf path) from the P11 model, so it can appear on that asset's graph.timeline. A station naming an intern node (a plant, a shop, a line) is reported in 'unbound' rather than attached to a node the customer never asked about. Matching is by segment, never by string prefix: 'zavod-1' must not claim 'zavod-10' events.",
+  "demo-plant": {
+    "vision": {
+      "registers": {
+        "shopfloor": {
+          "register": "plant",
+          "range": "events",
+          "station_column": "stansiya",
+          "event_column": "hodisa",
+          "timestamp_column": "sana",
+          "confidence_column": "ishonch",
+          "sensitivity": "station"
+        },
+        "access": {
+          "register": "plant",
+          "range": "person_events",
+          "station_column": "stansiya",
+          "event_column": "hodisa",
+          "timestamp_column": "sana",
+          "sensitivity": "person",
+          "person_classes": ["yuz"],
+          "biometric_ack": true
+        }
+      }
+    }
+  }
+}

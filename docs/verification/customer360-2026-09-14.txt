@@ -1,0 +1,20 @@
+Customer 360 phase verification, 2026-09-14
+
+Scope:
+- tenant-scoped customer, contact, channel identity, and order storage
+- platform API routes and dashboard Customer 360 tab
+- explicit channel identity verification, no automatic merge
+
+Evidence:
+- Python runtime unittest: 119 passed, 0 failed
+- Node runner tests: 15 passed, 0 failed
+- Python compileall: passed
+- archive path traversal scan: passed
+- static tenant predicate and parameterization audit: passed
+
+Not run in Computer:
+- FastAPI HTTP integration tests, because web dependencies are not installed
+- React typecheck/Next build, because npm dependencies and tsc are not installed
+- real CRM/ERP provider calls, OAuth, PostgreSQL, production deployment
+
+Release status: IMPLEMENTED_LOCAL only, not production-ready.

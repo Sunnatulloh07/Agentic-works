@@ -1,0 +1,335 @@
+// Runner v1 (docs §3.5): allowlist'dan tashqariga chiqmaydi, har harakat audit'ga.
+// Chiqish kodlari: 0=self-test/toza, 1=TOKEN yo'q, 2=5x reconnect muvaffaqiyatsiz,
+// 3=kill switch (nazorat farqlaydi), 4=token eskirgan.
+// Tray (Electron) + global hotkey + screenshot + imzoli update — keyin (docs §3.5);
+// hozir: SIGINT/SIGTERM + STOP fayli + server stopped bayrog'i + reconnect backoff.
+const fs = require("fs");
+const path = require("path");
+const WebSocket = require("ws");
+
+const SERVER = process.env.RUNNER_SERVER || "ws://localhost:8000/runner/ws";
+const TOKEN = process.env.RUNNER_TOKEN || "";
+function allowFile() { return process.env.RUNNER_ALLOW || path.join(__dirname, "..", "..", "packs", "demo-retail", "devices.yaml"); }
+function auditFile() { return process.env.RUNNER_AUDIT || path.join(__dirname, "audit.jsonl"); }
+const STOP_FILE = path.join(__dirname, "STOP");
+function spoolDir() { return process.env.RUNNER_SPOOL || path.join(__dirname, "spool"); }
+const SPOOL_MAX = 100;
+const HB_MS = parseInt(process.env.RUNNER_HB_MS || "30000", 10);
+
+function loadAllow() {
+  const lines = fs.readFileSync(allowFile(), "utf-8").split(/\r?\n/);
+  const folders = [];
+  const denyWords = [];
+  const apps = [];
+  const printers = [];
+  const pushFlow = (text, arr, lower = true) => {
+    for (const q of text.matchAll(/["']([^"']+)["']/g)) {
+      const v = q[1].replace(/\//g, path.sep);
+      arr.push(lower ? v.toLowerCase() : v);
+    }
+  };
+  let section = null; // 'folders' | 'deny' | 'apps' | 'printers' | null
+  for (const line of lines) {
+    let m = line.match(/^\s*folders\s*:\s*\[(.*)\]/);
+    if (m) { pushFlow(m[1], folders); continue; }
+    m = line.match(/^\s*deny_always\s*:\s*\[(.*)\]/);
+    if (m) { pushFlow(m[1], denyWords); continue; }
+    m = line.match(/^\s*apps\s*:\s*\[(.*)\]/);
+    if (m) { pushFlow(m[1], apps); continue; }
+    m = line.match(/^\s*printers\s*:\s*\[(.*)\]/);
+    if (m) { pushFlow(m[1], printers, false); continue; }
+    if (/^\s*folders\s*:/.test(line)) { section = "folders"; continue; }
+    if (/^\s*deny_always\s*:/.test(line)) { section = "deny"; continue; }
+    if (/^\s*apps\s*:/.test(line)) { section = "apps"; continue; }
+    if (/^\s*printers\s*:/.test(line)) { section = "printers"; continue; }
+    if (/^\s*\w/.test(line) && !/^\s*-\s*["']/.test(line)) { section = null; continue; }
+    const item = line.match(/^\s*-\s*["']([^"']+)["']/);
+    if (!item) continue;
+    const v = item[1].replace(/\//g, path.sep);
+    if (section === "folders") folders.push(v.toLowerCase());
+    else if (section === "deny") denyWords.push(v.toLowerCase());
+    else if (section === "apps") apps.push(v.toLowerCase());
+    else if (section === "printers") printers.push(item[1]);
+  }
+  return { folders, denyWords, apps, printers };
+}
+
+function allowedTarget(allow, target) {
+  const low = String(target).toLowerCase();
+  if (allow.denyWords.some((w) => low.includes(w))) return false; // deny_always
+  let t;
+  try {
+    t = fs.realpathSync(path.resolve(target)).toLowerCase(); // symlinkniy yechish
+  } catch {
+    t = path.resolve(target).toLowerCase();
+  }
+  return allow.folders.some((f) => t === f || t.startsWith(f + path.sep));
+}
+
+function audit(entry) {
+  try {
+    fs.appendFileSync(auditFile(), JSON.stringify({ ts: Date.now(), ...entry }) + "\n");
+  } catch {
+    console.error("AUDIT yozilmadi (disk?)");
+  }
+}
+
+function execTool(allow, tool, params) {
+  audit({ tool, params: params || {}, phase: "attempt" }); // boshlanish izi
+  if (tool === "fs.list") {
+    const dir = String((params || {}).dir || "");
+    if (!allowedTarget(allow, dir)) {
+      audit({ tool, dir, ok: false, error: "deny" });
+      return { ok: false, error: "allowlist'da yo'q: " + dir };
+    }
+    let real = dir;
+    try {
+      real = fs.realpathSync(path.resolve(dir)); // tekshirilgan yo'l bilan o'qish
+    } catch {
+      audit({ tool, dir, ok: false, error: "path" });
+      return { ok: false, error: "yo'l topilmadi" };
+    }
+    try {
+      const names = fs.readdirSync(real);
+      audit({ tool, dir: real, count: names.length, ok: true });
+      return { ok: true, entries: names };
+    } catch (e) {
+      audit({ tool, dir: real, ok: false, error: String(e.message || e).slice(0, 200) });
+      return { ok: false, error: "o'qib bo'lmadi" };
+    }
+  }
+  if (tool === "office.read_excel") {
+    const file = String((params || {}).file || "");
+    if (!allowedTarget(allow, file)) {
+      audit({ tool, file, ok: false, error: "deny" });
+      return { ok: false, error: "allowlist'da yo'q: " + file };
+    }
+    let real = file;
+    try {
+      real = fs.realpathSync(path.resolve(file));
+      if (fs.statSync(real).size > 10 * 1024 * 1024) {
+        audit({ tool, file: real, ok: false, error: "too big" });
+        return { ok: false, error: "fayl juda katta (10MB+)" };
+      }
+    } catch {
+      audit({ tool, file, ok: false, error: "path" });
+      return { ok: false, error: "yo'l topilmadi" };
+    }
+    try {
+      const XLSX = require("xlsx");
+      const wb = XLSX.readFile(real, { bookVBA: false, WTF: false });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }).slice(0, 500);
+      audit({ tool, file: real, ok: true, rows: rows.length });
+      return { ok: true, sheet: wb.SheetNames[0], rows };
+    } catch (e) {
+      audit({ tool, file: real, ok: false, error: String(e.message || e).slice(0, 200) });
+      return { ok: false, error: "excel o'qilmadi" };
+    }
+  }
+  if (tool === "print.spool") {
+    const file = String((params || {}).file || "");
+    const printer = String((params || {}).printer || "");
+    if (!allow.printers.includes(printer)) {
+      audit({ tool, file, printer, ok: false, error: "printer deny" });
+      return { ok: false, error: "printer ruxsatda yo'q: " + printer };
+    }
+    if (!allowedTarget(allow, file)) {
+      audit({ tool, file, printer, ok: false, error: "deny" });
+      return { ok: false, error: "allowlist'da yo'q: " + file };
+    }
+    try {
+      const dir = spoolDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const existing = fs.readdirSync(dir);
+      if (existing.length >= SPOOL_MAX) {
+        audit({ tool, file, printer, ok: false, error: "spool full" });
+        return { ok: false, error: "spool to'la — operator tozalasin" };
+      }
+      const dest = path.join(dir, Date.now() + "-" + path.basename(file));
+      fs.copyFileSync(fs.realpathSync(path.resolve(file)), dest);
+      audit({ tool, file, printer, ok: true, spool: dest });
+      return { ok: true, spool: dest };
+    } catch (e) {
+      audit({ tool, file, printer, ok: false, error: String(e.message || e).slice(0, 200) });
+      return { ok: false, error: "spool xato" };
+    }
+  }
+  if (tool === "print.status") {
+    audit({ tool, phase: "status" });
+    try {
+      const dir = spoolDir();
+      const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+      return { ok: true, printers: allow.printers, queued: files.length };
+    } catch (e) {
+      return { ok: false, error: "status xato" };
+    }
+  }
+  if (tool === "app.launch") {
+    const appName = String((params || {}).app || "").toLowerCase();
+    if (!allow.apps.includes(appName)) {
+      audit({ tool, app: appName, ok: false, error: "app deny" });
+      return { ok: false, error: "app ruxsatda yo'q: " + appName };
+    }
+    audit({ tool, app: appName, ok: true, note: "allowlist tasdiq" });
+    if (process.env.RUNNER_EXEC === "1") {
+      if (!path.isAbsolute(appName)) {
+        audit({ tool, app: appName, ok: false, error: "absolute path kerak" });
+        return { ok: false, error: "real ishga tushirish faqat absolute path bilan" };
+      }
+      try {
+        const { spawn } = require("child_process");
+        const child = spawn(appName, [], { detached: true, stdio: "ignore" });
+        child.unref();
+        audit({ tool, app: appName, ok: true, pid: child.pid || 0 });
+        return { ok: true, pid: child.pid || 0 };
+      } catch (e) {
+        audit({ tool, app: appName, ok: false, error: String(e.message || e).slice(0, 200) });
+        return { ok: false, error: "ishga tushmadi" };
+      }
+    }
+    return { ok: true, dry_run: true }; // real ishga tushirish faqat RUNNER_EXEC=1
+  }
+  audit({ tool, ok: false, error: "unknown" });
+  return { ok: false, error: "noma'lum tool: " + tool };
+}
+
+function selfTest() {
+  const assert = require("assert");
+  const os = require("os");
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "rtest-"));
+  const tmpSpool = path.join(tmpBase, "spool");
+  const tmpAudit = path.join(tmpBase, "audit.jsonl");
+  process.env.RUNNER_SPOOL = tmpSpool;
+  process.env.RUNNER_AUDIT = tmpAudit;
+  const allowDir = path.join(tmpBase, "hisobotlar");
+  fs.mkdirSync(allowDir, { recursive: true });
+  const otherDir = path.join(tmpBase, "other");
+  fs.mkdirSync(otherDir, { recursive: true });
+  const allow = { folders: [allowDir.toLowerCase()], denyWords: ["parol"],
+                  apps: ["excel.exe"], printers: ["HP-Office"] };
+  assert.strictEqual(allowedTarget(allow, path.join(allowDir, "yanvar")), true);
+  assert.strictEqual(allowedTarget(allow, otherDir), false);
+  assert.strictEqual(allowedTarget(allow, allowDir + "2"), false, "prefix o'xshashlik o'tmasligi kerak");
+  assert.strictEqual(allowedTarget(allow, path.join(allowDir, "parol-scan")), false, "deny so'z");
+  const r = execTool(allow, "fs.list", { dir: otherDir });
+  assert.strictEqual(r.ok, false);
+  const r2 = execTool(allow, "nope", {});
+  assert.strictEqual(r2.ok, false);
+  // Parser fixture (real faylga bog'liq emas)
+  const fixture = 'runners:\n  - id: t\n    allow:\n      folders:\n        - "C:/A"\n        - \'D:/B\'\n      deny_always:\n        - "sekret"\n      apps: ["x.exe"]\n      printers: ["P1"]\n';
+  const fxFile = path.join(tmpBase, "devices.yaml");
+  fs.writeFileSync(fxFile, fixture);
+  const fxAllowFile = process.env.RUNNER_ALLOW;
+  process.env.RUNNER_ALLOW = fxFile;
+  const fx = loadAllow();
+  if (fxAllowFile === undefined) delete process.env.RUNNER_ALLOW; else process.env.RUNNER_ALLOW = fxAllowFile;
+  assert.ok(fx.folders.length === 2, "block+quote stillar");
+  assert.ok(fx.denyWords.includes("sekret"), "block deny");
+  assert.ok(fx.apps.includes("x.exe") && fx.printers.includes("P1"));
+  // Real devices.yaml — faqat mavjudlik (tarkib o'zgarsa test sinmaydi)
+  const real = loadAllow();
+  assert.ok(real.folders.length >= 1, "devices.yaml o'qilishi kerak");
+  // office.read_excel: tmp xlsx
+  const XLSX = require("xlsx");
+  const tmp = path.join(tmpBase, "rtest.xlsx");
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["a", "b"], [1, 2]]), "S1");
+  XLSX.writeFile(wb, tmp);
+  const allowTmp = { folders: [tmpBase.toLowerCase()], denyWords: [], apps: [], printers: [] };
+  const rx = execTool(allowTmp, "office.read_excel", { file: tmp });
+  assert.strictEqual(rx.ok, true);
+  assert.deepStrictEqual(rx.rows[0], ["a", "b"]);
+  // print spool + status + app allow/deny
+  const rp = execTool({ ...allowTmp, printers: ["HP-Office"] }, "print.spool", { file: tmp, printer: "HP-Office" });
+  assert.strictEqual(rp.ok, true);
+  assert.ok(rp.spool.startsWith(tmpSpool), "spool env hurmat qilinadi");
+  const rp2 = execTool({ ...allowTmp, printers: ["HP-Office"] }, "print.spool", { file: tmp, printer: "Evil" });
+  assert.strictEqual(rp2.ok, false);
+  const st = execTool(allowTmp, "print.status", {});
+  assert.strictEqual(st.ok, true);
+  assert.strictEqual(execTool(allow, "app.launch", { app: "calc.exe" }).ok, false);
+  assert.strictEqual(execTool(allow, "app.launch", { app: "EXCEL.EXE" }).ok, true);
+  fs.rmSync(tmpBase, { recursive: true, force: true });
+  console.log("runner self-test: OK (19 checks)");
+}
+
+if (process.argv.includes("--self-test")) {
+  selfTest();
+  process.exit(0);
+}
+
+if (!TOKEN) {
+  console.error("RUNNER_TOKEN kerak");
+  process.exit(1);
+}
+
+let stopped = false;
+function requestStop(reason) {
+  if (stopped) return;
+  stopped = true;
+  audit({ tool: "kill_switch", reason });
+  console.log("STOP:", reason);
+  process.exit(3); // 3 = kill switch (nazorat farqlaydi; 0 = toza)
+}
+process.on("SIGINT", () => requestStop("SIGINT"));
+process.on("SIGTERM", () => requestStop("SIGTERM"));
+setInterval(() => {
+  if (fs.existsSync(STOP_FILE)) requestStop("STOP fayli");
+}, 1000);
+
+// Tray (Electron) + global hotkey — kod imzosi bilan keyin (docs §3.5).
+// Hozir: SIGINT/SIGTERM + STOP fayli + server stopped bayrog'i.
+
+const allow = loadAllow();
+let attempt = 0;
+
+function connect() {
+  if (stopped) return;
+  const ws = new WebSocket(SERVER);
+  ws.on("open", () => {
+    attempt = 0;
+    ws.send(JSON.stringify({ token: TOKEN }));
+    const beat = () => {
+      if (stopped) return;
+      if (fs.existsSync(STOP_FILE)) return requestStop("STOP fayli");
+      ws.send(JSON.stringify({ type: "heartbeat", token: TOKEN }));
+    };
+    beat();
+    const timer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) { clearInterval(timer); return; }
+      beat();
+    }, HB_MS);
+  });
+  ws.on("message", (raw) => {
+    if (stopped || fs.existsSync(STOP_FILE)) return requestStop("STOP (xabar oldidan)");
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.stopped) return requestStop("server buyrug'i");
+    if (msg.type === "heartbeat_ack" && msg.auth === false) {
+      console.error("token eskirgan — to'xtadim");
+      process.exit(4);
+    }
+    for (const t of msg.tasks || []) {
+      let res;
+      try {
+        res = execTool(allow, t.tool, t.params || {});
+      } catch (e) {
+        res = { ok: false, error: "runner xato" };
+        audit({ tool: t.tool, task_id: t.id, ok: false, error: "exception" });
+      }
+      audit({ tool: t.tool, task_id: t.id, ok: res.ok });
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "result", id: t.id, ...res }));
+    }
+  });
+  const retry = () => {
+    if (stopped) return;
+    attempt += 1;
+    if (attempt > 5) { console.error("5 urinish — to'xtadim"); process.exit(2); }
+    setTimeout(connect, 2000 * attempt); // backoff
+  };
+  ws.on("close", retry);
+  ws.on("error", () => { try { ws.close(); } catch {} });
+}
+
+connect();

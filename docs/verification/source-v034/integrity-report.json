@@ -1,0 +1,92 @@
+{
+  "original_archive_sha256": "55677bc3e09f40c9c036d8c95b6ae03ff196bdb81f971233fc639693587dce20",
+  "manifest_entries": 245,
+  "mismatches": [
+    {
+      "file": "README.md",
+      "expected": "3cafa457232956f780f875d138b332381fb4bb91de83652488c716252f12f9e2",
+      "actual": "e977bbf2d5f5e799b0b105b30c68328d26f4281bc26c0411719acfc8dbfffeea"
+    },
+    {
+      "file": "api-python/app/platform_api.py",
+      "expected": "b85f130c62f2e26f95fe846f2ef2f0668377e8cb755d2907b4ff982f0e3d19c8",
+      "actual": "575ab6caf94546d12d3fba9e86df21691ad2ffd4a655872f3bdaace9dbeb59f6"
+    },
+    {
+      "file": "api-python/platform_runtime/connectors.py",
+      "expected": "daf4b27cef40ad87d9caadee11fb168e47af722c5c59c87e6ddeccc5498fd015",
+      "actual": "4f56ccc6a2375759f620f560ff1a127235779ee3ae6b26bd3749277dee35c136"
+    },
+    {
+      "file": "api-python/platform_runtime/engine.py",
+      "expected": "9f2b7c400322dfaaae4f020ce8bb9e78ef224c5e02c2000a01eda3b204c6dc9b",
+      "actual": "78400b82a9cffd41f1adc85202733930bb2c705b275284b0af967aebcf982392"
+    },
+    {
+      "file": "api-python/platform_runtime/tools.py",
+      "expected": "a4932413b38e3893a17779d5dfb20d4d0cb3ce2249a83a1728105e4858241f80",
+      "actual": "847a3922c1256fa6a5344242acb4cfe9c0a8fed08f143821e33630680328f1c0"
+    },
+    {
+      "file": "apps/ui/app/platform/page.tsx",
+      "expected": "2ca8f9c4a327d77bf16fc89a17cf0b54b9e37439be7b053d76e80446e66591b2",
+      "actual": "513c7f45c7ae4803b4ad2cdca1b7c99d643fe62dd5c2e9c9877d9ec77cc2de8f"
+    },
+    {
+      "file": "docs/IMPLEMENTATION-STATUS.md",
+      "expected": "90bd944933eb316f80eae6c7acf0b141da91bb71d4cc18c45e7abe21f8e8115a",
+      "actual": "ac6c189d8d039d2b603e3566d0a2d5e3eb0238f334d2aae6db7b2dcf404c9bb8"
+    },
+    {
+      "file": "scripts/verify_offline.py",
+      "expected": "bb87a6aed0d8ee9b6b12822fef8959c2fe165a0f81303d79adc2d7b954a0ba42",
+      "actual": "63dc45306c756d31159df7b4a20c5eade9f490533d55273a2b836945492b551c"
+    }
+  ],
+  "unlisted_files": [
+    "api-python/platform_runtime/database/__init__.py",
+    "api-python/platform_runtime/database/contract.py",
+    "api-python/platform_runtime/database/gateway.py",
+    "api-python/platform_runtime/database/mysql_backend.py",
+    "api-python/platform_runtime/database/redis_backend.py",
+    "api-python/platform_runtime/database/sql.py",
+    "api-python/platform_runtime/database/transports.py",
+    "api-python/requirements-databases.txt",
+    "api-python/runtime_tests/test_managed_database.py",
+    "api-python/runtime_tests/test_managed_mysql_contract.py",
+    "api-python/runtime_tests/test_managed_network_contracts.py",
+    "api-python/runtime_tests/test_managed_redis_contract.py",
+    "config/customer-managed.example.json",
+    "config/managed-agent.example.yaml",
+    "docs/CHECKPOINT-V034-UZ.md",
+    "docs/MANAGED-DATABASES-UZ.md",
+    "docs/verification/dust-v033-baseline/browser_session_client.log",
+    "docs/verification/dust-v033-baseline/javascript_typescript_syntax.log",
+    "docs/verification/dust-v033-baseline/node_runner.log",
+    "docs/verification/dust-v033-baseline/python_runtime.log",
+    "docs/verification/dust-v033-baseline/python_syntax.json",
+    "docs/verification/dust-v033-baseline/release_tools.log",
+    "docs/verification/dust-v033-baseline/sqlite_demo.log",
+    "docs/verification/dust-v033-baseline/summary.json",
+    "docs/verification/v034/browser_session_client.log",
+    "docs/verification/v034/changes-from-v033.json",
+    "docs/verification/v034/javascript_typescript_syntax.log",
+    "docs/verification/v034/managed_database_demo.log",
+    "docs/verification/v034/manifest-v034.sha256",
+    "docs/verification/v034/node_runner.log",
+    "docs/verification/v034/python_runtime.log",
+    "docs/verification/v034/python_syntax.json",
+    "docs/verification/v034/release_tools.log",
+    "docs/verification/v034/sqlite_demo.log",
+    "docs/verification/v034/summary.json",
+    "scripts/demo_managed_database.py"
+  ],
+  "cause": "Root manifest is out of sync with the archive. The included versioned v034 manifest matches all 281 other archive entries. Exact historical reason is not established; unsigned manifests do not authenticate publisher identity.",
+  "action": "Original ZIP and original manifest retained. New manifest describes only the new checkpoint and is not publisher authentication.",
+  "versioned_manifest_check": {
+    "path": "docs/verification/v034/manifest-v034.sha256",
+    "entries_checked": 281,
+    "mismatches": [],
+    "only_unlisted_file": "docs/verification/v034/manifest-v034.sha256"
+  }
+}

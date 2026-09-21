@@ -1,0 +1,68 @@
+{
+  "_comment": "Example connection entries. Copy the sections you need into config/integrations.json and replace every SET_... value. Credentials are environment variable NAMES, never values; the real secret lives only in api-python/.env. See docs/CRM-ECOSYSTEM-AND-INTEGRATIONS-UZ.md.",
+  "demo-retail": {
+    "connections": {
+      "onec_main": {
+        "driver": "onec",
+        "contract_version": "1.0",
+        "lifecycle": "configured",
+        "host": "1c.example.uz",
+        "allowed_hosts": ["1c.example.uz"],
+        "base_path": "/agent-platform/hs/leads",
+        "auth": "basic",
+        "basic_auth_env": "SET_ONEC_BASIC",
+        "capabilities": ["discover", "validate", "read", "plan_write", "execute_write", "reconcile"],
+        "agent_ids": ["sales.responder", "sales.order_taker"],
+        "timeout_seconds": 15,
+        "response_map": {
+          "items": "result.rows",
+          "created_id": "result.Ref_Key",
+          "id": "Ref_Key",
+          "title": "Description",
+          "name": "Наименование",
+          "phone": "phone",
+          "email": "email",
+          "status": "Статус"
+        }
+      },
+      "custom_crm": {
+        "driver": "custom_webhook",
+        "contract_version": "1.0",
+        "lifecycle": "configured",
+        "host": "crm.example.uz",
+        "allowed_hosts": ["crm.example.uz"],
+        "base_path": "/api/v1",
+        "credential_env": "SET_CUSTOM_CRM_TOKEN",
+        "capabilities": ["discover", "validate", "read", "plan_write", "execute_write", "reconcile"],
+        "agent_ids": ["sales.responder", "sales.hot_lead"],
+        "timeout_seconds": 15,
+        "headers": {
+          "Authorization": {"env": "SET_CUSTOM_CRM_TOKEN", "prefix": "Bearer "},
+          "X-Tenant": "demo-retail"
+        },
+        "operations": {
+          "find_leads": {"method": "GET", "path": "/leads?q={query}&limit={limit}"},
+          "find_contacts": {"method": "GET", "path": "/contacts?q={query}&limit={limit}"},
+          "find_stalled_leads": {"method": "GET", "path": "/leads/stalled?minutes={minutes}&limit={limit}"},
+          "create_lead": {
+            "method": "POST",
+            "path": "/leads",
+            "body": {"full_name": "name", "tel": "phone", "note": "comments", "source": "source"}
+          },
+          "create_deal": {"method": "POST", "path": "/deals"},
+          "attach_message": {"method": "POST", "path": "/leads/{lead_id}/notes"}
+        },
+        "response_map": {
+          "items": "data",
+          "id": "id",
+          "title": "title",
+          "name": "full_name",
+          "phone": "contacts.phone",
+          "email": "contacts.email",
+          "status": "stage",
+          "created_at": "created_at"
+        }
+      }
+    }
+  }
+}

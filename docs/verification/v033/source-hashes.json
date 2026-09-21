@@ -1,0 +1,542 @@
+[
+  {
+    "path": ".github/workflows/verify.yml",
+    "sha256": "d87b5ad1eab1e29252777a5b8ef43346afb2c364f2bef550496b6367c4f08d4c"
+  },
+  {
+    "path": "api-python/.env.example",
+    "sha256": "d983485e9728ab01c24597251c1fd7a05c3a44abc7217784d9c6be7dd52ee782"
+  },
+  {
+    "path": "api-python/Dockerfile",
+    "sha256": "a4dc87394cd44af6c9ad9e74133faf9b6f09d1c801d8788b80a0ee3891ad950f"
+  },
+  {
+    "path": "api-python/app/__init__.py",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "api-python/app/approvals.py",
+    "sha256": "9727b99382d8e72cf676c0c771d0ba4b51380dc540c12db851656dd89c65e91b"
+  },
+  {
+    "path": "api-python/app/auth.py",
+    "sha256": "82b2e90c81800f69bd486dcf5d1bca9d83b631cb7545e97a76642458d4c46160"
+  },
+  {
+    "path": "api-python/app/authorization.py",
+    "sha256": "c31305cd9ca54c535fa7f70adeb2ce7dd80acd8260732df02aec4050643fb2f2"
+  },
+  {
+    "path": "api-python/app/cache.py",
+    "sha256": "97df98918855dfea0fb062e0323ec865bc854a0d8d5baa479deb3c51d3563c29"
+  },
+  {
+    "path": "api-python/app/config.py",
+    "sha256": "6644694e9a2caf02b6e0127efea7ec85aca90edd097a4c3819bdc296f8cbdc8a"
+  },
+  {
+    "path": "api-python/app/customer360.py",
+    "sha256": "dd5a6f730eb2c9d51870fb71a5fc7d0352fc27263d4d0509b6ff009551e2e958"
+  },
+  {
+    "path": "api-python/app/domain.py",
+    "sha256": "bb36ee85a280c104f8ae1ecc084b38f1bb43a50384f5b5af257ebc41e3835e9a"
+  },
+  {
+    "path": "api-python/app/domain_enums.py",
+    "sha256": "c6d97a14832b5abf857835486c8d14d506ce79963070f70f15056cd440c21f6b"
+  },
+  {
+    "path": "api-python/app/hotlead.py",
+    "sha256": "5e24ea7c10354b4d47e25871da29229d04a8cd3e38e6f1665ce568c3b0acbf40"
+  },
+  {
+    "path": "api-python/app/identity_api.py",
+    "sha256": "ce02873d6d936dbb60c3b60e893fe099663727b9e5646c594487fb3a1c1036ca"
+  },
+  {
+    "path": "api-python/app/identity_schema.py",
+    "sha256": "83a611fc1b3791fce536bed2db64059bc6b67e4d571c752a225b2f4fe38cc936"
+  },
+  {
+    "path": "api-python/app/identity_store.py",
+    "sha256": "1e52366689ee7552049ca348e8015a77595f21e694453c785cb17cc3ad689fe6"
+  },
+  {
+    "path": "api-python/app/instagram.py",
+    "sha256": "d332484f330591bf84be6ed2b7ab9167988fd41a4913ff3564282427d7eaec33"
+  },
+  {
+    "path": "api-python/app/integrations/__init__.py",
+    "sha256": "0bb142294bf40e915fd85dc680d6bfd0487b84f3a26450b09f0d7011e5b36d2b"
+  },
+  {
+    "path": "api-python/app/integrations/telegram_api.py",
+    "sha256": "e1d4af2d77eb45bc427e7ce643244d3e152370c88bd067aeb81b15adc695e381"
+  },
+  {
+    "path": "api-python/app/ladder.py",
+    "sha256": "6a798652851c75eac031b812e760fd6ff96b55f8ed71632e0fcc782a3127e4b8"
+  },
+  {
+    "path": "api-python/app/lang.py",
+    "sha256": "5e7d4f79ffc63f4f8b702d7243faa59dd6f7ec85d60a56efa58d5e738a1327c8"
+  },
+  {
+    "path": "api-python/app/limits.py",
+    "sha256": "8db2bcce1b8cf2f76e6b52f8b3b25ca612e37044c67f5b5f46c68f35321f90be"
+  },
+  {
+    "path": "api-python/app/main.py",
+    "sha256": "283c9faf849bf438eae02a5d88f0bc0af21bb166c0ab94c16007a77c7f1888a3"
+  },
+  {
+    "path": "api-python/app/operator.py",
+    "sha256": "1de276a61b63de4a06a57af4ad09dbc88e66401517879f38249036116738b358"
+  },
+  {
+    "path": "api-python/app/orchestrator.py",
+    "sha256": "41bdfdb34a1ab6eb5493189e40e2ba16e7eafed43e191bad40ef99b31fdaf19a"
+  },
+  {
+    "path": "api-python/app/orders.py",
+    "sha256": "c78b12900389c212f925df78ec3eb62d6ee5e2634df2e9bd2e2bea408a61461f"
+  },
+  {
+    "path": "api-python/app/packs.py",
+    "sha256": "42b4e6e11a5ce593a69dfbc4a234ce9e884ca0d77e4ad7b2a72f714e0edef149"
+  },
+  {
+    "path": "api-python/app/pipeline.py",
+    "sha256": "7e5a4a7ee35fa76f3d83ce58b793cc429fc381783a896036a304c6c7fa5be2a8"
+  },
+  {
+    "path": "api-python/app/planning.py",
+    "sha256": "26d1a5ac694366a9ecae425312321a03440af662a9df4d9741608f2bff7a7a75"
+  },
+  {
+    "path": "api-python/app/platform_api.py",
+    "sha256": "b85f130c62f2e26f95fe846f2ef2f0668377e8cb755d2907b4ff982f0e3d19c8"
+  },
+  {
+    "path": "api-python/app/ports.py",
+    "sha256": "561aad7c4825c1cddda9d4ed22ce91f780817c4e3990601f1dfb75ec427af3b7"
+  },
+  {
+    "path": "api-python/app/responder.py",
+    "sha256": "0a21016a5a42b522881aa1dc76ec75cd7767f8d48cbb7bdad0def83c57bf8cce"
+  },
+  {
+    "path": "api-python/app/runner_ws.py",
+    "sha256": "6bca78a08715ad40d1799417142330dcf161554fc8e52e4c0ac5709476acfba7"
+  },
+  {
+    "path": "api-python/app/runtime_authority.py",
+    "sha256": "09b269a403a7eda4b664339ae0ab04cf56eb00e460b9683f2767dbf18f3eb3d3"
+  },
+  {
+    "path": "api-python/app/security.py",
+    "sha256": "3cec8951ac046babf32b6e973fa3e071f50fef5d4a8729a2e6c673ecf561bcfd"
+  },
+  {
+    "path": "api-python/app/stats.py",
+    "sha256": "f0cb7a3336b5550448af992ddaf148d5274744ecb5f6417db0cf48a80d2ce420"
+  },
+  {
+    "path": "api-python/app/storage.py",
+    "sha256": "725aea6cc6db307bc014f3674e317378b70009a8eaf0ea96f6065750c8214f5e"
+  },
+  {
+    "path": "api-python/app/telegram.py",
+    "sha256": "13bde8cc2d53ef0b5afb2c8eb4302430aca24294eecf6f1f87499c0a46443aca"
+  },
+  {
+    "path": "api-python/app/tool_registry.py",
+    "sha256": "7cb5f8ec36fe8b1e31b94eec5b1e48de861246f5c4ae7c79579e6ca6ca39fa87"
+  },
+  {
+    "path": "api-python/app/tools.py",
+    "sha256": "26b4f10d1446d25d6ac64f9236dc4292c05c134a246c454f051dbfc3711f41b2"
+  },
+  {
+    "path": "api-python/app/trace.py",
+    "sha256": "8cab5c4487eea71322757dd29afdb9817c1ab183f8029ab759c9ff683b7ada5e"
+  },
+  {
+    "path": "api-python/app/voice.py",
+    "sha256": "ee89541da1d0dc16f7fd1c7f8d8249e3cf446a18171b336ef6e28b7b1a612fab"
+  },
+  {
+    "path": "api-python/app/worker.py",
+    "sha256": "49f506a31599c340ecb5890ad3bea69e0c1056aac0b21a2e79423a333fe8f41f"
+  },
+  {
+    "path": "api-python/integration_tests/test_connector_authority_http.py",
+    "sha256": "15dfa7750cb9afc57ab4415e52e6f3bee75a30fb781061d716cf37f251a4d6c7"
+  },
+  {
+    "path": "api-python/integration_tests/test_control_plane_hardening_http.py",
+    "sha256": "e7563b0dfdba4e5e65f4d2eff401df567fca52b50469d7012012cc8ed2c2d19a"
+  },
+  {
+    "path": "api-python/integration_tests/test_http.py",
+    "sha256": "6985dd5ab1e1e8136432e6bac7a2331c391d1802a67cbcf6de0f7483740b9af5"
+  },
+  {
+    "path": "api-python/integration_tests/test_identity_http.py",
+    "sha256": "2d8ab3476c757f8e638f06280ee28b30fa3662d193e10fafeb01076966372ed2"
+  },
+  {
+    "path": "api-python/platform_runtime/__init__.py",
+    "sha256": "ef4931abd866346a43762f782da7b7f0d2e07c242775a78ab2ed30d712372eaa"
+  },
+  {
+    "path": "api-python/platform_runtime/agent_loop.py",
+    "sha256": "e193601ddab7a0c9aea04da7ef3373155b737b286dddb88d709b799f239617c6"
+  },
+  {
+    "path": "api-python/platform_runtime/agent_planner.py",
+    "sha256": "ab63a1170302a17646f439c333cef252582a3635cf7454b300403f8f442fbb3f"
+  },
+  {
+    "path": "api-python/platform_runtime/connector_authority.py",
+    "sha256": "06e34c6de348447f113ade17b84f48c2e9d460fc8ecf1aa261a39bd8a3bcdaec"
+  },
+  {
+    "path": "api-python/platform_runtime/connector_contract.py",
+    "sha256": "92bb3b1efba7f9a4a660d597c2ce45b26c6a863323915f5cd469dccb3f9b6635"
+  },
+  {
+    "path": "api-python/platform_runtime/connectors.py",
+    "sha256": "daf4b27cef40ad87d9caadee11fb168e47af722c5c59c87e6ddeccc5498fd015"
+  },
+  {
+    "path": "api-python/platform_runtime/engine.py",
+    "sha256": "9f2b7c400322dfaaae4f020ce8bb9e78ef224c5e02c2000a01eda3b204c6dc9b"
+  },
+  {
+    "path": "api-python/platform_runtime/llm.py",
+    "sha256": "1425b7f1fe626556c9fcf414b329bacf304e1840945b3f3fb79b320a079a4b9c"
+  },
+  {
+    "path": "api-python/platform_runtime/mcp.py",
+    "sha256": "0d2f94c131d96b78fca1242e9f505bf57a579619f3cb0dcf8af93eaca047166d"
+  },
+  {
+    "path": "api-python/platform_runtime/postgres_connector.py",
+    "sha256": "cba59c489c8af9799ebb5a2221d3e8bc99fb4b3977ebbe81165c4a25220fa4aa"
+  },
+  {
+    "path": "api-python/platform_runtime/speech.py",
+    "sha256": "aded8e3dabf6d31b8f61cd9830528579783f29386ada29bdf91810c72f44b67a"
+  },
+  {
+    "path": "api-python/platform_runtime/tools.py",
+    "sha256": "a4932413b38e3893a17779d5dfb20d4d0cb3ce2249a83a1728105e4858241f80"
+  },
+  {
+    "path": "api-python/requirements.txt",
+    "sha256": "659605e309e37d930d45065e05c9eb921f2ab8f9aa4251997e031db1b085c776"
+  },
+  {
+    "path": "api-python/runtime_tests/test_adapters.py",
+    "sha256": "d56e2c9f91c900b1f5ce8c81315bf8442f165ddb54abeacc5313f1ddeaec9151"
+  },
+  {
+    "path": "api-python/runtime_tests/test_agent_loop.py",
+    "sha256": "f7f045c01714cbe9a4ecd5c99894222327d2b2dbe0e3954a1c41f38a85057660"
+  },
+  {
+    "path": "api-python/runtime_tests/test_agent_planner.py",
+    "sha256": "1f403bc35e9a9775bc53a6d55cc1905d763968ec7adaf07bb3c3963523a620d2"
+  },
+  {
+    "path": "api-python/runtime_tests/test_connector_authority.py",
+    "sha256": "87ed3e60b1776b52b6ac8af4357ee9183313b953c990e277be0fbc91b2de41a7"
+  },
+  {
+    "path": "api-python/runtime_tests/test_connector_contract.py",
+    "sha256": "ff2640d62fc89a8cf3704bb7c047f2349f62537a3d5f5a516da873c2ec24d008"
+  },
+  {
+    "path": "api-python/runtime_tests/test_control_plane_authority.py",
+    "sha256": "181911c6244cced232ddc4a5041275318aaffb43e07ba4827fc41e16b08bff3e"
+  },
+  {
+    "path": "api-python/runtime_tests/test_customer360.py",
+    "sha256": "4b7b2436489aabfe449b87058a7d8ebb47d7ca56ff963623fb8d96fea1b06655"
+  },
+  {
+    "path": "api-python/runtime_tests/test_engine.py",
+    "sha256": "ba8a713f90ac32f5e1352f91bb16438aed70add574ac860dd800c3e9f6285976"
+  },
+  {
+    "path": "api-python/runtime_tests/test_foundation_v02.py",
+    "sha256": "dfe600842d2d9c3011acecebb2f10346b816e4a1368e67cbd9292f0513d2f217"
+  },
+  {
+    "path": "api-python/runtime_tests/test_identity_hardening.py",
+    "sha256": "316e9ae8eb3e660a341330ed5af0d0c6438b283d80344187d9dcc812280466ef"
+  },
+  {
+    "path": "api-python/runtime_tests/test_identity_store.py",
+    "sha256": "37783bc9693f980bba01d9ed4db46c64c08e8526f618c5e1ef3f8e3227a16b44"
+  },
+  {
+    "path": "api-python/runtime_tests/test_postgres_contract.py",
+    "sha256": "389b610cdac450ade3b4662c56a85e66b03ec7c9d9192008aa19073eedf806de"
+  },
+  {
+    "path": "api-python/runtime_tests/test_runtime_authority.py",
+    "sha256": "414579ce88374d9d547f6942053d2bf5d4d9fef51c23658ced42e567c7085cd8"
+  },
+  {
+    "path": "api-python/tests/conftest.py",
+    "sha256": "e9ae11efc7e4132968bd41206c950f74f270671c1df8b3d8c0da8c40d0e23b92"
+  },
+  {
+    "path": "api-python/tests/test_agents.py",
+    "sha256": "55e5dd77b2ea0bf16471ffca3841aa4e72ced90142bb7cd3445e87fa49a15df5"
+  },
+  {
+    "path": "api-python/tests/test_audit_fixes.py",
+    "sha256": "d521ff175e384e61148cbb4f7ee1b59881039d7dd0d14d5c437f0b5e90412833"
+  },
+  {
+    "path": "api-python/tests/test_authz.py",
+    "sha256": "7501e15cca649345dc0c1201c562b5ee701b1857b10a9fa04880b93e03acb68a"
+  },
+  {
+    "path": "api-python/tests/test_config.py",
+    "sha256": "eb033b8b0dbdebdceadc1b7a842c5e8a92370518fec4498ca7d78dc485e6ab2b"
+  },
+  {
+    "path": "api-python/tests/test_domain.py",
+    "sha256": "c452791203eb088ba642b9fa62198372fa315bf932a11951222c21b0d89fac24"
+  },
+  {
+    "path": "api-python/tests/test_gaps.py",
+    "sha256": "ae01abd23361173524f695d28ec4202f4516e29edd9b296555191947f433ee4d"
+  },
+  {
+    "path": "api-python/tests/test_health.py",
+    "sha256": "2c4fb924bc443b922ffdff108eb04ab34bb589bcc847f78ef9e4a080bd3909a5"
+  },
+  {
+    "path": "api-python/tests/test_lang.py",
+    "sha256": "4b8795f103854514cffa43df047508b6c7f21d5b18a2f2adf1eacd8aac58564f"
+  },
+  {
+    "path": "api-python/tests/test_operator.py",
+    "sha256": "8c1216743de6ebef8b808715063655ee10b79f805e64f0f970447908ac585257"
+  },
+  {
+    "path": "api-python/tests/test_orchestrator.py",
+    "sha256": "a30be9c01d2c0792355f11c05203f24332c7cd78b73de7595524a356bcdcb06d"
+  },
+  {
+    "path": "api-python/tests/test_packs.py",
+    "sha256": "aceef961710ee7d9859dfd5c3c5ee7b79b43834c6d2632e342a1fce2f6f3e4ea"
+  },
+  {
+    "path": "api-python/tests/test_ports.py",
+    "sha256": "0fdf6d31e520ffb81b0b40aa69093e95b90db3466c591771501f622e75d6bef2"
+  },
+  {
+    "path": "api-python/tests/test_redis.py",
+    "sha256": "312beae17c6e6d53c4ba47ecf2cad98e863756b86b770ec9cb8830658e0789ac"
+  },
+  {
+    "path": "api-python/tests/test_security.py",
+    "sha256": "f8bfc69cd6e4d3b4fd0fad22a3cacab189f6675f8ec5f87643a7893c6634e548"
+  },
+  {
+    "path": "api-python/tests/test_stage1.py",
+    "sha256": "b9ae808485f2cb8236b18ddf15c746da486d7cd2db363e34220955943ad12b4c"
+  },
+  {
+    "path": "api-python/tests/test_stage2.py",
+    "sha256": "5b9fb80d3d093675d58f3590b7f70856bf10ed0e0be32190bfa8daf751e75aa8"
+  },
+  {
+    "path": "api-python/tests/test_stage4.py",
+    "sha256": "be68270520b59dfb497d9b52776471b9ff7aca9d82dfa8af4e3ba92fb4c6e8c6"
+  },
+  {
+    "path": "api-python/tests/test_stage6.py",
+    "sha256": "5e6ab00bda59a8f02e05441ae06efcb59e4b25625726937e27682f9fc673959d"
+  },
+  {
+    "path": "api-python/tests/test_stage8.py",
+    "sha256": "8885b15d4298fc2c60f3629e0a02871c44fbe8101ccd7052b792529e6d38fd45"
+  },
+  {
+    "path": "api-python/tests/test_storage_foundation.py",
+    "sha256": "30b355c33df7136c4b59e37195ba1ae729926ff62a826eee4b02de41a784a42a"
+  },
+  {
+    "path": "api-python/tests/test_telegram_api.py",
+    "sha256": "6d8b36a4e3125dc259d9ae07b7ddbdee4a68704610bcb22b4245b4cec4eeeb8d"
+  },
+  {
+    "path": "api-python/tests/test_tenant_auth.py",
+    "sha256": "b12f28e272868cc654b6034c7b536aa5f0d4db9d76e13207856cdc99a4000945"
+  },
+  {
+    "path": "api-python/tests/test_tool_registry.py",
+    "sha256": "532bf5896db410b09496aabe14002eeabd3b289450f8fbcb3e08c2e8a20e5679"
+  },
+  {
+    "path": "apps/runner/allow.example.json",
+    "sha256": "f972ee803c9640a130fe3517aceb882859c0c3515aad76bc6523cbe8f5af7558"
+  },
+  {
+    "path": "apps/runner/main.js",
+    "sha256": "35d0eb021656a9e62841abece1fd355b3bbff7fe71a669b3c45f20fd401477ac"
+  },
+  {
+    "path": "apps/runner/package-lock.json",
+    "sha256": "a432fd39f5881a8e2bf04fe0ce3035843d27aa2c26fefd64e3d78a9c8dcf7b7c"
+  },
+  {
+    "path": "apps/runner/package.json",
+    "sha256": "fd07e7579f3447aff57f8998ffb8f1a60f645dddaba33d7d92bb8bd9d8f0f704"
+  },
+  {
+    "path": "apps/runner/runner.js",
+    "sha256": "b7ed339a84b53164bc9cfcffb6565732841f9e9ac890c5878582ee906c253490"
+  },
+  {
+    "path": "apps/runner/test.js",
+    "sha256": "91ba67a13a1528cbaace44e51d33d4e5a99df2b328532825aa06bb25e4963192"
+  },
+  {
+    "path": "apps/ui/Dockerfile",
+    "sha256": "29dbb69c1f2ae397633d4b748d41a7805373b8a52d34279a1985d93ac7b40e0e"
+  },
+  {
+    "path": "apps/ui/app/layout.tsx",
+    "sha256": "9f86763a4464259e0b0262e4304dc09e91b47dfdbba8471ccffd34bd09190426"
+  },
+  {
+    "path": "apps/ui/app/legacy/page.tsx",
+    "sha256": "231fec78e7d89601f67c78bbeb4a7e4707b63aa918c34082e81a3ef7c7c17451"
+  },
+  {
+    "path": "apps/ui/app/page.tsx",
+    "sha256": "41894a246d224f1bb68ec1cd8cb9a68982010316622a160a81ce289a0f1aa6db"
+  },
+  {
+    "path": "apps/ui/app/platform/page.tsx",
+    "sha256": "2ca8f9c4a327d77bf16fc89a17cf0b54b9e37439be7b053d76e80446e66591b2"
+  },
+  {
+    "path": "apps/ui/components/AgentRuns.tsx",
+    "sha256": "fa2ddedb9757bc3e5ed6c8c47c1bd55480b15afde70d539669b6ee99b78e72be"
+  },
+  {
+    "path": "apps/ui/components/SessionGate.tsx",
+    "sha256": "691a97161eb197d5a827f26687503e123cb27850fa5d9efe597de0ba4662b510"
+  },
+  {
+    "path": "apps/ui/lib/session-client.d.mts",
+    "sha256": "7cc445aa020d86cde1df40473b9f400ab23b8a4511a746e1a12618391f4ee414"
+  },
+  {
+    "path": "apps/ui/lib/session-client.mjs",
+    "sha256": "4daffa00b698ad2f714a939a4d21e0f026ada8f88ff973863b7e80370a058245"
+  },
+  {
+    "path": "apps/ui/lib/session-client.test.mjs",
+    "sha256": "1ae8d8f238999b8f67d1f3473e86f2478dd22faac1582a2346129ecf57ee93c5"
+  },
+  {
+    "path": "apps/ui/next-env.d.ts",
+    "sha256": "8964d295a9047c3a222af813b7d37deb57b835fd0942d89222e7def0aed136cc"
+  },
+  {
+    "path": "apps/ui/next.config.mjs",
+    "sha256": "7378473489712cc5aec4dfd4f6623faf2dcf5d90f33c0594fdad698afb8c66b2"
+  },
+  {
+    "path": "apps/ui/package-lock.json",
+    "sha256": "6255f00066a3a068d0970dfd48ebc15525fb125b7494c3486edfb767beb87fcd"
+  },
+  {
+    "path": "apps/ui/package.json",
+    "sha256": "3866adbf164fa2eb54b72816be96176057d29c42cfd8de01c4f346890aaf1f6d"
+  },
+  {
+    "path": "apps/ui/tsconfig.json",
+    "sha256": "1519b3e409b0059442adaf1c0c663021214e914c0f80b40cbba705e378aa4537"
+  },
+  {
+    "path": "config/agent-capabilities.example.yaml",
+    "sha256": "fede17854e828124342e5afec8efbd6baa735a0df3342c82cf5b3eb0dd1f7f46"
+  },
+  {
+    "path": "config/customer-sqlite.example.json",
+    "sha256": "7ffdb9d5a02361fba9febe53de42c288590b988efacc8a8d2a09dd3781b2399f"
+  },
+  {
+    "path": "config/integrations.example.json",
+    "sha256": "5e8354697a1ac52b1cfdff2f02d48719e506080256984244a023036e1c6d698b"
+  },
+  {
+    "path": "packs/_template/pack.yaml",
+    "sha256": "0f21904e1bb4e6a5018c8b6ae383463df9f5dd4f62b704b9fd6286113ec8faba"
+  },
+  {
+    "path": "packs/demo-retail/devices.yaml",
+    "sha256": "cf2a69d7607ee4c9c2439396fdcbc601d3b176dc3f09898d0af0d4ecb8b15288"
+  },
+  {
+    "path": "packs/demo-retail/pack.yaml",
+    "sha256": "83fd5fdb01f4399ac0c134a4f53f2fbde3f0ab88594a2926d566c146dc9e0346"
+  },
+  {
+    "path": "packs/demo-retail/products.yaml",
+    "sha256": "f86167be35a87383eef904b74418aa81833cb481c7b997280d690c02de89c806"
+  },
+  {
+    "path": "packs/marketing/pack.yaml",
+    "sha256": "8750f7c4708430501cfa4a22838790e7f2c71794c55a18dcfe47a944605dce97"
+  },
+  {
+    "path": "scripts/check_release.py",
+    "sha256": "1f1aef90bdedab7d04da80e0728ded5bdc1409520d7477ca0571cdf5a70d8b4a"
+  },
+  {
+    "path": "scripts/db_backup.py",
+    "sha256": "d19ae52dd723a139620902cf9eb683016ab6d5e2f9636b666381730016fa614a"
+  },
+  {
+    "path": "scripts/demo_runtime.py",
+    "sha256": "06c3c3f8ed571ceffe927ed3b35891e6f67a7eec40a43ab1a61a64bfc6c729b5"
+  },
+  {
+    "path": "scripts/owner_login.py",
+    "sha256": "3a1d5cb683e6135778772eb6f2a53bcb745c4c94875708edbc724586fff740a9"
+  },
+  {
+    "path": "scripts/provision_identity.py",
+    "sha256": "6a7ccf45eea6574428a4c6ed3e90a02341da1d0e73cede7a10e07319ae4b0057"
+  },
+  {
+    "path": "scripts/setup_local.py",
+    "sha256": "e80fdf9d8f9e6a72b5923af07b4814aa8241d0d18b282944512f78e8811a6dfd"
+  },
+  {
+    "path": "scripts/sqlite_backup.py",
+    "sha256": "d7a54e3f678b335ec4b3156f8e3e204eee1a13871e26f5f5e6c4e864b5e9d1aa"
+  },
+  {
+    "path": "scripts/test_release_tools.py",
+    "sha256": "dd7c08bfc970d24a57e8530fa69094092a2456486b2ea1fc6903db35e2808c38"
+  },
+  {
+    "path": "scripts/verify_offline.py",
+    "sha256": "bb87a6aed0d8ee9b6b12822fef8959c2fe165a0f81303d79adc2d7b954a0ba42"
+  }
+]

@@ -1,0 +1,17 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {authorization,callback,acceptCallback} from './oauth-client.mjs';
+const origin='https://app.example.invalid';
+const make=(changes={})=>({authorization_url:'https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({state:'state',redirect_uri:origin+'/oauth/google/callback'}),expires_in:600,...changes});
+test('valid authorization binding and expiry',()=>{const x=authorization(make(),origin,1000);assert.equal(x.state,'state');assert.equal(x.expires,601000);});
+test('invalid runtime ttl values rejected',()=>{for(const x of [undefined,NaN,Infinity,0,-1,'600',true])assert.throws(()=>authorization(make({expires_in:x}),origin));});
+test('ttl capped at ten minutes',()=>assert.equal(authorization(make({expires_in:9999}),origin,0).expires,600000));
+test('malicious provider origin rejected',()=>assert.throws(()=>authorization(make({authorization_url:make().authorization_url.replace('accounts.google.com','evil.invalid')}),origin)));
+test('malicious callback origin rejected',()=>assert.throws(()=>authorization(make(), 'https://other.invalid')));
+test('duplicate state rejected',()=>assert.throws(()=>authorization(make({authorization_url:make().authorization_url+'&state=second'}),origin)));
+test('provider URL credentials rejected',()=>assert.throws(()=>authorization(make({authorization_url:make().authorization_url.replace('https://','https://user@')}),origin)));
+test('valid callback and refusal parsed',()=>{assert.equal(callback('?state=s&code=c').code,'c');assert.equal(callback('?state=s&error=access_denied').denied,true);});
+test('ambiguous callbacks rejected',()=>{for(const q of ['?state=s&state=x&code=c','?state=s&code=c&code=x','?state=s&error=x&code=c','?code=c','?state=s&code=%0A'])assert.throws(()=>callback(q));});
+test('only same source origin and state accepted',()=>{const popup={};const p={popup,state:'s',expires:100};const event={source:popup,origin,data:callback('?state=s&code=c')};assert.equal(acceptCallback(p,event,origin,50),true);for(const e of [{...event,origin:'https://evil.invalid'},{...event,source:{}},{...event,data:{...event.data,state:'wrong'}}])assert.equal(acceptCallback(p,e,origin,50),false);});
+test('expired state and malformed expiry rejected',()=>{const popup={};const e={source:popup,origin,data:callback('?state=s&code=c')};for(const expires of [0,50,NaN])assert.equal(acceptCallback({popup,state:'s',expires},e,origin,50),false);});
+test('nonboolean refusal rejected',()=>{const popup={};assert.equal(acceptCallback({popup,state:'s',expires:100},{source:popup,origin,data:{type:'agent-platform-google-oauth',state:'s',code:'c',denied:'true'}},origin,0),false);});

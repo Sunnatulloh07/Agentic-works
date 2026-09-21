@@ -1,0 +1,41 @@
+# Local engineering preview only. Bind public TLS via a reviewed reverse proxy for deployment.
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: api-python/Dockerfile
+  env_file: ./api-python/.env
+  environment:
+    APP_DB: /srv/data/app.db
+    PACKS_DIR: /srv/packs
+    PLATFORM_INTEGRATIONS_FILE: /srv/config/integrations.json
+  volumes:
+    - apidata:/srv/data
+    - ./config:/srv/config:ro
+  restart: unless-stopped
+services:
+  api:
+    <<: *backend
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+  ui:
+    build:
+      context: .
+      dockerfile: apps/ui/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  apidata:

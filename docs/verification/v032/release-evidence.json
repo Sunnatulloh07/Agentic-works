@@ -1,0 +1,133 @@
+{
+  "version": "0.3.2-agent-loop-source-preview",
+  "date": "2026-09-14",
+  "release": "NO_GO",
+  "scope": "Source-only, no acceptance",
+  "gates": {
+    "python_runtime": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "node_runner": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "browser_session_client": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "release_tools": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "python_syntax": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "ui_syntax_only": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "session_declaration_types": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "offline_demo": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "http_integration": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "ui_typecheck": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "ui_production_build": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "dependency_security_review": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "postgres_live_two_tenant": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "crm_oauth_sync_write_reconcile": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "mcp_live": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "oidc_mfa": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "secret_vault": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "load_fault_injection": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "encrypted_offsite_restore": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "staging_pilot": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "No current-source execution or acceptance"
+    },
+    "agent_loop_runtime": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "Source-only checkpoint"
+    },
+    "agent_loop_http": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "Source-only checkpoint"
+    },
+    "agent_loop_provider": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "Source-only checkpoint"
+    },
+    "agent_loop_ui": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "Source-only checkpoint"
+    },
+    "agent_loop_migration_mixed_version": {
+      "status": "NOT_RUN",
+      "evidence": null,
+      "reason": "Source-only checkpoint"
+    }
+  }
+}

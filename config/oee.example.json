@@ -1,0 +1,52 @@
+{
+  "_comment": "OEE and andon (P13 / T4). This block declares what the platform needs in order to compute an OEE honestly, and it declares almost nothing else. Availability needs a planned run time; performance needs an ideal cycle time; quality needs produced and good counts. Planned run time and ideal cycle time are NOT measurements, they are standards, so they are declarations the customer makes here or columns the customer owns. Copy the 'oee' block below into config/integrations.json, merged under the tenant key next to 'sheets_registers', 'assets' and 'business_graph'. Every register and range named here must already exist in that tenant's sheets_registers block. Replace SET_... values before use.",
+  "_note_registers": "Each entry under 'registers' names an existing sheets register and range, plus the column that identifies the station. The five factor columns are each optional, and each one that is absent makes exactly the factors that need it uncomputable and names them in not_computable. There is no partial-OEE defaulting: a factor whose input is missing is None, never 1.0, never a guess. That is the whole design. A platform that infers its own denominator is grading the factory against a benchmark it invented.",
+  "_note_planned_run": "planned_run_column is optional; planned_run_seconds is its alternative. If the customer's sheet has a per-row shift plan, name the column. If the plan is the same constant every shift, use planned_run_seconds and leave the column out. planned_run_seconds is a JSON number of seconds (28800, not \"28800\") and must be positive; the validator refuses a string, a zero and anything above a year, because a plan of zero seconds makes availability a division by zero. Declaring BOTH is allowed and is the ordinary 'per-row value with a station default' shape: a readable non-blank cell wins, and the constant fills in for a cell that is blank. A non-blank but unreadable cell uses neither -- it is counted in the unreadable counter and sets no plan, because the customer wrote something there and the platform will not quietly replace it with the constant. The refusal is reserved for genuinely ambiguous configuration: two registers declared for one read.",
+  "_note_performance": "performance is ideal_cycle * produced / run -- three measured values, so it does NOT need the plan. This is deliberate: a customer who declares an ideal cycle time but no shift plan still gets a real performance and quality figure and a refused OEE, which is strictly more information than refusing the whole read. Do not 'fix' this by requiring the plan for performance; that would throw away two honest factors to make the code simpler.",
+  "_note_ratio_direction": "performance is a rate, not a share. It is below 1.0 whenever the line runs slower than the standard implies, and that is the normal case, not an error. It is never clamped up to 1.0. availability above 1.0 is reported as-is rather than clamped too, because a run longer than the plan is a planning defect the manager needs to see, and clamping it to 100% would hide it behind a perfect number.",
+  "_note_quality": "quality is good / produced. Two refusals: produced of zero has no ratio (both 0% and 100% would be fabrications, so it is reported unusable with the input named), and good above produced is a data error rather than a yield above 100%. Reporting the latter would give an OEE of 347%, and a manager who sees that once stops trusting every other figure in the payload. It is surfaced through the 'good_exceeds_produced' counter instead of being clamped.",
+  "_note_unplanned": "unplanned_column is optional and is reported, never classified. An idle span is an observation; whether it was planned (a lunch break, a scheduled changeover) or unplanned (a breakdown) is a declaration the customer makes by class. The module counts the class the register names as unplanned and does not decide for itself, because deriving planned run time from calendar arithmetic would mean the platform deciding how many shifts a factory runs.",
+  "_note_thresholds": "The 'thresholds' block is the andon configuration, and it is entirely the customer's. The platform does not decide that 85% is a bad OEE; the customer decides what to be told about. Each metric ('oee', 'availability', 'performance', 'quality') takes an optional 'below' and an optional 'above', both percentages in 0..100. A pair with below >= above is refused at configure time rather than silently never firing. With no thresholds declared at all, oee.andon refuses by name: it will not invent a bound to compare against, and it will not report a comparison nobody asked for.",
+  "_note_andon_is_detection": "oee.andon returns which stations breached which declared threshold, with the measured value and the bound it crossed -- the fact, not the verdict. Delivery reuses the P6 escalation coordinator, so this module does not grow a second notification path. Alerting is a coordinator action, not a tool, so a model can neither manufacture an alarm nor suppress one. A station whose OEE is not computable is counted in 'not_evaluated' and raises NO breach: a missing column name must not page a manager about a failing line.",
+  "_note_blank_vs_zero": "Every quantity comes from a declared column. A blank cell is 'not recorded' and a cell holding text is 'unreadable'; they are counted separately ('unreadable_planned', 'unreadable_run', 'unreadable_produced', 'unreadable_good', 'unreadable_unplanned') because they mean different things to a manager. Neither becomes zero. A blank and a confident 0 are different facts, and a station with no readable run time produces a refused availability rather than a station reporting zero downtime. A decimal comma ('12,5') is read as a decimal point, because real Uzbek spreadsheets hold it.",
+  "_note_person": "No per-person figure exists and no configuration key could create one. There is no operator_column, shift_column, team_column or any equivalent; an OEE attributed to a machine is a maintenance signal, but the same number attributed to the operator on that shift is a sanction. If the customer's register happens to carry an operator or brigada column, it is never read: the module only reads the columns it was told to read. This is asserted structurally by the test suite and measured by scripts/probe_oee_boundary.py.",
+  "_note_readonly": "Both tools are read-only. There is no write path in the module at all -- an entity able to edit a run time would be the author of the OEE it is reporting on. Every read goes through sheets.rows, so the register declaration, A1 allowlist, agent tool permission and connection allowlist all apply unchanged. This module adds no transport and no new authority.",
+  "demo-plant": {
+    "oee": {
+      "registers": {
+        "line": {
+          "register": "plant",
+          "range": "oee",
+          "station_column": "stansiya",
+          "planned_run_column": "reja",
+          "ideal_cycle_column": "ideal",
+          "run_column": "ish",
+          "produced_column": "chiqim",
+          "good_column": "yaxshi",
+          "unplanned_column": "rejasiz"
+        },
+        "press": {
+          "register": "plant",
+          "range": "press",
+          "station_column": "stansiya",
+          "planned_run_seconds": 28800,
+          "ideal_cycle_column": "ideal",
+          "run_column": "ish",
+          "produced_column": "chiqim",
+          "good_column": "yaxshi"
+        }
+      },
+      "thresholds": {
+        "oee": {
+          "below": 85
+        },
+        "availability": {
+          "below": 90
+        },
+        "quality": {
+          "below": 95
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+"""Tashqi servis adapterlari."""

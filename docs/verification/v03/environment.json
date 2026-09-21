@@ -1,0 +1,17 @@
+{
+  "python": "3.14.6 (main, Jun 11 2026, 04:03:53) [Clang 22.1.3 ]",
+  "missing_dependencies": [
+    "fastapi",
+    "pydantic",
+    "jwt",
+    "yaml",
+    "httpx",
+    "pytest",
+    "redis",
+    "psycopg"
+  ],
+  "ui_dependencies_installed": false,
+  "typescript_binary": "/opt/npm-global/lib/node_modules/typescript/bin/tsc",
+  "installation_attempted": false,
+  "external_provider_calls": false
+}

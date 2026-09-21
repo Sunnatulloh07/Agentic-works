@@ -1,0 +1,72 @@
+# Muddati o'tgan ish eskalatsiyasi (PRD v0.5, P6)
+#
+# Bitta jadval: jadval o'qiladi, kechikkan ish menejerga bir marta xabar qilinadi.
+#
+# Sozlash: PUT /platform/{tenant}/escalation/{schedule}
+# Jadval:  GET /platform/{tenant}/escalation
+# Ledger:  GET /platform/{tenant}/escalation/{schedule}/ledger
+# O'chirish: POST /platform/{tenant}/escalation/{schedule}/disable
+# Ko'rish: escalation.preview (read tool — hech narsa yubormaydi)
+#
+# Ruxsat: PUT va POST — owner-only; GET — owner yoki operator. Sabab: bu real
+# odamlar haqida real chatga avtomatik xabar rejalashtiradi.
+#
+# Ikki qat'iy chegara (kodda majburiy, shunchaki tavsiya emas):
+#   1. Platforma xodimni BAHOLAMAYDI: ball, reyting, samaradorlik yo'q.
+#      Faqat faktlar: kim, qanday vazifa, qaysi muddat, qanday holat.
+#   2. Faqat O'QISH + XABAR. Ishni o'zgartirmaydi, qayta tayinlamaydi,
+#      yopmaydi. Yagona yozuv — menejerga telegram.send (operator sozlagan
+#      qabul qiluvchiga, shuning uchun approval talab qilinmaydi).
+#
+# Talablar (configure vaqtida tekshiriladi):
+#   - actor owner bo'lishi shart (cron kanali, owner roli);
+#   - agent policy mavjud bo'lishi shart;
+#   - agent `source` o'quvchisi VA `telegram.send` ga ega bo'lishi shart;
+#   - recipient agent'ning allowed_recipients ro'yxatida bo'lishi shart —
+#     aks holda eskalatsiya boshqa chatga yo'naltirilishi mumkin bo'lardi.
+#
+# `source` (P14 C bosqich) — jadval QAYSI o'quvchidan eskalatsiya qilishini
+# tanlaydi va faqat ikkitasi bor: `workforce` (default) yoki `telephony`.
+# Muhim: bu YANGI YUBORUVCHI EMAS. Ikkalasi ham `telegram.send` orqali, o'sha
+# ledger, o'sha dedup va o'sha cooldown bilan yetkaziladi — ikkinchi
+# bildirishnoma yo'li ochilmaydi, chunki ikkinchi yo'l — bu o'chirishni
+# unutib qoldiradigan ikkinchi narsa.
+#
+# Telefoniyadan eskalatsiya qilinganda digest qo'shimcha ikki faktni aytadi:
+# rozilik darvozasi rad etgan raqamlar soni va e'lon qilingan sur'atdan ortiq
+# (ya'ni qonuniy ravishda bajarilmaydigan) qatorlar soni. Sabab: "12 ta
+# qo'ng'iroq tayyor" deb aytib, "ulardan 10 tasi rad etilgan" deb aytmaslik —
+# navbatning o'zi rad etadigan haddan ortiq da'vo.
+#
+# `max_age_days` FAQAT `workforce` uchun qo'llanadi. Raqamni yoshi bo'yicha
+# chiqarib tashlash qonuniy qo'ng'iroqni jimgina bekor qilardi, va "eski" —
+# qo'ng'iroqning qonuniyligini to'xtatadigan sabab emas.
+#
+# Dedup kaliti: (tenant, schedule, person, task, due) — ya'ni ISH OB'YEKTI,
+# xodim emas. Bitta kechikkan vazifa bir marta eskalatsiya qilinadi. Muddati
+# ko'chirilgan vazifa — yangi kalit, shuning uchun qaytadan ogohlantiriladi.
+# Telefoniya manbasida "ish ob'ekti" — RAQAM (maqsad bilan), hech qachon xodim.
+escalation:
+  daily:
+    agent: mgmt.hr                   # pack.yaml dagi agent id
+    source: workforce                # workforce | telephony  (default: workforce)
+    recipient: "123456789"           # operator sozlagan chat — model ko'rmaydi
+    title: "Kechikkan ish — kunlik"  # ixtiyoriy sarlavha (bo'sh bo'lsa standart)
+    cooldown_seconds: 86400          # 300..2592000 (failed urinishlar orasidagi)
+    max_per_cycle: 10                # 1..50   (bir xabarda ko'pi bilan nechta yozuv)
+    interval_seconds: 3600           # 300..604800 (sikl davriyligi)
+    max_age_days: 30                 # 1..365  (bundan eski yozuv alohida yuborilmaydi)
+    enabled: true
+
+  # Telefoniyadan eskalatsiya: qo'ng'iroq navbati yetkazish uchun tayyor
+  # bo'lganda menejerga xabar. Yuboruvchi bir xil — `telegram.send`.
+  calls_ready:
+    agent: ops.telephony
+    source: telephony
+    recipient: "123456789"
+    title: "Qo'ng'iroq navbati tayyor"
+    cooldown_seconds: 86400
+    max_per_cycle: 20
+    interval_seconds: 3600
+    max_age_days: 30                 # telefoniya uchun qo'llanmaydi (yuqoriga qarang)
+    enabled: false                   # ataylab o'chirilgan: operator yoqishi kerak

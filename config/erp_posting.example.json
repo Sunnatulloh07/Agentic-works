@@ -1,0 +1,42 @@
+{
+  "_comment": "ERP posting (P8e). This is the first block in the platform that writes to a financial system, so it is deliberately declared SEPARATELY from 'connections'. A CRM connection is a read-mostly integration; a posting target is a system that will act on what we send, and an operator must not be able to post to a CRM sandbox because it happened to be the only thing configured. Copy the 'erp_posting' block below into config/integrations.json, under the tenant key next to 'documents', 'sheets_registers' and 'business_graph'.",
+  "_note_no_money": "The platform still does not move money. This block creates an accounting document -- a payable -- in the customer's ERP. There is no key here that pays, transfers, settles, remits or refunds, and no vocabulary for one anywhere in the module. Paying the invoice stays a human act in the ERP the customer already trusts. The absence is measured by scripts/probe_erp_posting_boundary.py, which inspects every public callable and every request body the module can build, not merely promised here.",
+  "_note_driver": "Two drivers, and the choice is about who owns the endpoint shape. 'onec_http' is 1C: a standard read/post pair over the 1C HTTP service. 'custom_http' is any ERP with a JSON endpoint. They differ only in how the answer is read (response_map) and in the auth header, so the same posting body travels either way.",
+  "_note_exact_or_refuse": "A posting is written only when the instruction is exact. The document must carry supplier, number, doc_date, currency and total_minor, and the operator must supply an account alias and a counterparty alias. If any of them is absent the posting is refused BY NAME: 'refusing to post an incomplete document: counterparty, total_minor'. The platform never fills a gap with a guess, because a guessed counterparty silently attributes a real debt to the wrong company. A malformed value is reported separately from a missing one, because 'we could not read the amount' and 'the amount you sent is not a number' send an operator to two different places.",
+  "_note_registers": "The account and the counterparty are the two fields a posting needs that do not live in the document, and they are read from the operator's own registers here, never from the document and never from the model. A supplier invoice that names its own ledger account is a supplier choosing where its own debt lands. The model names an ALIAS ('purchase', 'acme'), the operator's register maps it to the real code. A one-digit slip in a raw account code is a misposting nobody notices until an audit, so the model is never allowed to write one.",
+  "_note_dedup": "A duplicate posting pays an invoice twice, so it is prevented rather than detected, and it is prevented in three places. (1) The ERP is asked whether it already holds this document (search_path). (2) The platform records its own ledger row keyed by the same (driver, supplier, number) identity, checked BEFORE any I/O. (3) A UNIQUE index on that identity survives a race between two concurrent submits. The lookup is authoritative when it answers; the ledger is the backstop for a provider that cannot search by document number. Both must agree the document is new before anything is sent.",
+  "_note_search_fails_closed": "A search failure is NOT treated as 'not found'. An unreachable ERP means the platform cannot know whether the invoice is already posted, and sending in that state is exactly how a double payment happens, so the posting is refused. A MISSING CREDENTIAL is reported as itself, by variable name, rather than folded into 'could not ask the ERP': sending an operator to investigate the ERP when the fix is an environment variable wastes the one minute they had.",
+  "_note_retry": "A failed attempt stays retryable. The unique identity index is populated only by an outcome that ASSERTS the ERP holds the document ('posted', or 'skipped_existing' because the ERP already had it). A 'failed' row is an audit record of an attempt that did not land, and an 'unconfirmed' row is one where we do not know -- neither occupies the index, because otherwise a single transport blip would make a legitimate invoice permanently unpostable and the operator's only recourse would be editing the database.",
+  "_note_unconfirmed": "A 2xx without a document identifier is recorded as 'unconfirmed', not as 'posted'. An unverifiable financial write must not be reported as settled, so the operator is told to reconcile it in the ERP by hand rather than retrying, because a retry may post the invoice twice.",
+  "_note_approval": "erp.posting_prepare and erp.posting_status are reads. erp.posting_submit is a 'write', so the engine requires a human approval for it before it fires. The prepare tool exists so an operator can see, before approving, exactly what would be sent and which fields are missing -- a refusal there is the useful outcome, not a failure. The posting is recomputed from the step arguments at write time rather than trusted from a stored plan, because an approved step replays its arguments and a caller must not be able to approve a clean plan and submit a dirty one under the same fingerprint.",
+  "_note_allow_auto_submit": "allow_auto_submit is false here, and turning it on does not remove the approval; it only records the operator's intent that routine invoices of this shape need no second look. The engine's approval gate is not configurable from a tenant file. Leave this false until a live acceptance run has been through the loop at least once.",
+  "_note_not_outbound": "erp.posting_submit is deliberately NOT in the engine's outbound destination gate. That gate answers 'may this agent address this recipient', and a posting has no recipient: its guard is the document identity, which the ledger and the ERP search already enforce before any I/O. Listing it in the outbound allowlist would have made the destination check vacuous, because there is no conversation to bind it to and the allowlist branch would always pass.",
+  "_note_residency": "A posting body carries a counterparty name and a document number, which are not in the three biometric categories, so under the 2026 amendment they may leave the country -- but only once one of the three transfer bases applies, and the implementing regulations are not yet in force. An operator who wants the ERP to stay reachable only from inside Uzbekistan should point host at a domestic address; the platform does not choose this for them.",
+  "demo-erp": {
+    "erp_posting": {
+      "driver": "onec_http",
+      "enabled": true,
+      "host": "erp.example.uz",
+      "base_path": "/hs/agent",
+      "timeout_seconds": 15,
+      "auth": "basic",
+      "basic_auth_env": "ERP_1C_BASIC",
+      "post_path": "/documents",
+      "search_path": "/documents",
+      "response_map": {
+        "created_id": "Ref_Key",
+        "existing_id": "items.0.Ref_Key",
+        "items": "items"
+      },
+      "accounts": {
+        "purchase": "6010",
+        "services": "6020"
+      },
+      "counterparties": {
+        "acme": "ACME-LLC-0001",
+        "beta": "BETA-MCHJ-0002"
+      },
+      "allow_auto_submit": false
+    }
+  }
+}

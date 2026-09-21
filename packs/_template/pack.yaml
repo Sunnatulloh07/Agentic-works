@@ -1,0 +1,30 @@
+# Yangi mijoz uchun shablon. Nusxalang, nomini o'zgartiring, agentlarni yozing.
+# Core kodga tegish shart emas: yangi vertikal = yangi YAML.
+#
+# Qoidalar:
+#  - tools[] ichidagi har nom runtime registry'da mavjud bo'lishi shart,
+#    aks holda pack yuklanmaydi va xato qaysi tool ekanini aytadi.
+#  - ladder faqat: human_led | human_assisted | autonomous
+#  - har write tool (telegram.send, records.create, sheets.append, ...) tasdiq talab qiladi.
+#  - deterministik /report, /memory, /record buyruqlari agent NOMI bo'yicha emas,
+#    QOBILIYAT bo'yicha yo'naltiriladi: shu tool'ga ruxsati bor birinchi agent tanlanadi.
+name: template
+language: uz
+agents:
+  - id: sales.responder
+    name: "Javobchi (namuna, nusxalab o'zgartiring)"
+    department: sales
+    persona: prompts/responder.md
+    tools: [telegram.send]
+    ladder: human_led
+    approval: { required_for: [telegram.send], approver_role: operator }
+  - id: ops.assistant
+    name: "Operatsion yordamchi (namuna)"
+    department: operations
+    tools: [reports.summary, records.create, records.list, memory.put, memory.search]
+    ladder: human_assisted
+branches:
+  - id: main
+    name: "Asosiy filial"
+    address: "Toshkent"
+    phone: "+998900000000"

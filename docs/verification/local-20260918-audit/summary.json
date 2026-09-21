@@ -1,0 +1,170 @@
+{
+  "kind": "offline_verification_only",
+  "created_at": "2026-09-18T11:29:00.891289+00:00",
+  "python": "3.14.6",
+  "results": [
+    {
+      "name": "javascript_typescript_syntax",
+      "status": "BLOCKED",
+      "reason": "Bun unavailable; optional syntax-only check"
+    },
+    {
+      "name": "python_runtime",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "runtime_tests",
+        "-v"
+      ],
+      "seconds": 33.83,
+      "log": "python_runtime.log",
+      "tests": 266
+    },
+    {
+      "name": "release_tools",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_release_tools.py",
+        "-v"
+      ],
+      "seconds": 0.396,
+      "log": "release_tools.log",
+      "tests": 3
+    },
+    {
+      "name": "manifest_tools",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_manifest.py",
+        "-v"
+      ],
+      "seconds": 0.35,
+      "log": "manifest_tools.log",
+      "tests": 6
+    },
+    {
+      "name": "sqlite_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "scripts/demo_runtime.py"
+      ],
+      "seconds": 0.489,
+      "log": "sqlite_demo.log"
+    },
+    {
+      "name": "managed_database_demo",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "scripts/demo_managed_database.py"
+      ],
+      "seconds": 0.464,
+      "log": "managed_database_demo.log"
+    },
+    {
+      "name": "node_runner",
+      "status": "FAIL",
+      "exit_code": 134,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/runner/test.js"
+      ],
+      "seconds": 0.146,
+      "log": "node_runner.log"
+    },
+    {
+      "name": "browser_session_client",
+      "status": "FAIL",
+      "exit_code": 134,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/session-client.test.mjs"
+      ],
+      "seconds": 0.143,
+      "log": "browser_session_client.log"
+    },
+    {
+      "name": "browser_oauth_client",
+      "status": "FAIL",
+      "exit_code": 134,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/oauth-client.test.mjs"
+      ],
+      "seconds": 0.143,
+      "log": "browser_oauth_client.log"
+    },
+    {
+      "name": "browser_google_data_client",
+      "status": "FAIL",
+      "exit_code": 134,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/google-data-client.test.mjs"
+      ],
+      "seconds": 0.134,
+      "log": "browser_google_data_client.log"
+    },
+    {
+      "name": "python_syntax",
+      "status": "PASS",
+      "checked": 165,
+      "errors": []
+    }
+  ],
+  "http_dependencies_missing": [
+    "psycopg"
+  ],
+  "optional_database_dependencies_missing": [
+    "psycopg",
+    "pymysql",
+    "pymongo",
+    "pyodbc",
+    "oracledb",
+    "boto3",
+    "cassandra",
+    "neo4j",
+    "elasticsearch"
+  ],
+  "not_performed": [
+    "dependency-backed HTTP tests",
+    "Next/React typecheck",
+    "Next production build",
+    "live providers",
+    "live network databases including SQL Server, Oracle, DynamoDB, Cassandra, Neo4j and Elasticsearch",
+    "native macOS F_GETPATH/LaunchAgent",
+    "local model inference",
+    "UI browser acceptance",
+    "production dependency audit",
+    "deployment"
+  ],
+  "release": "NO_GO"
+}

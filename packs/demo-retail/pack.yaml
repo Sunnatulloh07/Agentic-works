@@ -1,0 +1,54 @@
+name: demo-retail
+language: uz
+shop_name: "Bolalar kiyimlari do'koni"
+faq:
+  delivery: "Yetkazib berish: Toshkent bo'ylab 1 kunda, 30000 so'm. 500000 dan yuqori buyurtma bepul."
+  returns: "Qaytarish: 7 kun ichida chek bilan, kiyilmagan bo'lsa."
+  payment: "To'lov: naqd, Click, Payme. Oldindan to'lov shart emas."
+agents:
+  - id: sales.responder
+    name: "DM javobchi"
+    persona: prompts/sales/responder.md
+    tools: [telegram.send, instagram.send, products.search]
+    ladder: human_led
+  - id: sales.order_taker
+    name: "Buyurtma qabulchi"
+    tools: [telegram.send, instagram.send, records.create, sheets.append]
+    ladder: human_assisted
+  - id: sales.stock_answerer
+    name: "Qoldiq/narx aytuvchi"
+    tools: [products.search]
+    ladder: autonomous
+  - id: ops.branch_router
+    name: "Filial router"
+    tools: [telegram.send, records.create, sheets.append]
+    ladder: human_assisted
+  - id: sales.hot_lead
+    name: "Hot-lead xabarchi"
+    tools: [records.create, telegram.send]
+    ladder: autonomous
+  - id: intel.daily_stats
+    name: "Kunlik statistika"
+    tools: [reports.summary, sheets.append, telegram.send]
+    ladder: autonomous
+  - id: ops.assistant
+    name: "Operatsion yordamchi"
+    department: operations
+    tools: [records.create, records.list, memory.put, memory.search, reports.summary]
+    ladder: human_assisted
+  - id: ops.device_observer
+    name: "Qurilma kuzatuvchi"
+    department: operations
+    tools: [fs.list, fs.read_text]
+    ladder: human_assisted
+branches:
+  - id: chilonzor
+    name: "Chilonzor filiali"
+    address: "Toshkent, Chilonzor tumani"
+    phone: "+998901110000"
+    hours: "9:00-21:00"
+  - id: yunusobod
+    name: "Yunusobod filiali"
+    address: "Toshkent, Yunusobod tumani"
+    phone: "+998902220000"
+    hours: "9:00-21:00"

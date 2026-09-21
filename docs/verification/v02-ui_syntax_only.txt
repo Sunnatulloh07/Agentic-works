@@ -1,0 +1,2 @@
+COMMAND: node /opt/npm-global/lib/node_modules/typescript/bin/tsc --ignoreConfig --noCheck --noEmit --jsx react-jsx --target es2020 apps/ui/app/platform/page.tsx
+EXIT: 0

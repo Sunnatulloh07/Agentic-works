@@ -1,0 +1,106 @@
+{
+  "release": "0.2.0-preview",
+  "production_ready": false,
+  "baseline_zip_sha256": "5fff3925655b410fc0b8c103280fc58ac860224924ad52de9b832c0201f5a88f",
+  "baseline_file_count": 132,
+  "baseline_tests": {
+    "python_runtime": 71,
+    "node_runner": 13
+  },
+  "current_tests": {
+    "python_runtime": 114,
+    "node_runner": 15
+  },
+  "checks": {
+    "python_runtime": {
+      "exit_code": 0,
+      "status": "passed",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "runtime_tests",
+        "-v"
+      ]
+    },
+    "node_runner": {
+      "exit_code": 0,
+      "status": "passed",
+      "command": [
+        "node",
+        "--test",
+        "apps/runner/test.js"
+      ]
+    },
+    "offline_demo": {
+      "exit_code": 0,
+      "status": "passed",
+      "command": [
+        "python",
+        "scripts/demo_runtime.py"
+      ]
+    },
+    "python_syntax": {
+      "exit_code": 0,
+      "status": "passed",
+      "command": [
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "api-python",
+        "scripts"
+      ]
+    },
+    "ui_syntax_only": {
+      "exit_code": 0,
+      "status": "passed",
+      "command": [
+        "node",
+        "/opt/npm-global/lib/node_modules/typescript/bin/tsc",
+        "--ignoreConfig",
+        "--noCheck",
+        "--noEmit",
+        "--jsx",
+        "react-jsx",
+        "--target",
+        "es2020",
+        "apps/ui/app/platform/page.tsx"
+      ]
+    },
+    "ui_typecheck_attempt": {
+      "exit_code": 1,
+      "status": "blocked_or_failed",
+      "command": [
+        "node",
+        "/opt/npm-global/lib/node_modules/typescript/bin/tsc",
+        "--ignoreConfig",
+        "--noEmit",
+        "--jsx",
+        "react-jsx",
+        "--target",
+        "es2020",
+        "apps/ui/app/platform/page.tsx"
+      ]
+    }
+  },
+  "blocked": [
+    "FastAPI HTTP integration and legacy pytest suites: dependencies unavailable",
+    "React-aware typecheck and Next production build: dependencies unavailable",
+    "Production security dependency upgrade including Next14.2.5",
+    "Real provider integration, credentials and contract verification",
+    "Uzbek speech quality/latency benchmark",
+    "Streaming telephony/meeting pipeline",
+    "Production deploy, restore and load test"
+  ],
+  "live_provider_calls": 0,
+  "new_schema_migrations": 0,
+  "notes": [
+    "UI syntax-only uses installed TypeScript7 with --noCheck; not project TypeScript or React semantic validation",
+    "No dependencies installed; no deployment performed",
+    "Aisha adapters verified with fake transports only",
+    "SQLite connector uses real temporary database in tests"
+  ]
+}

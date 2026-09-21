@@ -1,0 +1,37 @@
+{
+  "checkpoint": "0.3.1-code-review-preview",
+  "date": "2026-09-14",
+  "work_mode": "SOURCE_EDIT_AND_MANUAL_REVIEW_ONLY",
+  "user_policy": "Agent writes/reviews source and test files; user runs all tests and builds.",
+  "project_commands_executed": [],
+  "test_collection_performed": false,
+  "project_runtime_imported": false,
+  "review": {
+    "status": "MANUAL_SOURCE_REVIEW",
+    "scope": "changed control-plane paths and their direct callers; not a whole-repository audit",
+    "automated_checks": false
+  },
+  "tests": {
+    "status": "NOT_RUN",
+    "reason": "USER_REQUEST",
+    "exit_code": null,
+    "passed": null,
+    "failed": null
+  },
+  "build_typecheck_lint_compile_demo": {
+    "status": "NOT_RUN",
+    "reason": "USER_REQUEST",
+    "exit_code": null
+  },
+  "archive_source_rerun": {
+    "status": "NOT_RUN",
+    "reason": "USER_REQUEST",
+    "exit_code": null
+  },
+  "ci_deployment_live_services": {
+    "status": "NOT_RUN",
+    "reason": "OUT_OF_AGENT_SCOPE"
+  },
+  "historical_evidence": "docs/verification/v03/ applies to the input snapshot only",
+  "release": "NO_GO"
+}

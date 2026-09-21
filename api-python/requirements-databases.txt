@@ -1,0 +1,17 @@
+# Optional managed-network adapters. Compatibility ranges, NOT an audited lock.
+# Install only in the deployment/CI environment. No installation was run here.
+-r requirements.txt
+PyMySQL>=1.1,<2
+pymongo>=4.6,<5
+redis>=5,<7
+
+# Enterprise preview: SQL Server also needs the OS-level Microsoft ODBC Driver 18.
+# Compatibility ranges only; neither native dependency was installed or audited here.
+pyodbc>=5.2,<6
+oracledb>=3.2,<4
+
+# NoSQL source/contract preview. Not installed or live-tested here.
+boto3>=1.35,<2
+cassandra-driver>=3.29,<4
+neo4j>=5.25,<6
+elasticsearch>=8.15,<9

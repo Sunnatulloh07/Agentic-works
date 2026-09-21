@@ -1,0 +1,267 @@
+[
+  {
+    "path": "README.md",
+    "change": "modified",
+    "sha256": "ad636e2ab03f5afea16ec42c12a36ed73ee1ac2ef58c18f70843793e4c292951"
+  },
+  {
+    "path": "api-python/.env.example",
+    "change": "modified",
+    "sha256": "d983485e9728ab01c24597251c1fd7a05c3a44abc7217784d9c6be7dd52ee782"
+  },
+  {
+    "path": "config/customer-sqlite.example.json",
+    "change": "modified",
+    "sha256": "7ffdb9d5a02361fba9febe53de42c288590b988efacc8a8d2a09dd3781b2399f"
+  },
+  {
+    "path": "docs/IMPLEMENTATION-STATUS.md",
+    "change": "modified",
+    "sha256": "0c6dcf475ac71934e63290213028bae69a064b2b1cc98cbee03eac5468e0d5f1"
+  },
+  {
+    "path": "docs/AUDIT-V03-UZ.md",
+    "change": "added",
+    "sha256": "da0dfda2cb5f5e9b187d57e8afd7f405121ac46d9bb5258832ca58f3c2ae675f"
+  },
+  {
+    "path": "docs/RUNBOOK-V03-UZ.md",
+    "change": "added",
+    "sha256": "543ee7c42edf5f2a8f169d78cf10316c961c1557c3f988dacaa383bb84b36087"
+  },
+  {
+    "path": "scripts/setup_local.py",
+    "change": "modified",
+    "sha256": "e80fdf9d8f9e6a72b5923af07b4814aa8241d0d18b282944512f78e8811a6dfd"
+  },
+  {
+    "path": "scripts/provision_identity.py",
+    "change": "added",
+    "sha256": "6a7ccf45eea6574428a4c6ed3e90a02341da1d0e73cede7a10e07319ae4b0057"
+  },
+  {
+    "path": "scripts/sqlite_backup.py",
+    "change": "added",
+    "sha256": "d7a54e3f678b335ec4b3156f8e3e204eee1a13871e26f5f5e6c4e864b5e9d1aa"
+  },
+  {
+    "path": "scripts/check_release.py",
+    "change": "added",
+    "sha256": "1f1aef90bdedab7d04da80e0728ded5bdc1409520d7477ca0571cdf5a70d8b4a"
+  },
+  {
+    "path": "scripts/test_release_tools.py",
+    "change": "added",
+    "sha256": "dd7c08bfc970d24a57e8530fa69094092a2456486b2ea1fc6903db35e2808c38"
+  },
+  {
+    "path": "docs/prd-v02/00-INDEX.md",
+    "change": "modified",
+    "sha256": "b7997d5f1b12bf8ec7b8d3d4d90017adaf868708a97bfba8234ff564f9d19542"
+  },
+  {
+    "path": "docs/prd-v03/00-HARDENING-PRD-UZ.md",
+    "change": "added",
+    "sha256": "9cc91aceec0fbac359b2eb18de21ae480c802c2bf78b5f106bb6bc3bdf7b1162"
+  },
+  {
+    "path": "docs/verification/v03/python-syntax.log",
+    "change": "added",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "docs/verification/v03/python-runtime.log",
+    "change": "added",
+    "sha256": "a08b04f9403bcf1363555e73428738f7090dd0a6edd47f9e3c9eb0376126b496"
+  },
+  {
+    "path": "docs/verification/v03/node-runner.log",
+    "change": "added",
+    "sha256": "b2a5529659eabaa6a5c38554e64df2e0c44834b71c1e60ecc4c0ac6179de0167"
+  },
+  {
+    "path": "docs/verification/v03/browser-session.log",
+    "change": "added",
+    "sha256": "cfff8b69caf7e458faad0b10a63383be2565af99c885a579b5245f1f1df594ee"
+  },
+  {
+    "path": "docs/verification/v03/release-tools.log",
+    "change": "added",
+    "sha256": "cf4d2cc76b1d61432f02e7b785be7c43dffcce7fc7246a903f58be683563cc5f"
+  },
+  {
+    "path": "docs/verification/v03/ui-syntax-only.log",
+    "change": "added",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "docs/verification/v03/session-declaration-types.log",
+    "change": "added",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "docs/verification/v03/offline-demo.log",
+    "change": "added",
+    "sha256": "4b38f5f3cba932d7b4e84e60881e2d5b98d628faf2f177e5e4d215d8a377ffc3"
+  },
+  {
+    "path": "docs/verification/v03/environment.json",
+    "change": "added",
+    "sha256": "45bb796d234aa27fbd9894a72a4cf8df3e06bcc8d753261fa2f8145077b8c953"
+  },
+  {
+    "path": "docs/verification/v03/execution.json",
+    "change": "added",
+    "sha256": "263194276e1941bba6c17334ac0cda879061787e1099baac1deba20751e7a010"
+  },
+  {
+    "path": "docs/verification/v03/release-evidence.json",
+    "change": "added",
+    "sha256": "85f2e882a42e9ea9ce44d57f7f7f0830ca3b6c7cab154f28737f920e1a687d50"
+  },
+  {
+    "path": "apps/ui/lib/session-client.mjs",
+    "change": "added",
+    "sha256": "4daffa00b698ad2f714a939a4d21e0f026ada8f88ff973863b7e80370a058245"
+  },
+  {
+    "path": "apps/ui/lib/session-client.d.mts",
+    "change": "added",
+    "sha256": "7cc445aa020d86cde1df40473b9f400ab23b8a4511a746e1a12618391f4ee414"
+  },
+  {
+    "path": "apps/ui/lib/session-client.test.mjs",
+    "change": "added",
+    "sha256": "1ae8d8f238999b8f67d1f3473e86f2478dd22faac1582a2346129ecf57ee93c5"
+  },
+  {
+    "path": "apps/ui/components/SessionGate.tsx",
+    "change": "added",
+    "sha256": "691a97161eb197d5a827f26687503e123cb27850fa5d9efe597de0ba4662b510"
+  },
+  {
+    "path": "apps/ui/app/platform/page.tsx",
+    "change": "modified",
+    "sha256": "4a536ac92ab369677e61e99df4d5439ad68d684e6e2c2e3ef5526c01baae442b"
+  },
+  {
+    "path": "api-python/app/auth.py",
+    "change": "modified",
+    "sha256": "82b2e90c81800f69bd486dcf5d1bca9d83b631cb7545e97a76642458d4c46160"
+  },
+  {
+    "path": "api-python/app/domain.py",
+    "change": "modified",
+    "sha256": "bb36ee85a280c104f8ae1ecc084b38f1bb43a50384f5b5af257ebc41e3835e9a"
+  },
+  {
+    "path": "api-python/app/main.py",
+    "change": "modified",
+    "sha256": "86f4db2c6ee3cdca06289666e4cecfeeb9f5a57af45e8b88ce2e7d4af50add27"
+  },
+  {
+    "path": "api-python/app/platform_api.py",
+    "change": "modified",
+    "sha256": "14f609620d72d1a0f05b7308adb950e5cd8df663fbb9253bd3f41ed7c615c06d"
+  },
+  {
+    "path": "api-python/app/storage.py",
+    "change": "modified",
+    "sha256": "725aea6cc6db307bc014f3674e317378b70009a8eaf0ea96f6065750c8214f5e"
+  },
+  {
+    "path": "api-python/app/customer360.py",
+    "change": "modified",
+    "sha256": "0c12b1c26918d1d097956a4e14185b5acb75240cc96425dc845067aec7250b19"
+  },
+  {
+    "path": "api-python/app/identity_store.py",
+    "change": "modified",
+    "sha256": "1e52366689ee7552049ca348e8015a77595f21e694453c785cb17cc3ad689fe6"
+  },
+  {
+    "path": "api-python/app/identity_api.py",
+    "change": "modified",
+    "sha256": "ce02873d6d936dbb60c3b60e893fe099663727b9e5646c594487fb3a1c1036ca"
+  },
+  {
+    "path": "api-python/app/domain_enums.py",
+    "change": "added",
+    "sha256": "c6d97a14832b5abf857835486c8d14d506ce79963070f70f15056cd440c21f6b"
+  },
+  {
+    "path": "api-python/app/identity_schema.py",
+    "change": "added",
+    "sha256": "83a611fc1b3791fce536bed2db64059bc6b67e4d571c752a225b2f4fe38cc936"
+  },
+  {
+    "path": "api-python/app/authorization.py",
+    "change": "added",
+    "sha256": "c31305cd9ca54c535fa7f70adeb2ce7dd80acd8260732df02aec4050643fb2f2"
+  },
+  {
+    "path": "api-python/app/runtime_authority.py",
+    "change": "added",
+    "sha256": "af681daecf38fc81481e45d9536ebeb405bfac739656cf29331a76006170f97e"
+  },
+  {
+    "path": "api-python/integration_tests/test_http.py",
+    "change": "modified",
+    "sha256": "6985dd5ab1e1e8136432e6bac7a2331c391d1802a67cbcf6de0f7483740b9af5"
+  },
+  {
+    "path": "api-python/integration_tests/test_identity_http.py",
+    "change": "added",
+    "sha256": "2d8ab3476c757f8e638f06280ee28b30fa3662d193e10fafeb01076966372ed2"
+  },
+  {
+    "path": "api-python/platform_runtime/connectors.py",
+    "change": "modified",
+    "sha256": "e9625492cb1d3782ad335b85ac521f9c35e205ca908c9d796e0174150e87c353"
+  },
+  {
+    "path": "api-python/platform_runtime/engine.py",
+    "change": "modified",
+    "sha256": "b9f6502339cf4b8d7692dc854f98529c1809085abd729762aa9703011c8a644e"
+  },
+  {
+    "path": "api-python/platform_runtime/connector_contract.py",
+    "change": "modified",
+    "sha256": "8bd51742a3345c4a56e9932aa408ca96cf3cf6acf089f1c26e9bf97ad9d575d1"
+  },
+  {
+    "path": "api-python/platform_runtime/postgres_connector.py",
+    "change": "added",
+    "sha256": "d5c6c8ed3c547bd01fd4e8d5656ae7ad50d9eed1f7e7c6da0bd4c2e622614d3c"
+  },
+  {
+    "path": "api-python/runtime_tests/test_foundation_v02.py",
+    "change": "modified",
+    "sha256": "dfe600842d2d9c3011acecebb2f10346b816e4a1368e67cbd9292f0513d2f217"
+  },
+  {
+    "path": "api-python/runtime_tests/test_identity_store.py",
+    "change": "modified",
+    "sha256": "37783bc9693f980bba01d9ed4db46c64c08e8526f618c5e1ef3f8e3227a16b44"
+  },
+  {
+    "path": "api-python/runtime_tests/test_identity_hardening.py",
+    "change": "added",
+    "sha256": "325d4394fd2559b14b4acaced1be85c7404be1e34180d38ffb420bc997db19fc"
+  },
+  {
+    "path": "api-python/runtime_tests/test_postgres_contract.py",
+    "change": "added",
+    "sha256": "389b610cdac450ade3b4662c56a85e66b03ec7c9d9192008aa19073eedf806de"
+  },
+  {
+    "path": "api-python/runtime_tests/test_runtime_authority.py",
+    "change": "added",
+    "sha256": "414579ce88374d9d547f6942053d2bf5d4d9fef51c23658ced42e567c7085cd8"
+  },
+  {
+    "path": ".github/workflows/verify.yml",
+    "change": "modified",
+    "sha256": "3a5e7a9cd4ecb46e66290f4e76ed09dcaadefbc38c7436271b9b00b3e46f2f47"
+  }
+]

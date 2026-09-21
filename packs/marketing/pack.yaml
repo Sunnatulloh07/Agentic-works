@@ -1,0 +1,36 @@
+name: marketing
+language: uz
+# Tool nomlari runtime registry nomlari bilan aynan bir xil bo'lishi shart.
+# Mos kelmasa pack yuklanmaydi (app/packs.py load-time tekshiruvi).
+agents:
+  - id: marketing.content_editor
+    name: "Kontent muharriri"
+    department: marketing
+    tools: [knowledge.search, telegram.send]
+    ladder: human_led
+    approval: { required_for: [telegram.send], approver_role: operator }
+  - id: marketing.ad_creative
+    name: "Reklama kreativchisi"
+    department: marketing
+    tools: [knowledge.search, instagram.send]
+    ladder: human_led
+    approval: { required_for: [instagram.send], approver_role: operator }
+  - id: marketing.researcher
+    name: "Bozor tadqiqotchisi"
+    department: marketing
+    # Veb qidiruv adapteri hali yo'q. Tadqiqot faqat yuklangan bilim bazasidan.
+    # reports.summary shu agentda: deterministik /report shu qobiliyat orqali
+    # yo'naltiriladi, core agent nomini bilmaydi.
+    tools: [knowledge.search, reports.summary]
+    ladder: human_led
+  - id: marketing.script_doctor
+    name: "Ssenariy doktori"
+    department: marketing
+    tools: [knowledge.search, telegram.send]
+    ladder: human_led
+    approval: { required_for: [telegram.send], approver_role: operator }
+branches:
+  - id: main
+    name: "Bosh ofis"
+    address: "Toshkent"
+    phone: "+998903330000"

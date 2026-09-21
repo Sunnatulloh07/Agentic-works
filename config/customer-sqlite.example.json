@@ -1,0 +1,37 @@
+{
+  "demo-retail": {
+    "connections": {
+      "crm-export": {
+        "driver": "sqlite_readonly",
+        "path": "/srv/customer-db/demo-retail/crm.sqlite",
+        "enabled": true,
+        "tables": {
+          "contacts": [
+            "id",
+            "name",
+            "company"
+          ]
+        }
+      },
+      "crm-postgres-readonly": {
+        "driver": "postgres_readonly",
+        "contract_version": "1.0",
+        "lifecycle": "configured",
+        "capabilities": ["discover", "validate", "read"],
+        "host": "postgres.example.internal",
+        "allowed_hosts": ["postgres.example.internal"],
+        "port": 5432,
+        "database": "customer_db",
+        "user": "readonly_user",
+        "password_env": "CUSTOMER_DB_PASSWORD",
+        "sslmode": "verify-full",
+        "isolation": "tenant_column",
+        "schema": "public",
+        "tenant_column": "workspace_id",
+        "tables": {
+          "customers": ["id", "workspace_id", "display_name", "status"]
+        }
+      }
+    }
+  }
+}

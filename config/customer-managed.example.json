@@ -1,0 +1,374 @@
+{
+  "demo-retail": {
+    "connections": {
+      "customer-sqlite": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "sqlite_managed",
+        "path": "/srv/customer-db/demo-retail/customer.sqlite"
+      },
+      "customer-postgres": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "postgres_managed",
+        "host": "postgres.customer.example",
+        "allowed_hosts": [
+          "postgres.customer.example"
+        ],
+        "port": 5432,
+        "database": "customer",
+        "user": "managed_agent",
+        "password_env": "CUSTOMER_POSTGRES_PASSWORD",
+        "schema": "public",
+        "sslmode": "verify-full"
+      },
+      "customer-mysql": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "mysql_managed",
+        "host": "mysql.customer.example",
+        "allowed_hosts": [
+          "mysql.customer.example"
+        ],
+        "port": 3306,
+        "database": "customer",
+        "user": "managed_agent",
+        "password_env": "CUSTOMER_MYSQL_PASSWORD",
+        "tls": true,
+        "schema": "customer"
+      },
+      "customer-mariadb": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "mariadb_managed",
+        "host": "mariadb.customer.example",
+        "allowed_hosts": [
+          "mariadb.customer.example"
+        ],
+        "port": 3306,
+        "database": "customer",
+        "user": "managed_agent",
+        "password_env": "CUSTOMER_MARIADB_PASSWORD",
+        "tls": true,
+        "schema": "customer"
+      },
+      "customer-mongodb": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "mongodb_managed",
+        "host": "mongodb.customer.example",
+        "allowed_hosts": [
+          "mongodb.customer.example"
+        ],
+        "port": 27017,
+        "database": "customer",
+        "user": "managed_agent",
+        "password_env": "CUSTOMER_MONGODB_PASSWORD",
+        "tls": true
+      },
+      "customer-redis": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "redis_managed",
+        "host": "redis.customer.example",
+        "allowed_hosts": [
+          "redis.customer.example"
+        ],
+        "port": 6380,
+        "database": 0,
+        "user": "managed_agent",
+        "password_env": "CUSTOMER_REDIS_PASSWORD",
+        "tls": true,
+        "namespace": "agent_platform"
+      },
+      "customer-sqlserver": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "workspace_id",
+        "resources": {
+          "customers": {
+            "key_field": "id",
+            "version_field": "version",
+            "read_fields": [
+              "id",
+              "version",
+              "name",
+              "status"
+            ],
+            "insert_fields": [
+              "name",
+              "status"
+            ],
+            "update_fields": [
+              "name",
+              "status"
+            ]
+          }
+        },
+        "driver": "sqlserver_managed",
+        "host": "sqlserver.customer.example",
+        "allowed_hosts": [
+          "sqlserver.customer.example"
+        ],
+        "port": 1433,
+        "database": "customer",
+        "user": "managed_agent",
+        "password_env": "CUSTOMER_SQLSERVER_PASSWORD",
+        "tls": true,
+        "schema": "sales",
+        "odbc_driver": "ODBC Driver 18 for SQL Server"
+      },
+      "customer-oracle": {
+        "contract_version": "1.1",
+        "generation": 1,
+        "enabled": false,
+        "lifecycle": "configured",
+        "agent_ids": [
+          "ops.assistant"
+        ],
+        "capabilities": [
+          "read",
+          "plan_write",
+          "execute_write"
+        ],
+        "isolation": "tenant_column",
+        "tenant_column": "WORKSPACE_ID",
+        "resources": {
+          "CUSTOMERS": {
+            "key_field": "ID",
+            "version_field": "VERSION",
+            "read_fields": [
+              "ID",
+              "VERSION",
+              "NAME",
+              "STATUS"
+            ],
+            "insert_fields": [
+              "NAME",
+              "STATUS"
+            ],
+            "update_fields": [
+              "NAME",
+              "STATUS"
+            ]
+          }
+        },
+        "driver": "oracle_managed",
+        "host": "oracle.customer.example",
+        "allowed_hosts": [
+          "oracle.customer.example"
+        ],
+        "port": 2484,
+        "database": "customer",
+        "user": "MANAGED_AGENT",
+        "password_env": "CUSTOMER_ORACLE_PASSWORD",
+        "tls": true,
+        "schema": "SALES",
+        "service_name": "customer.example"
+      }
+    }
+  }
+}

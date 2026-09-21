@@ -1,0 +1,47 @@
+{
+  "_comment": "Manufacturing reads (P12 / T4). The customer already owns a BOM sheet, a cycle-time sheet and an output sheet; this block adds no adapter, no transport and no storage. It only names which existing register holds which figure and which column means what. Copy the 'manufacturing' block below into config/integrations.json, merged under the tenant key next to 'sheets_registers', 'assets' and 'business_graph'. Every register and range named here must already exist in that tenant's sheets_registers block, and 'assets.levels' must be declared, because a station with nothing to bind to has no owner. Replace SET_... values before use.",
+  "_note_views": "Three views, three sub-blocks, each with its own register. They are separate on purpose: a BOM is master data that changes monthly, a cycle reading is a measurement that changes every shift, and an output count is a daily total. Binding them to one register would force the customer to restructure their own spreadsheet, and a platform that dictates where the customer's data lives has stopped being a layer on top of their systems.",
+  "_note_bom": "bom reads the declared product structure: what a product is assembled from. parent_column and component_column are required and are the two ends of each edge; a row missing either is counted in 'skipped' rather than guessed. quantity_column, unit_column and scrap_column are optional. Nothing here rolls a cost up, because a cost needs prices this module has no declared source for, and a rolled-up figure with an invisible basis is worse than none. Nothing here explodes a multi-level structure into a total either, because that would hide which level a component came from.",
+  "_note_cycle": "cycle reports the measured cycle time per station and compares it to a declared standard. duration_column and station_column are required; standard_column is optional and its absence is a first-class answer, not a gap. A measured cycle with no declared standard is reported as measured and marked compared:false, never judged fast or slow: calling it slow would mean the platform invented the standard it is measuring against. A compared row ships delta_seconds AND ratio, both facts about two numbers, never a verdict.",
+  "_note_yield": "yield reports output, defects and the ratio between them. output_column and station_column are required; defect_column is optional and its absence is reported, not defaulted. When the defect count is not readable, the station ships yield:null and yield_computable:false. It does NOT assume zero defects: that would print 100% for a line that might be rejecting half its work. A defect count above output is reported in 'defect_exceeds_output' rather than clamped, because it is a data error the manager needs to see, and quietly turning it into 0% yield would hide it.",
+  "_note_numbers": "Every quantity is parsed from a declared column. A blank cell is 'not recorded' and a cell holding text is 'unreadable'; they are counted separately ('unreadable_quantity', 'unreadable_output', 'unreadable_defect') because they mean different things to a manager. Neither becomes zero. A blank and a confident 0 are different facts, and a row with no readable output produces no station at all rather than a station reporting output 0. A decimal comma ('12,5') is read as a decimal point, because real Uzbek spreadsheets hold it and refusing it would be a bug.",
+  "_note_oee": "There is no OEE here, and none can be configured. OEE availability and performance need planned run time and ideal cycle time, which no register in this module declares; the PRD lists OEE as a Jidoka camera feed, and vision.summary already refuses it with 'bu P13 ishi'. This module keeps the same refusal rather than inventing an availability figure from whatever happens to be present. P13 owns OEE. A report that carries an index with no visible denominator is a number that will eventually be wrong and never questioned.",
+  "_note_person": "No per-person figure exists and no configuration key could create one. There is no operator_column, shift_column, team_column or any equivalent; a yield attributed to a person is a sanction waiting to happen, and the platform does not know why a batch failed. If the customer's sheet happens to carry an operator column, it is never read: the module only reads the columns it was told to read. This is asserted structurally by the test suite and measured by scripts/probe_manufacturing_boundary.py.",
+  "_note_readonly": "All three tools are read. A BOM is the customer's master data: an entity able to edit what a product is made of would be the author of the recipe it is reporting on, and every yield and cycle figure would then be computed against a model it could change. There is no write path in the module at all. Every read goes through sheets.rows, so the register declaration, A1 allowlist, agent tool permission and connection allowlist all apply unchanged.",
+  "_note_ambiguity": "Each sub-block must declare exactly one register for a view to be readable. Two registers under 'yield' would make a yield read ambiguous, and the module refuses by name rather than picking one. A tenant with only a yield register cannot satisfy a cycle read: the absent register is a refusal, not an empty factory.",
+  "demo-plant": {
+    "manufacturing": {
+      "bom": {
+        "structure": {
+          "register": "plant",
+          "range": "bom",
+          "parent_column": "mahsulot",
+          "component_column": "qism",
+          "quantity_column": "miqdor",
+          "unit_column": "birlik",
+          "scrap_column": "brak"
+        }
+      },
+      "cycle": {
+        "line": {
+          "register": "plant",
+          "range": "cycles",
+          "station_column": "stansiya",
+          "duration_column": "davomiylik",
+          "standard_column": "standart",
+          "unit_column": "birlik"
+        }
+      },
+      "yield": {
+        "shift": {
+          "register": "plant",
+          "range": "output",
+          "station_column": "stansiya",
+          "output_column": "chiqim",
+          "defect_column": "nuqson",
+          "unit_column": "birlik"
+        }
+      }
+    }
+  }
+}

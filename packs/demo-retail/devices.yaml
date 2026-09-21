@@ -1,0 +1,10 @@
+runners:
+  - id: office-pc-1
+    os: windows
+    allow:
+      apps: ["EXCEL.EXE", "chrome.exe"]
+      folders: ["C:/Hisobotlar", "D:/Skan"]
+      printers: ["HP-Office"]
+      screen: { enabled: false, windows: [] }
+    deny_always: ["parol", "karta", "bank-klient"]
+    physical: ["HP-Office"]

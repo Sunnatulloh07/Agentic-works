@@ -1,0 +1,23 @@
+# Mavjud pack ichidagi agents ro‘yxatiga moslashtiriladigan MISOL.
+# Connectionlar va rollarni administrator tekshiradi. Bu fayl avtomatik yoqilmaydi.
+agents:
+  - id: ops.assistant
+    name: Tasdiqli DB yordamchisi
+    department: operations
+    ladder: autonomous
+    tools:
+      - database.catalog
+      - database.read
+      - database.plan_write
+      - database.write
+    allowed_connections:
+      - customer-sqlite
+      - customer-postgres
+      - customer-mysql
+      - customer-mariadb
+      - customer-mongodb
+      - customer-redis
+    approval:
+      required_for: [database.write]
+      approver_role: owner
+      independent: true

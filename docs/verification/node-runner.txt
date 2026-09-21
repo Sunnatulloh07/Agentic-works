@@ -1,0 +1,21 @@
+✔ real file read (2.193436ms)
+✔ real directory listing (0.422002ms)
+✔ outside allowlist denied (0.331998ms)
+✔ relative path denied (0.148871ms)
+✔ prefix lookalike denied (0.273526ms)
+✔ symlink escape denied (0.326459ms)
+✔ secret files denied (0.269222ms)
+✔ disabled physical tool denied (0.175252ms)
+✔ arbitrary shell denied (0.220415ms)
+✔ large text denied (0.50165ms)
+✔ binary file denied (1.387712ms)
+✔ durable journal result survives reload (1.84283ms)
+✔ journal traversal denied (0.193408ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 72.783913

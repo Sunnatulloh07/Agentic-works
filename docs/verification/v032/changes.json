@@ -1,0 +1,138 @@
+{
+  "checkpoint": "0.3.2-agent-loop-source-preview",
+  "baseline_archive": "agent-platform-v031-code-review.zip",
+  "baseline_archive_sha256": "1b3d3a65ad6fe75d94efade5a82390215dcda51e9918910733b54dc9e9ad4833",
+  "execution_status": "NOT_RUN",
+  "changes": [
+    {
+      "path": "README.md",
+      "change": "modified",
+      "sha256": "292b46ac0368a8d51b24407586f9f66f621e1b3328a864ff11982f9da0cfa557",
+      "baseline_sha256": "d01084aabd2b137c5b472d07c542f32c5c378f2b0f38b29fd9b2c9b3125f2ea5"
+    },
+    {
+      "path": "api-python/app/main.py",
+      "change": "modified",
+      "sha256": "283c9faf849bf438eae02a5d88f0bc0af21bb166c0ab94c16007a77c7f1888a3",
+      "baseline_sha256": "fe48bbf4694593590b4abcb29cbc6e21585d9392d64a4582497eddc69c02b758"
+    },
+    {
+      "path": "api-python/app/platform_api.py",
+      "change": "modified",
+      "sha256": "de2ea1290fe44dd7d8eedb099c31361cad2b985fac6c0dfa7fb9113c0e6d1e9b",
+      "baseline_sha256": "2f22e2e90862a36f45acfc4b49f9eb419fc1419d010eba6b9e28049577f9fdcb"
+    },
+    {
+      "path": "api-python/app/runtime_authority.py",
+      "change": "modified",
+      "sha256": "09b269a403a7eda4b664339ae0ab04cf56eb00e460b9683f2767dbf18f3eb3d3",
+      "baseline_sha256": "af681daecf38fc81481e45d9536ebeb405bfac739656cf29331a76006170f97e"
+    },
+    {
+      "path": "api-python/app/worker.py",
+      "change": "modified",
+      "sha256": "49f506a31599c340ecb5890ad3bea69e0c1056aac0b21a2e79423a333fe8f41f",
+      "baseline_sha256": "c5aa82f404c751bb7e4eecfbef7c6a361ac12b03a91934b0edf73166c8127ca3"
+    },
+    {
+      "path": "api-python/integration_tests/test_control_plane_hardening_http.py",
+      "change": "modified",
+      "sha256": "e7563b0dfdba4e5e65f4d2eff401df567fca52b50469d7012012cc8ed2c2d19a",
+      "baseline_sha256": "fc9ad14994753d24e8e8f07857fe1b452f1e678f9da5ce8128d1413fdc305803"
+    },
+    {
+      "path": "api-python/platform_runtime/agent_loop.py",
+      "change": "added",
+      "sha256": "e193601ddab7a0c9aea04da7ef3373155b737b286dddb88d709b799f239617c6",
+      "baseline_sha256": null
+    },
+    {
+      "path": "api-python/platform_runtime/agent_planner.py",
+      "change": "added",
+      "sha256": "ab63a1170302a17646f439c333cef252582a3635cf7454b300403f8f442fbb3f",
+      "baseline_sha256": null
+    },
+    {
+      "path": "api-python/platform_runtime/engine.py",
+      "change": "modified",
+      "sha256": "83ed2a69bc0a5aab7e6bf3ea8a63c3e4ae69853af7571f121e3acf62e419a122",
+      "baseline_sha256": "dfe599dbbc77db719ad02835143d0f60844b80d4de2139748f1cccb725d84b00"
+    },
+    {
+      "path": "api-python/runtime_tests/test_agent_loop.py",
+      "change": "added",
+      "sha256": "171b047dc05d6a5d04c91d989207e87495ed4c15963e7ba4b42ac06e844661f0",
+      "baseline_sha256": null
+    },
+    {
+      "path": "api-python/runtime_tests/test_agent_planner.py",
+      "change": "added",
+      "sha256": "1f403bc35e9a9775bc53a6d55cc1905d763968ec7adaf07bb3c3963523a620d2",
+      "baseline_sha256": null
+    },
+    {
+      "path": "api-python/runtime_tests/test_control_plane_authority.py",
+      "change": "modified",
+      "sha256": "181911c6244cced232ddc4a5041275318aaffb43e07ba4827fc41e16b08bff3e",
+      "baseline_sha256": "d08fab8d5cc09fc8ded06f6c2ced9e62237aa9033999cbbba97579b77e447fd5"
+    },
+    {
+      "path": "apps/ui/app/platform/page.tsx",
+      "change": "modified",
+      "sha256": "1949cbdc462bdfccbdf3fb9bde87dd8eb0d40f6c52028ac5c79a20e8f9b663f8",
+      "baseline_sha256": "4a536ac92ab369677e61e99df4d5439ad68d684e6e2c2e3ef5526c01baae442b"
+    },
+    {
+      "path": "apps/ui/components/AgentRuns.tsx",
+      "change": "added",
+      "sha256": "715a004c8767ff8d25d63b85ce8e029b65de9897e09942a02ff4491e31bc5188",
+      "baseline_sha256": null
+    },
+    {
+      "path": "config/integrations.example.json",
+      "change": "modified",
+      "sha256": "5e8354697a1ac52b1cfdff2f02d48719e506080256984244a023036e1c6d698b",
+      "baseline_sha256": "e0ed7567819a269490eec834a714e9a49e311b8f43465a57c70d85c1c4339a05"
+    },
+    {
+      "path": "docs/CHECKPOINT-V032-UZ.md",
+      "change": "added",
+      "sha256": "dd0feaeda3e9cb43a6c2408904ee63a64b8f33ce0ea3710d2ae4e23d81256ac8",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/IMPLEMENTATION-STATUS.md",
+      "change": "modified",
+      "sha256": "90bd944933eb316f80eae6c7acf0b141da91bb71d4cc18c45e7abe21f8e8115a",
+      "baseline_sha256": "cb005174539450da0126fbe3dba5f33740476a75c949b8ef4d3532ba2ecc8727"
+    },
+    {
+      "path": "docs/WORKING-AGREEMENT-UZ.md",
+      "change": "modified",
+      "sha256": "e0ab31355aa4b6055acd4e06c24e5a9249e5c8a7c05e391f6eda47590a493f8f",
+      "baseline_sha256": "5b6e7e801268fd1b4227db641f017ea652ea8b72a61f67e9c4593e15d615a4a2"
+    },
+    {
+      "path": "docs/verification/v032/baseline-v031-MANIFEST.sha256",
+      "change": "added",
+      "sha256": "0dfc23632951aaf8c55a10cd75f4729b176ca15bd9ace7ee9074c9f14648f06c",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/verification/v032/execution.json",
+      "change": "added",
+      "sha256": "13f9a7c2778b8545aaf971112628960df74be24e2c02aa055fcbe527121a3bde",
+      "baseline_sha256": null
+    },
+    {
+      "path": "docs/verification/v032/release-evidence.json",
+      "change": "added",
+      "sha256": "49d0951dc25ee0945e249bce2a3f07c75054893bfced4acc2212d57fbf23fd6b",
+      "baseline_sha256": null
+    }
+  ],
+  "metadata_exclusions": [
+    "MANIFEST.sha256",
+    "docs/verification/v032/changes.json"
+  ]
+}

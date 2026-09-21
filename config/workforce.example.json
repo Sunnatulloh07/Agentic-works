@@ -1,0 +1,42 @@
+{
+  "_comment": "Workforce oversight mapping (P9b). HR data already lives in operator-owned Google Sheets, so no new adapter is needed: this file only names which sheet and which column means what. Copy the 'workforce' block below into config/integrations.json, merged under the tenant key next to 'sheets_registers', and replace SET_... values. IMPORTANT: 'register' and 'range' must already exist in that tenant's sheets_registers block. Column names are the literal header text of the spreadsheet, so they are usually Uzbek Latin or Cyrillic (Ism, Holat, Sana). Status words are matched case-insensitively and are casefolded on load. No key other than the ones shown below is accepted inside a register: an unknown key is refused rather than ignored, because a typo in a column name would otherwise look exactly like an empty roster.",
+  "_note_attendance": "absent_statuses must be declared explicitly. An empty list means the status column is unreadable, and workforce.attendance refuses rather than reporting that nobody is absent.",
+  "_note_shifts": "hours_column is optional. A blank or unreadable cell reports hours as null, never as zero, and is counted in unreadable_hours.",
+  "_note_workload": "open_statuses and done_statuses together decide what counts as outstanding. Strictly ISO dates (YYYY-MM-DD) are compared against the platform clock; an ambiguous cell such as 10.01.2026 is counted in unparsable_due rather than guessed.",
+  "demo-retail": {
+    "workforce": {
+      "registers": {
+        "attendance": {
+          "register": "hr",
+          "range": "attendance",
+          "id_column": "id",
+          "name_column": "Ism",
+          "status_column": "Holat",
+          "date_column": "Sana",
+          "absent_statuses": ["yo'q", "ta'til", "kasallik"],
+          "done_statuses": ["keldi"]
+        },
+        "shifts": {
+          "register": "hr",
+          "range": "shifts",
+          "id_column": "id",
+          "name_column": "Xodim",
+          "status_column": "Smena",
+          "date_column": "Sana",
+          "hours_column": "Soat"
+        },
+        "workload": {
+          "register": "hr",
+          "range": "tasks",
+          "id_column": "id",
+          "name_column": "Mas'ul",
+          "status_column": "Holat",
+          "task_column": "Vazifa",
+          "due_column": "Muddat",
+          "open_statuses": ["ochiq", "jarayonda"],
+          "done_statuses": ["bajarildi", "yopildi"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,156 @@
+{
+  "kind": "offline_verification_only",
+  "created_at": "2026-09-14T05:03:53.364614+00:00",
+  "python": "3.14.6",
+  "results": [
+    {
+      "name": "python_runtime",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "/opt/venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "runtime_tests",
+        "-v"
+      ],
+      "seconds": 18.217,
+      "log": "python_runtime.log",
+      "tests": 601
+    },
+    {
+      "name": "release_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_release_tools.py",
+        "-v"
+      ],
+      "seconds": 0.391,
+      "log": "release_tools.log",
+      "tests": 3
+    },
+    {
+      "name": "manifest_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_manifest.py",
+        "-v"
+      ],
+      "seconds": 0.291,
+      "log": "manifest_tools.log",
+      "tests": 6
+    },
+    {
+      "name": "sqlite_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "scripts/demo_runtime.py"
+      ],
+      "seconds": 0.406,
+      "log": "sqlite_demo.log"
+    },
+    {
+      "name": "managed_database_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/venv/bin/python",
+        "scripts/demo_managed_database.py"
+      ],
+      "seconds": 0.642,
+      "log": "managed_database_demo.log"
+    },
+    {
+      "name": "node_runner",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/usr/local/bin/node",
+        "--test",
+        "apps/runner/test.js"
+      ],
+      "seconds": 0.147,
+      "log": "node_runner.log",
+      "tests": 18
+    },
+    {
+      "name": "browser_session_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/usr/local/bin/node",
+        "--test",
+        "apps/ui/lib/session-client.test.mjs"
+      ],
+      "seconds": 0.123,
+      "log": "browser_session_client.log",
+      "tests": 12
+    },
+    {
+      "name": "javascript_typescript_syntax",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "/opt/bin/bun",
+        "/tmp/platform-offline-ybg4t2a7/syntax.cjs",
+        "/tmp/agent-platform-development/agent-platform/apps"
+      ],
+      "seconds": 0.024,
+      "log": "javascript_typescript_syntax.log"
+    },
+    {
+      "name": "python_syntax",
+      "status": "PASS",
+      "checked": 131,
+      "errors": []
+    }
+  ],
+  "http_dependencies_missing": [
+    "pytest",
+    "fastapi",
+    "httpx",
+    "pydantic",
+    "jwt",
+    "yaml",
+    "psycopg",
+    "redis"
+  ],
+  "optional_database_dependencies_missing": [
+    "psycopg",
+    "pymysql",
+    "pymongo",
+    "redis",
+    "pyodbc",
+    "oracledb"
+  ],
+  "not_performed": [
+    "dependency-backed HTTP tests",
+    "Next/React typecheck",
+    "Next production build",
+    "live providers",
+    "live network databases including SQL Server and Oracle",
+    "production dependency audit",
+    "deployment"
+  ],
+  "release": "NO_GO"
+}
