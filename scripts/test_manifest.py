@@ -107,3 +107,59 @@ class ManifestGeneratorTests(unittest.TestCase):
             self.skipTest('no ignored files present in this checkout')
         self.assertTrue(any(name.endswith('.pyc') or '.pytest_cache' in name
                             for name in ignored_paths(outer)))
+
+
+class LineEndingIndependenceTests(unittest.TestCase):
+    """The manifest must verify where the checker says to run it.
+
+    ``verify_manifest`` opens with "Run on a freshly extracted release ZIP", and it
+    did not.  Measured against a clean ``git archive`` extraction, **403 of 498
+    hashes mismatched** -- every one of them a text file -- because the manifest had
+    been built in a Windows working tree holding CRLF while any extraction, and any
+    Linux checkout, holds LF.  The gate was red on its own documented input, which is
+    how a gate stops carrying information.
+
+    These tests pin the property that was missing: a digest is a property of the
+    content, not of the platform that happened to write the file.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_crlf_and_lf_content_share_a_digest(self):
+        crlf = self.root / 'crlf.txt'
+        lf = self.root / 'lf.txt'
+        crlf.write_bytes(b'alpha\r\nbeta\r\ngamma\r\n')
+        lf.write_bytes(b'alpha\nbeta\ngamma\n')
+        self.assertEqual(digest(lf), digest(crlf))
+
+    def test_a_lone_cr_is_still_content(self):
+        """Only CRLF folds. A bare CR is a byte the author chose and must count."""
+        bare = self.root / 'bare.txt'
+        plain = self.root / 'plain.txt'
+        bare.write_bytes(b'a\rb')
+        plain.write_bytes(b'a\nb')
+        self.assertNotEqual(digest(bare), digest(plain))
+
+    def test_normalisation_survives_a_chunk_boundary(self):
+        """A CR ending one 1 MiB chunk and an LF starting the next must still fold."""
+        size = 1024 * 1024
+        crlf = self.root / 'boundary-crlf.txt'
+        lf = self.root / 'boundary-lf.txt'
+        crlf.write_bytes(b'x' * (size - 1) + b'\r\n' + b'y' * 10)
+        lf.write_bytes(b'x' * (size - 1) + b'\n' + b'y' * 10)
+        self.assertEqual(digest(lf), digest(crlf))
+
+    def test_a_manifest_written_on_crlf_verifies_against_lf(self):
+        """The whole point: generate here, verify there."""
+        target = self.root / 'a.txt'
+        target.write_bytes(b'alpha\r\nbeta\r\n')
+        write(self.root, render(self.root))
+        # Same content as a Linux checkout or ZIP extract would hold.
+        target.write_bytes(b'alpha\nbeta\n')
+        result = verify(self.root)
+        self.assertEqual('PASS', result['status'], result['errors'])

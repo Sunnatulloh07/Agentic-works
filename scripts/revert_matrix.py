@@ -49,6 +49,26 @@ RED, GREEN, MISSING = 'RED', 'GREEN', 'PATTERN-MISSING'
 AUTO_BASELINE = 'auto'
 
 
+def drop_sidecar(path):
+    """Remove the sidecar, or say so and carry on.
+
+    This used to be a bare ``os.remove`` and it cost a whole measurement: a host
+    policy that blocks bulk deletion refused the unlink, the exception unwound
+    through ``main`` and the phase script stopped after its FIRST module -- three
+    mutations measured out of thirty-five, with the run reporting nothing wrong.
+    An instrument may not die because it could not tidy up after itself, so the
+    failure is reported and the measurement continues.
+
+    Leaving a stale sidecar is safe: the next run compares it against the live file
+    and either restores from it or overwrites it, and both paths re-enter here.
+    """
+    try:
+        os.remove(path)
+    except OSError as exc:
+        print(f'note: could not remove {os.path.basename(path)} ({exc.strerror}); '
+              f'the next run will reconcile it.')
+
+
 def signature(line):
     """The failure counts unittest printed, as a comparable string. Empty means green.
 
@@ -149,9 +169,9 @@ def main(target, pattern, mutations, baseline_signature=None):
                   f'{len(live)} bytes).')
             print('Restoring the recorded baseline; re-run to measure.')
             open(path, 'wb').write(previous)
-            os.remove(sidecar)
+            drop_sidecar(sidecar)
             return 1
-        os.remove(sidecar)
+        drop_sidecar(sidecar)
 
     baseline = open(path, 'rb').read()
     baseline_hash = hashlib.sha256(baseline).hexdigest()
@@ -230,7 +250,7 @@ def main(target, pattern, mutations, baseline_signature=None):
         print(f'RESIDUE: {residue}')
 
     if os.path.exists(sidecar):
-        os.remove(sidecar)
+        drop_sidecar(sidecar)
 
     greens = [label for label, verdict, _, _ in results if verdict == GREEN]
     missing = [label for label, verdict, _, _ in results if verdict == MISSING]

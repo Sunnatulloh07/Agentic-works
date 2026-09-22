@@ -6108,3 +6108,378 @@ FAILED (failures=1, errors=11, skipped=1)
 | Bloklangan yuza | **12**, endi `test_platform_baseline.py` qadaydi |
 | `integration_tests` | **95 pass** (ilgari yig'ilmasdi) |
 | Devor vaqti | 576.8 s → **425.9 s** — test **ko'paydi**, vaqt **qisqardi** |
+## §155. Fazza ellikinchi — `app/` qatlami: **o'qilmaydigan to'plamdagi qadam — qadam emas**
+
+### §155.1. "Qadalgan" ko'ringan ikki chegara
+
+`MAX_PERSONA_CHARS` (`packs.py`) va `MAX_QUEUE` (`runner_ws.py`) — ikkisi ham
+`tests/` da qadalgan edi. Muammo qadamda emas, **to'plamda**:
+
+| `.github/workflows/verify.yml` | Buyruq | Gate? |
+|---|---|---|
+| 15-qator | `unittest discover -s runtime_tests` | **ha** |
+| 33-qator | `pytest integration_tests -q` | **ha** |
+| — | `api-python/tests/` | **hech qayerda yo'q** |
+
+`tests/` esa **qizil**, chunki u **ataylab bekor qilingan** API ni sinaydi va
+marshrutlar `410 Gone` qaytaradi:
+
+```
+Legacy runner disabled; use /platform/runner/ws and platform tasks
+Legacy mutation retired; use platform API
+```
+
+Ya'ni qadam `tests/` da yashaydi-yu, `tests/` ni hech bir gate yurgizmaydi.
+**Bu qadam emas — da'vo.** `MAX_PERSONA_CHARS` ni `8000` → `80000` qilish hech
+qanday signal bermasdi; `MAX_QUEUE` ni `100` → `1000` qilish ham.
+
+### §155.2. Sanab chiqilgan chegaralar
+
+| Modul | Chegara | Qiymat | Oldin |
+|---|---|---|---|
+| `auth.py` | token shifti | 86 400 s | qadalmagan |
+| `auth.py` | token poli | 1 s | **nomsiz** |
+| `auth.py` | sessiya tokeni umri | 900 s | **nomsiz** (ternary ichida) |
+| `identity_store.py` | sessiya shifti / poli | 2 592 000 / 60 s | qadalmagan / **nomsiz** |
+| `identity_store.py` | throttle limit / oyna | 20 / 900 s | **nomsiz** |
+| `identity_store.py` | taklifnoma default / pol / shift | 86 400 / 300 / 604 800 s | **nomsiz** |
+| `identity_store.py` | e-mail shifti | 320 belgi | **nomsiz** |
+| `identity_store.py` | parol poli / shifti | 12 / 256 | **nomsiz** |
+| `identity_store.py` | token poli / shifti | 20 / 256 | **nomsiz** |
+| `identity_store.py` | scrypt xarajat / blok / parallel | 16 384 / 8 / 1 | **nomsiz** |
+| `identity_store.py` | kalit uzunligi / tuz | 32 / 16 bayt | **nomsiz** |
+| `identity_store.py` | oxirgi owner qo'riqchisi | 1 | **nomsiz** |
+| `limits.py` | kunlik shift / pol | 1000 / 1 | **nomsiz** |
+| `limits.py` | hisoblagich TTL | 86 400 s | **nomsiz** |
+| `limits.py` | ogohlantirish ulushi | 0.8 | **nomsiz** (ikki joyda yozilgan) |
+| `packs.py` | persona shifti | 8 000 belgi | faqat `tests/` da |
+| `telegram.py` | webhook tanasi shifti | 1 000 000 B | qadalmagan |
+| `trace.py` | rotatsiya ostonasi | 5 MiB | qadalmagan |
+| `runner_ws.py` | navbat / natija shifti | 100 / 1000 | faqat `tests/` da / qadalmagan |
+
+### §155.3. Beshta son — bu sozlama emas, **xarajat**
+
+`SCRYPT_N`, `SCRYPT_R`, `SCRYPT_P`, `SCRYPT_DKLEN`, `SALT_BYTES`. Bu yerda
+`0.8` ni `0.08` qilish — siyosat; `SCRYPT_N` ni `16384` → `1024` qilish esa
+**har bir saqlangan parolni buzish narxini 16 barobar arzonlashtirish**.
+
+To'plamda bu beshta sonni **hech narsa o'qimasdi**, ya'ni xarajat faktorini
+tushirishning yagona signali — loginlarning tezlashishi bo'lardi. Endi
+`test_app_layer_bounds` ularni so'zma-so'z qadaydi.
+
+### §155.4. Instrument o'z sidecar'ini o'chira olmagani uchun o'lchov o'ldi
+
+Bu fazaning eng qimmatli topilmasi chegara emas, **asbob** haqida.
+
+Matritsa birinchi moduldan keyin to'xtadi — 31 mutatsiyadan **3 tasi**
+o'lchandi:
+
+```
+target      : api-python\app\auth.py
+CONTROL                GREEN           OK
+token ceiling 86400    RED               5.9s
+token floor 1          RED               6.3s
+session token lifetime 900 RED            5.9s
+restore verified: YES
+```
+
+Qolgan olti modul haqida **birorta satr yo'q**, va chiqish kodi `0`. Sabab:
+`revert_matrix.main` oxirida `os.remove(sidecar)` chaqiriladi, host siyosati
+esa ommaviy o'chirishni to'sadi:
+
+```
+[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]
+  {"count":220,"threshold":50,"scope":"turn","targets":["...auth.py.matrix-baseline"]}
+```
+
+Istisno `main` dan yuqoriga chiqib, faza skriptining `for` sikli uziladi.
+Ya'ni **asbob o'zini tozalay olmagani uchun o'ldi va bu haqda hech narsa
+demadi** — bu §148 dagi "ikki o'qilmagan rejim yashil deb o'qilgan" nuqsonining
+boshqa ko'rinishi.
+
+Tuzatish — `revert_matrix.drop_sidecar()`: `OSError` yutiladi, xabar
+bosiladi, o'lchov davom etadi. Sidecar eskirib qolishi xavfsiz: keyingi yurish
+uni jonli fayl bilan solishtiradi va yo tiklaydi, yo ustidan yozadi.
+
+### §155.5. Natija — 31/31 qizil
+
+| Modul | Mutatsiya | Natija |
+|---|---|---|
+| `app/auth.py` | 3 | 3 RED |
+| `app/identity_store.py` | 19 | 19 RED |
+| `app/limits.py` | 4 | 4 RED |
+| `app/packs.py` | 1 | 1 RED |
+| `app/telegram.py` | 1 | 1 RED |
+| `app/trace.py` | 1 | 1 RED |
+| `app/runner_ws.py` | 2 | 2 RED |
+| **Jami** | **31** | **31 RED, 0 GREEN, 0 o'lchanmagan** |
+
+Har modulda `CONTROL GREEN` va `restore verified: YES`. Sidecar qolmadi,
+mutatsiya qoldig'i yo'q (`grep` bilan tekshirildi).
+
+O'lchov to'plami ikki fayl: `test_app_layer_bounds` (48 sinov — qadamlar) va
+`test_identity_store` (6 sinov — **iste'molchi**: u haqiqiy sessiya, taklifnoma
+va parol yaratadi, shuning uchun kengaytirilgan TTL yoki bo'shatilgan parol
+poli uni **chaqiruvchida** sezadi, faqat uni nomlagan assertion'da emas).
+`test_identity_hardening` uchinchi bo'lardi va **o'lchov bilan** chiqarildi: u
+har yurishda 12 s yeydi, ya'ni 3 daqiqalik matritsani 10 daqiqalikka aylantiradi
+va qo'shimcha qamrov bermaydi.
+
+### §155.6. Struktura sinovi beshta chegarani topdi — o'zim qoldirganlarini
+
+`test_the_promoted_modules_carry_no_stray_literal_in_a_guard` qo'shilgandan
+keyin **beshta** haqiqiy nomsiz chegara chiqdi, hammasi `identity_store.py` da:
+
+```
+len(value) > 320                      -> MAX_EMAIL_CHARS
+12 <= len(password) <= 256            -> MIN_PASSWORD_CHARS / MAX_PASSWORD_CHARS
+1  <= len(password) <= 256            -> MIN_CANDIDATE_PASSWORD_CHARS
+20 <= len(value) <= 256               -> MIN_TOKEN_CHARS / MAX_TOKEN_CHARS
+len(owners) <= 1                      -> LAST_OWNER_GUARD
+```
+
+Ya'ni "nomlangan" deb e'lon qilingan modulda ham sonlar qolgan edi. `limits.py`
+da ham `v > 0` → `v >= MIN_DAILY_LIMIT` tuzatildi.
+
+### §155.7. Yo'l-yo'lakay: `tests/` — 33 qizil, uch sabab
+
+`tests/` ni o'lchash paytida ma'lum bo'ldi: **35 emas, 33 qizil**
+(`33 failed, 172 passed, 4 skipped, 9.6 s`) — ikki sinov `tzdata` bilan
+yashilga o'tdi.
+
+| Sabab | Sinovlar |
+|---|---|
+| Bekor qilingan marshrut → `410 Gone` | **10** |
+| Eskirgan javob shakli (`KeyError`: `access_token` 8, `task_id` 3, `reply` 2, `approval_id` 1, `stopped` 1) | **15** |
+| Legacy runner WebSocket (`WebSocketDisconnect`, yopilish kodi `4401`) | **4** |
+| Kontrakt/mazmun surilishi (`AssertionError`) | **3** |
+| Auth statusi (`assert 401 == 403`) | **1** |
+| **Jami** | **33** |
+
+`tzdata` — **o'lchov sodiqligi** nuqsoni edi, kod nuqsoni emas:
+`requirements.txt:9` da `tzdata>=2024.1` **e'lon qilingan**, lekin lokal
+venv'da o'rnatilmagan edi. CI (Linux) uni o'rnatadi, Windows esa yo'q. Ya'ni
+mening baseline'im CI muhitiga mos kelmasdi. O'rnatildi: `35 → 33 qizil`,
+`170 → 172 yashil`.
+### §155.8. Eng qimmatli topilma: §154 ning **o'z yozuvi** ikki marta xato edi
+
+§154 `test_platform_baseline.py` ni **aynan shu maqsadda** yozgan edi: bloklangan
+yuzaning soni surilib ketmasligi uchun. U **o'zi surilib ketdi**.
+
+| | §154 yozuvi | §155 o'lchovi |
+|---|---|---|
+| Bloklangan sinovlar | 12 | **13** |
+| `O_NOFOLLOW` | 7 | **6** |
+| `mkfifo` | 2 | 2 |
+| `fcntl` | 1 | 1 |
+| `posix` | 2 | 2 |
+| **simlink imtiyozi** | — | **2** |
+| To'plam imzosi | `errors=11` | `errors=12` |
+
+Ikki xato, va ikkisi ham boshqa turdagi:
+
+1. `test_root_symlink_replacement_denied` ro'yxatda **umuman yo'q edi** — ya'ni
+   son birga kam edi va `test_the_blocked_surface_is_twelve_tests` buni
+   "to'g'ri" deb tasdiqlab turgan edi.
+2. `test_escape_symlink_denied` `O_NOFOLLOW` deb yozilgan, lekin u o'sha kodga
+   **yetib ham bormaydi**: traceback uning o'z `setUp` ida, `os.symlink` da
+   o'lganini ko'rsatadi.
+
+Ikkisi ham **boshqa** platforma faktidan o'ladi va yozuvda uning **nomi yo'q
+edi**: Windows simlink imtiyozi — `OSError` `WinError 1314` bilan (Developer Mode
+yoki ko'tarilgan token talab qiladi). Endi u `symlink_privilege` nomi bilan
+turadi.
+
+**Nega birinchi versiya buni ko'ra olmadi** — bu fazaning asosiy saboqi va u
+umumiy:
+
+    U shartning ROST bo'lishini tekshirdi. Shartning AYNAN SABAB
+    ekanini hech qachon tekshirmadi.
+
+`not hasattr(os, 'O_NOFOLLOW')` bu hostda **rost** — o'sha sinovni o'ldirgan
+narsa u bo'lsa ham, bo'lmasa ham. Ya'ni noto'g'ri yozilgan qator predikatni
+qanoatlantiradi va **o'tib ketadi**. Bu §155.1 dagi "o'qilmaydigan to'plamdagi
+qadam" ning bir oiladagi qarindoshi: **tekshirilgan ko'ringan narsa
+tekshirilmagan bo'lishi mumkin.**
+
+Yechim — `test_each_recorded_reason_is_the_actual_cause`: u har bir bloklangan
+sinovni **yurgizadi** va ko'tarilgan istisnoni o'sha qatordagi sababga
+solishtiradi (`O_NOFOLLOW` qatori `O_NOFOLLOW` `AttributeError` bilan o'lishi
+shart; `symlink_privilege` qatori `WinError 1314` bilan). Endi "ishonchli
+ko'ringan" sabab **yiqiladi**.
+
+**Qo'riqchi tekshirildi:** `test_escape_symlink_denied` ni `O_NOFOLLOW` ga
+qaytarib mutatsiya qilinsa — **3 sinov qizil**. Ya'ni bu qo'riqchi haqiqatan
+ushlaydi, shunchaki yashil turmaydi.
+
+Yo'l-yo'lakay **o'sha tuzoqning ikkinchi nusxasi**: `TestResult.errors` istisno
+obyektini emas, **formatlangan traceback satrini** saqlaydi, ya'ni
+`errors[0][1][1]` — bu **satrning ikkinchi belgisi**. Tekshiruvchi sinovning
+o'zi shu xatoni qildi va 11 qizil berdi. `_Capture` sinfi endi `addError` dan
+obyektni oladi.
+
+Natijada `RECORDED_SIGNATURE` ham tuzatildi:
+`{'tests': 3000, 'failures': 1, 'errors': 12, 'skipped': 1}` — va §154 ning
+birinchi yozuvi `FIRST_RECORD` bo'lib modulda **saqlanib qoldi**, shunda ikkinchi
+tuzatish ham yashirin tahrir emas, auditlanadigan dalil bo'ladi.
+### §155.9. `verify_offline.py` — tugata olmaydigan gate, va **socket'siz to'plamga solgan socketim**
+
+Ikki nuqson: biri asbobda, biri **mening testlarimda**. Ikkisi ham bir xil
+saboqqa chiqadi.
+
+**Asbobda.** Gate `UnicodeDecodeError` bilan yiqildi, oxirida esa
+`TypeError: data must be str, not NoneType`:
+
+```
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0x97 in position 26494
+  File "scripts/verify_offline.py", line 141, in run
+    (output / (name + '.log')).write_text(text, encoding='utf-8')
+TypeError: data must be str, not NoneType
+```
+
+`0x97` — bu `[WinError 1314] Клиент не обладает требуемыми правами` matnidagi
+kirill bayti. O'quvchi thread `UnicodeDecodeError` ko'taradi, `result.stdout`
+`None` bo'lib qoladi, `write_text(None)` esa `TypeError` beradi. Ya'ni **gate
+o'zi tekshirayotgan platformada tugata olmaydi**, va sabab uning o'zida emas,
+kodlashda.
+
+Sabab: `child_env` `LANG=C.UTF-8` o'rnatadi, lekin `PYTHONIOENCODING` yoki
+`PYTHONUTF8` ni emas. Bola o'z lokali bilan yozadi, ota-ona o'z afzal ko'rgani
+bilan o'qiydi — va **ikkisi kodlash haqida kelishmagan**. Tuzatish:
+`errors='replace'` va `result.stdout or ''`. Buzilgan bir qator log —
+tugata olmaydigan gate'dan yaxshi.
+
+**Mening testlarimda.** Tuzatishdan keyin gate **yurgizildi** va uchta yangi
+xato bilan qizil bo'ldi:
+
+```
+RuntimeError: Offline verification: network disabled
+```
+
+Uchtasi ham mening `TelegramBodyCeilingTests` im. Ular
+`starlette.testclient.TestClient` orqali yozilgan edi, va `runtime_tests` da
+`TestClient` **hech qayerda ishlatilmagan** — uni faqat `integration_tests`
+ishlatadi, va u aynan shu sabab bilan offline gate'dan **chiqarilgan**
+(`verify_offline.py` `socket.connect`, `socket.getaddrinfo` va `socket.sendto`
+ni taqiqlovchi audit hook o'rnatadi).
+
+Ya'ni to'plam **socket'siz bo'lgani uchun** socket'siz emas edi — **hech kimga
+socket kerak bo'lmagani uchun** socket'siz edi. Men socket kerak qildim, va gate
+buni darhol aytdi.
+
+Tuzatish **ikki qadam** bo'ldi, chunki birinchisi yetmadi:
+
+1. `TestClient` olib tashlandi — korutina to'g'ridan-to'g'ri chaqiriladi.
+2. Lekin `asyncio.run` ham ishlamadi: **Windows'da event loop'ning o'zi socket**.
+   `ProactorEventLoop` ham, `SelectorEventLoop` ham o'z self-pipe'ini
+   `socket.socketpair()` dan quradi, audit hook esa uni `socket.connect` deb
+   ko'radi. Shuning uchun korutina **qo'lda**, `send(None)` bilan yuritiladi.
+
+Qo'lda yuritish xavfsiz, chunki handler **hech qachon to'xtamaydi**: uning
+yagona `await` i — stub `request.body()`, u esa hech narsani kutmasdan qaytadi.
+Agar kelajakda route haqiqiy narsani kuta boshlasa, `send` `StopIteration`
+o'rniga qiymat qaytaradi va test **baland ovozda yiqiladi**, osilib qolmaydi.
+
+Tekshirildi: modul **48 sinov** — audit hook **bilan ham**, usiz ham **OK**.
+
+**Yangi qo'riqchi:** `OfflineSuiteTests` `runtime_tests` da `TestClient` yoki
+`httpx` importini taqiqlaydi. `urllib.request` **ataylab** ro'yxatda emas:
+`test_custom_http_adapter` va `test_onec_adapter` uni faqat
+`OpenerDirector.open` ni soxta `HTTPError` bilan almashtirib, xabar tozalanganini
+tekshirish uchun import qiladi — ulanish yo'q, va taqiq **haqiqiy testni yolg'on
+qizil** qilardi. Qo'riqchi statik, ya'ni import qatorida yiqiladi, birinchi tarmoq
+chaqiruvida emas.
+
+**Qo'riqchi tekshirildi:** `test_retry.py` ga `TestClient` importi qo'shilsa,
+test **fayl nomini aytib** yiqiladi (`['test_retry.py: TestClient']`).
+
+### §155.10. Node runner ham **xuddi shu sinfda** bloklangan
+
+`node --test apps/runner/test.js` — CI ning bir qismi — Windows'da **24 dan 11
+tasi** yiqiladi:
+
+```
+Error: Private single-owner file required
+  apps/runner/runner.js:92  privateFile()
+# tests 24   # pass 13   # fail 11
+```
+
+Sabab Python tomonidagi bilan **bir xil**, faqat boshqa tilda: `privateFile`
+`(meta.mode & 0o077) === 0` ni talab qiladi, Windows esa POSIX ruxsat bitlarini
+**modellashtirmaydi** — `fs.chmodSync(f, 0o600)` NTFS'da ACL bilan ishlaydi va
+`mode` deyarli hech narsa qilmaydi.
+
+Ya'ni bloklangan yuza **ikki tilda** mavjud:
+
+| Til | Bloklangan | Qadalganmi |
+|---|---|---|
+| Python (`runtime_tests`) | **13 / 3000** | ha — `test_platform_baseline.py` |
+| Node (`apps/runner`) | **11 / 24** | **yo'q** — hech qayerda yozilmagan |
+
+Python tomonidagisi qadalgan, Node tomonidagisi esa **faqat shu fazada
+o'lchandi**. Uni qadash §156 uchun ish: `node --test` CI'da `ubuntu-latest` da
+yuguradi va u yerda yashil, Windows'da esa 11 tasi **tekshirilmagan**.
+
+### §155.11. Yakuniy o'lchov
+
+```
+Ran 3000 tests in 172.327s
+
+FAILED (failures=1, errors=12, skipped=1)
+```
+
+13 yomon sinov — **hammasi** ma'lum bloklangan yuza, **bittasi ham** shu fazada
+yozilgan moduldan emas (`grep -c "app_layer_bounds"` → `0`).
+
+| Ko'rsatkich | Qiymat |
+|---|---|
+| Testlar | 2949 → **3000** = **+51** |
+| Imzo | `errors=11` → **`errors=12`** — chunki 13-sinov **haqiqatan** o'lchanmagan edi |
+| Bloklangan yuza | 12 → **13**, sabab bo'yicha qadalgan |
+| `verify_offline.py` | **tugata olmaydi → tugatadi**; `python_runtime` va `node_runner` Windows'da FAIL (platforma, kod emas) |
+| Devor vaqti | 425.9 s → **172.3 s** — sabab o'lchanmagan, shuning uchun da'vo qilinmaydi |
+### §155.12. `MANIFEST.sha256` — gate **o'zi aytgan joyda** qizil edi
+
+`verify_manifest.py` ning birinchi qatori: *"Run on a freshly extracted release
+ZIP."* Toza `git archive HEAD` eksportida o'lchandi:
+
+```
+status: FAIL
+checked: 498
+hash mismatches: 403
+```
+
+498 dan **403 tasi** mos kelmadi, va **hammasi matn fayllari** edi. Sabab
+`core.autocrlf`: manifest CRLF tutgan Windows ishchi daraxtida yasalgan, bloblar
+esa — va shuning uchun har qanday Linux checkout yoki ZIP eksport — **LF**
+tutadi.
+
+Ya'ni gate **o'zining hujjatlashtirilgan kiritmasida** qizil edi. Bu loyihaning
+o'z shikoyati bilan aynan bir xil holat, `generate_manifest.py` hujjatida
+yozilganidek: *"the gate was red for so long that red stopped carrying
+information"*. Va u **birinchi** qadamda yurgiziladi — `.github/workflows/verify.yml:14`,
+`ubuntu-latest` da — ya'ni CI ning birinchi tekshiruvi ham qizil bo'lardi.
+
+Tuzatish: `digest()` endi **mazmunni** xeshlaydi, uni yozgan platformaning qator
+oxirini emas — CRLF → LF normallashtiriladi. `generate_manifest.py` shu
+funksiyani **import qiladi**, ya'ni generator bilan tekshiruvchi hech qachon
+kelishib qololmaydi.
+
+Oqim bilan o'qiladi, **bir baytli `carry`** bilan: bir chunk `\r` bilan tugab,
+keyingisi `\n` bilan boshlansa, oddiy `replace` ularni buklay olmaydi va orada
+begona CR qolib ketardi.
+
+**Tekshirildi:**
+
+| Yer | Natija |
+|---|---|
+| Ishchi daraxt (aralash CRLF/LF) | **PASS** — 502 fayl |
+| Toza LF eksport (`git archive` → `tar -x`) | **PASS** — 502 fayl |
+| Eski xulq (mutatsiya: `digest()` raw'ga qaytarildi) | **403 mismatch** — o'sha raqam |
+| 4 yangi sinov, o'sha mutatsiya bilan | **3 qizil** |
+
+Yangi sinovlar `scripts/test_manifest.py` da: CRLF va LF **bir xil** xesh beradi;
+**yakka `\r` hamon mazmun** (faqat CRLF buklanadi, chunki u platforma artefakti,
+yakka CR esa muallif tanlagan bayt); normalizatsiya **chunk chegarasidan** o'tadi;
+va CRLF'da yozilgan manifest LF'da **PASS** beradi — ya'ni "bu yerda yoz, u yerda
+tekshir" xossasi qadalgan.

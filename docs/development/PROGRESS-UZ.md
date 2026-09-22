@@ -1904,3 +1904,213 @@ Natija: **86 + 1 xato → 95 sinov, 95 pass, 50 s.**
 qiladi va offline Computer'da yurmaydi (modulning o'z hujjati shuni aytadi:
 "NOT RUN in the offline Computer"). U endi **yig'iladi va yashil**, lekin
 `verify_offline.py` dan tashqarida qoladi — bu ataylab.
+## V05Z — `app/` qatlami: **o'qilmaydigan to'plamdagi qadam — qadam emas** (§155)
+
+Bu fazada ikkita topilma bor va ikkinchisi muhimroq.
+
+### Nima qilindi
+
+`app/` qatlami — oxirgi audit qilinmagan qatlam edi. U runtime modullaridan
+**boshqa turdagi** bo'shliqni saqlagan: ular **nomsiz** edi, bular esa **nomli,
+lekin o'qilmaydigan joyda qadalgan**.
+
+`MAX_PERSONA_CHARS` (`packs.py`) va `MAX_QUEUE` (`runner_ws.py`) `tests/` da
+qadalgan edi. Lekin `.github/workflows/verify.yml` faqat ikki narsani yurgizadi:
+15-qatorda `runtime_tests`, 33-qatorda `integration_tests`. **`api-python/tests/`
+hech qayerda yo'q.** Ya'ni bu qadam emas — **da'vo**.
+
+Nomlangan chegaralar: `auth.py` (3), `identity_store.py` (19), `limits.py` (4),
+`packs.py`, `telegram.py`, `trace.py`, `runner_ws.py` (2). Jami **31 mutatsiya,
+31 qizil, 0 GREEN, 0 o'lchanmagan**; har modulda `CONTROL GREEN` va
+`restore verified: YES`.
+
+Eng qimmatli qator — **scrypt parametrlari**: `SCRYPT_N` ni `16384` → `1024`
+qilish har bir saqlangan parolni buzish narxini **16 barobar** arzonlashtiradi,
+va buni **hech narsa o'qimasdi**.
+
+### Instrument o'z sidecar'ini o'chira olmagani uchun o'lchov o'ldi
+
+Matritsa birinchi moduldan keyin to'xtadi — 31 dan **3 tasi** o'lchandi, qolgan
+oltisi haqida **birorta satr yo'q**, chiqish kodi esa `0`.
+
+Sabab: `revert_matrix.main` oxirida `os.remove(sidecar)`, host esa ommaviy
+o'chirishni to'sadi:
+
+```
+[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]
+  {"count":220,"threshold":50,"scope":"turn","targets":["...auth.py.matrix-baseline"]}
+```
+
+Istisno `main` dan chiqib faza skriptining `for` siklini uzadi. Ya'ni **asbob
+o'zini tozalay olmagani uchun o'ldi va bu haqda hech narsa demadi** — §148 dagi
+"ikki o'qilmagan rejim yashil deb o'qilgan" nuqsonining boshqa ko'rinishi.
+
+Tuzatish: `revert_matrix.drop_sidecar()` — `OSError` yutiladi, xabar bosiladi,
+o'lchov davom etadi. Sidecar eskirib qolishi xavfsiz (keyingi yurish uni jonli
+fayl bilan solishtiradi).
+
+### Ikkinchi topilma: §154 ning **o'z yozuvi** ikki marta xato edi
+
+`test_platform_baseline.py` aynan shu surilishni to'xtatish uchun yozilgan edi.
+U **o'zi surilib ketdi**:
+
+| | §154 yozuvi | §155 o'lchovi |
+|---|---|---|
+| Bloklangan sinovlar | 12 | **13** |
+| `O_NOFOLLOW` | 7 | **6** |
+| `symlink_privilege` | — | **2** |
+| Imzo | `errors=11` | `errors=12` |
+
+1. `test_root_symlink_replacement_denied` ro'yxatda **umuman yo'q edi**.
+2. `test_escape_symlink_denied` `O_NOFOLLOW` deb yozilgan, lekin traceback uning
+   **o'z `setUp` ida**, `os.symlink` da o'lganini ko'rsatadi — o'sha kodga yetib
+   ham bormaydi.
+
+Ikkisi ham **nomi yo'q** boshqa fakt bilan o'ladi: Windows simlink imtiyozi,
+`OSError` `WinError 1314`. Endi u `symlink_privilege`.
+
+**Saboq:** birinchi versiya shartning **rost** bo'lishini tekshirdi, shartning
+**aynan sabab** ekanini hech qachon tekshirmadi. `not hasattr(os, 'O_NOFOLLOW')`
+bu hostda rost — sinovni o'ldirgan narsa u bo'lsa ham, bo'lmasa ham. Ya'ni
+noto'g'ri qator predikatni qanoatlantirib **o'tib ketadi**.
+
+Yechim: `test_each_recorded_reason_is_the_actual_cause` — har bir bloklangan
+sinovni **yurgizadi** va ko'tarilgan istisnoni qatordagi sababga solishtiradi.
+Qo'riqchi tekshirildi: sababni qayta mutatsiya qilinsa **3 sinov qizil**.
+
+O'sha tuzoqning ikkinchi nusxasi: `TestResult.errors` **istisno obyektini emas,
+formatlangan traceback satrini** saqlaydi, ya'ni `errors[0][1][1]` — satrning
+ikkinchi belgisi. Tekshiruvchi sinov shu xatoni qilib 11 qizil berdi; `_Capture`
+endi obyektni `addError` dan oladi.
+
+### O'lchov sodiqligi: `tzdata`
+
+`tests/` ni o'lchaganda ma'lum bo'ldi: **35 emas, 33 qizil**. Ikki sinov
+`tzdata` bilan yashilga o'tdi. `requirements.txt:9` da `tzdata>=2024.1`
+**e'lon qilingan**, lekin lokal venv'da o'rnatilmagan edi — ya'ni mening
+baseline'im CI muhitiga mos kelmasdi. O'rnatildi: `35 → 33 qizil`,
+`170 → 172 yashil`.
+
+### `tests/` — 33 qizil, uch sabab
+
+| Sabab | Sinovlar |
+|---|---|
+| Bekor qilingan marshrut → `410 Gone` | **10** |
+| Eskirgan javob shakli (`KeyError`) | **15** |
+| Legacy runner WebSocket (`4401`) | **4** |
+| Kontrakt/mazmun surilishi | **3** |
+| Auth statusi (`401` vs `403`) | **1** |
+
+Ya'ni uning qizilligi **tasodifiy emas** — u ataylab bekor qilingan API ni
+sinaydi. Lekin u hamon **o'qilmaydi**, va shu holicha turishi noto'g'ri: uni yo
+tuzatish, yo nafaqaga chiqarish kerak.
+
+### Yozilgani
+
+| Fayl | Nima |
+|---|---|
+| `api-python/runtime_tests/test_app_layer_bounds.py` | **48 sinov** (qadamlar + struktura qo'riqchisi) |
+| `scripts/audit_app_layer_bounds.py` | 31 mutatsiya, 7 modul |
+| `scripts/append_doc_section.py` | marker bilan **bir marta** qo'shuvchi (ikki marta yozishni to'sadi) |
+| `scripts/revert_matrix.py` | `drop_sidecar()` — o'lchov endi o'zini tozalay olmagani uchun o'lmaydi |
+| `api-python/runtime_tests/test_platform_baseline.py` | 12 → **13**, `symlink_privilege`, **sababni tekshiruvchi** sinov |
+
+### Natija
+
+```
+runtime_tests.test_app_layer_bounds runtime_tests.test_identity_store
+→ 54 sinov, OK
+
+test_platform_baseline
+→ 9 sinov, OK
+```
+
+To'plam: **3 000 sinov** (`2949 + 51`), imzo
+`failures=1, errors=12, skipped=1` — `errors` birga oshdi, chunki **13-sinov
+haqiqatan ham o'lchanmagan edi** va endi sanaladi.
+
+---
+## V060 — `verify_offline.py` tugata olmaydigan gate edi, va **socket'siz to'plamga solgan socket** (§155 davomi)
+
+Bu ish §155 ni tekshirish paytida chiqdi va **ikki nuqson** berdi: biri asbobda,
+biri **mening testlarimda**.
+
+### Asbob: gate o'zi tekshirayotgan platformada tugata olmaydi
+
+```
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0x97 in position 26494
+TypeError: data must be str, not NoneType   (verify_offline.py:141)
+```
+
+`0x97` — `[WinError 1314] Клиент не обладает требуемыми правами` matnidagi
+kirill bayti. O'quvchi thread `UnicodeDecodeError` ko'taradi, `result.stdout`
+`None` bo'lib qoladi, `write_text(None)` `TypeError` beradi.
+
+Sabab: `child_env` `LANG=C.UTF-8` o'rnatadi, lekin `PYTHONIOENCODING` ni emas —
+**bola bilan ota-ona kodlash haqida kelishmagan**. Tuzatish: `errors='replace'`
+va `result.stdout or ''`.
+
+### Mening testlarim: to'plam socket'siz **bo'lgani uchun** emas edi
+
+Tuzatishdan keyin gate **yurgizildi** va uchta yangi xato bilan qizil bo'ldi:
+
+```
+RuntimeError: Offline verification: network disabled
+```
+
+Uchtasi ham mening `TelegramBodyCeilingTests` im — ular
+`starlette.testclient.TestClient` ishlatgan edi, va `runtime_tests` da
+`TestClient` **hech qayerda yo'q**: uni faqat `integration_tests` ishlatadi va u
+aynan shu sabab bilan offline gate'dan chiqarilgan.
+
+Ya'ni to'plam socket'siz **bo'lgani uchun** emas — **hech kimga socket kerak
+bo'lmagani uchun** socket'siz edi.
+
+Tuzatish **ikki qadam** bo'ldi, chunki birinchisi yetmadi:
+
+1. `TestClient` olib tashlandi → korutina to'g'ridan-to'g'ri chaqiriladi.
+2. `asyncio.run` ham ishlamadi: **Windows'da event loop'ning o'zi socket** —
+   `ProactorEventLoop` ham, `SelectorEventLoop` ham self-pipe'ini
+   `socket.socketpair()` dan quradi, hook uni `socket.connect` deb ko'radi.
+   Shuning uchun korutina **qo'lda** `send(None)` bilan yuritiladi. Bu xavfsiz,
+   chunki handler hech qachon to'xtamaydi (yagona `await` — stub `body()`).
+
+**Tekshirildi:** modul **48 sinov** — audit hook **bilan ham**, usiz ham **OK**.
+
+**Yangi qo'riqchi:** `OfflineSuiteTests` `runtime_tests` da `TestClient`/`httpx`
+importini taqiqlaydi. `urllib.request` **ataylab** ochiq: `test_custom_http_adapter`
+va `test_onec_adapter` uni faqat `OpenerDirector.open` ni soxta `HTTPError` bilan
+almashtirish uchun import qiladi — ulanish yo'q. Mutatsiya bilan tekshirildi:
+`test_retry.py` ga `TestClient` qo'shilsa, test **fayl nomini aytib** yiqiladi.
+
+### Yana bir o'lchov: Node runner ham **o'sha sinfda** bloklangan
+
+`node --test apps/runner/test.js` Windows'da **24 dan 11 tasi** yiqiladi:
+
+```
+Error: Private single-owner file required
+  apps/runner/runner.js:92  privateFile()
+```
+
+Sabab Python tomonidagi bilan **bir xil**: `privateFile` `(meta.mode & 0o077) === 0`
+ni talab qiladi, Windows esa POSIX ruxsat bitlarini modellashtirmaydi.
+
+| Til | Bloklangan | Qadalganmi |
+|---|---|---|
+| Python (`runtime_tests`) | **13 / 3000** | ha — `test_platform_baseline.py` |
+| Node (`apps/runner`) | **11 / 24** | **yo'q** |
+
+Node tomonidagini qadash — keyingi ish.
+
+### Yakuniy o'lchov
+
+```
+Ran 3000 tests in 172.327s
+
+FAILED (failures=1, errors=12, skipped=1)
+```
+
+13 yomon sinov — **hammasi** ma'lum bloklangan yuza, **bittasi ham** shu fazada
+yozilgan moduldan emas.
+
+---

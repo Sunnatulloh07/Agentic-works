@@ -18,9 +18,42 @@ EMAIL_RE = re.compile(r'^[^@\s]{1,128}@[^@\s]{1,255}$')
 SLUG_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$')
 ROLES = {'owner', 'operator', 'integrator', 'viewer'}
 ACCOUNT = '__account__'
+
+# Declared bounds (§155).  The TTL and throttle numbers used to be default
+# arguments and inline comparisons, which no test could address by value; the
+# regular expressions above are pinned behaviourally instead, by feeding them a
+# local part and a slug one character past each ceiling.
 MAX_SESSION_TTL = 30 * 86400
+MIN_SESSION_TTL = 60
+THROTTLE_LIMIT = 20
+THROTTLE_WINDOW_SECONDS = 900
+INVITATION_TTL_SECONDS = 86_400
+MIN_INVITATION_TTL_SECONDS = 300
+MAX_INVITATION_TTL_SECONDS = 604_800
+
+# Text ceilings.  A pin that lived only in ``tests/`` was not a pin: that suite is
+# run by no gate and is 35 red against an API retired to 410 Gone.
+MAX_EMAIL_CHARS = 320
+MIN_PASSWORD_CHARS = 12
+MAX_PASSWORD_CHARS = 256
+MIN_CANDIDATE_PASSWORD_CHARS = 1
+MIN_TOKEN_CHARS = 20
+MAX_TOKEN_CHARS = 256
+
+# Key-derivation parameters.  These are security bounds, not tunables: lowering
+# the cost factor lowers the cost of attacking every stored password, and
+# nothing used to notice.
+SCRYPT_N = 16384
+SCRYPT_R = 8
+SCRYPT_P = 1
+SCRYPT_DKLEN = 32
+SALT_BYTES = 16
+
+# Cardinality guard: the last owner of a workspace may not be removed.
+LAST_OWNER_GUARD = 1
 # Fixed valid dummy hash makes unknown-user login perform the same scrypt work.
-DUMMY = 'scrypt$16384$8$1$' + 'ab' * 16 + '$' + '00' * 32
+DUMMY = (f'scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}$'
+        + 'ab' * SALT_BYTES + '$' + '00' * SCRYPT_DKLEN)
 
 
 class IdentityError(ValueError): pass
@@ -29,7 +62,7 @@ class AuthRateLimited(RuntimeError): pass
 
 
 def _email(value):
-    if not isinstance(value, str) or not EMAIL_RE.fullmatch(value.strip()) or len(value) > 320:
+    if not isinstance(value, str) or not EMAIL_RE.fullmatch(value.strip()) or len(value) > MAX_EMAIL_CHARS:
         raise IdentityError('Invalid email')
     return value.strip().casefold()
 
@@ -47,18 +80,22 @@ def _workspace_id(value):
 
 
 def _password_hash(password, *, salt=None):
-    if not isinstance(password, str) or not 12 <= len(password) <= 256:
-        raise IdentityError('Password must have 12..256 characters')
-    salt = salt or secrets.token_bytes(16)
-    value = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
-    return 'scrypt$16384$8$1$' + salt.hex() + '$' + value.hex()
+    if not isinstance(password, str) or not MIN_PASSWORD_CHARS <= len(password) <= MAX_PASSWORD_CHARS:
+        raise IdentityError(
+            f'Password must have {MIN_PASSWORD_CHARS}..{MAX_PASSWORD_CHARS} characters')
+    salt = salt or secrets.token_bytes(SALT_BYTES)
+    value = hashlib.scrypt(password.encode(), salt=salt, n=SCRYPT_N, r=SCRYPT_R,
+                           p=SCRYPT_P, dklen=SCRYPT_DKLEN)
+    return (f'scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}$'
+            + salt.hex() + '$' + value.hex())
 
 
 def _password_ok(password, encoded):
-    if not isinstance(password, str) or not 1 <= len(password) <= 256: return False
+    if not isinstance(password, str) or not MIN_CANDIDATE_PASSWORD_CHARS <= len(password) <= MAX_PASSWORD_CHARS: return False
     try:
         algo, n, r, p, salt, expected = encoded.split('$')
-        if (algo, n, r, p) != ('scrypt', '16384', '8', '1') or len(salt) != 32 or len(expected) != 64:
+        if ((algo, n, r, p) != ('scrypt', str(SCRYPT_N), str(SCRYPT_R), str(SCRYPT_P))
+                or len(salt) != SALT_BYTES * 2 or len(expected) != SCRYPT_DKLEN * 2):
             return False
         value = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32)
         return hmac.compare_digest(value.hex(), expected)
@@ -66,7 +103,7 @@ def _password_ok(password, encoded):
 
 
 def _token_hash(value):
-    if not isinstance(value, str) or not 20 <= len(value) <= 256:
+    if not isinstance(value, str) or not MIN_TOKEN_CHARS <= len(value) <= MAX_TOKEN_CHARS:
         raise AuthenticationError('Invalid token')
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -77,7 +114,7 @@ def audit(c, workspace, actor, action, target=''):
               (workspace, actor, action, target, time.time()))
 
 
-def throttle(namespace, key, limit=20, window_seconds=900):
+def throttle(namespace, key, limit=THROTTLE_LIMIT, window_seconds=THROTTLE_WINDOW_SECONDS):
     """Durable fixed-window throttle, must run before expensive password verification."""
     bucket = hashlib.sha256((namespace + ':' + str(key)[:512]).encode()).hexdigest()
     window = int(time.time() // window_seconds)
@@ -178,10 +215,10 @@ def list_workspaces(user_id):
       WHERE m.user_id=? AND m.status='active' AND w.status='active' ORDER BY w.created''',(user_id,))]
 
 
-def create_invitation(actor_id, workspace_id, email, role, ttl_seconds=86400):
+def create_invitation(actor_id, workspace_id, email, role, ttl_seconds=INVITATION_TTL_SECONDS):
     wid = _workspace_id(workspace_id); email = _email(email)
     if role not in ROLES-{'owner'}: raise IdentityError('Invalid invitation role')
-    if type(ttl_seconds) is not int or not 300<=ttl_seconds<=604800: raise IdentityError('Invalid expiry')
+    if type(ttl_seconds) is not int or not MIN_INVITATION_TTL_SECONDS<=ttl_seconds<=MAX_INVITATION_TTL_SECONDS: raise IdentityError('Invalid expiry')
     raw=secrets.token_urlsafe(32); iid='inv_'+uuid.uuid4().hex; now=time.time()
     with tx() as c:
         _owner(c,actor_id,wid)
@@ -235,7 +272,7 @@ def revoke_membership(actor_id, workspace_id, target_user_id):
         _owner(c,actor_id,wid)
         target=c.execute('SELECT * FROM p_memberships WHERE workspace_id=? AND user_id=?',(wid,target_user_id)).fetchone()
         if not target or target['status']!='active': raise IdentityError('Membership not found')
-        if target['role']=='owner' and c.execute("SELECT count(*) FROM p_memberships WHERE workspace_id=? AND role='owner' AND status='active'",(wid,)).fetchone()[0]<=1:
+        if target['role']=='owner' and c.execute("SELECT count(*) FROM p_memberships WHERE workspace_id=? AND role='owner' AND status='active'",(wid,)).fetchone()[0]<=LAST_OWNER_GUARD:
             raise IdentityError('Last owner cannot be revoked')
         now=time.time()
         c.execute("UPDATE p_memberships SET status='revoked',version=version+1,updated=? WHERE workspace_id=? AND user_id=?",(now,wid,target_user_id))
@@ -260,7 +297,7 @@ def _new_session(c, uid, wid, expires, *, family=None, previous=''):
 
 
 def create_session(user_id, workspace_id=ACCOUNT, ttl_seconds=MAX_SESSION_TTL):
-    if type(ttl_seconds) is not int or not 60<=ttl_seconds<=MAX_SESSION_TTL: raise IdentityError('Invalid session TTL')
+    if type(ttl_seconds) is not int or not MIN_SESSION_TTL<=ttl_seconds<=MAX_SESSION_TTL: raise IdentityError('Invalid session TTL')
     if workspace_id!=ACCOUNT: _workspace_id(workspace_id)
     with tx() as c:
         result=_new_session(c,user_id,workspace_id,time.time()+ttl_seconds)

@@ -15,10 +15,39 @@ EXCLUDED_DIRS = {'.git', '.venv', '__pycache__', 'node_modules', '.next', '.pyte
 
 
 def digest(path):
+    """SHA-256 of the file's CONTENT, with line endings normalised to LF.
+
+    This used to hash the raw bytes, which made the manifest a statement about the
+    machine that produced it rather than about the release. Measured against a clean
+    ``git archive HEAD`` extraction -- exactly the "freshly extracted release" the
+    module docstring above tells you to run this on -- **403 of 498 hashes
+    mismatched**, and every one of them was a text file. The cause is
+    ``core.autocrlf``: the manifest had been generated in a Windows working tree
+    holding CRLF, while the blobs, and therefore any Linux checkout or ZIP extract,
+    hold LF. The gate was red on the very input it documents, so its red carried no
+    information.
+
+    Normalising on read makes the digest a property of the content instead. It is
+    applied identically by ``generate_manifest.py`` (which imports this function, so
+    the two can never disagree) and it is safe for binary files: the transform is
+    deterministic, so both platforms still compute the same value for the same bytes.
+    Only text files ever differed between platforms in the first place.
+
+    Streamed with a one-byte carry, because a ``\\r`` ending one chunk and a ``\\n``
+    starting the next would otherwise survive normalisation as a stray CR.
+    """
     h = hashlib.sha256()
+    carry = b''
     with path.open('rb') as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-            h.update(chunk)
+            data = carry + chunk
+            if data.endswith(b'\r'):
+                carry, data = b'\r', data[:-1]
+            else:
+                carry = b''
+            h.update(data.replace(b'\r\n', b'\n'))
+    if carry:
+        h.update(carry)
     return h.hexdigest()
 
 

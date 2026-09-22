@@ -15,12 +15,12 @@
 | Registry tool'lari | **88** (known **89**) | `build_registry()` |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
 | `app/` modullari | **40** fayl | `api-python/app/` |
-| Offline testlar | **2 949** | `Ran 2949 tests` |
-| Test signature | `failures=1, errors=11, skipped=1` | **boshqariladigan venv bilan** (`cryptography` bor) |
-| Windows uchun **bloklangan** sinovlar | **12** (11 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
-| Ultra-audit fazalari | **45** (§1–§154) | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
+| Offline testlar | **3 000** | `Ran 3000 tests` |
+| Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`) |
+| Windows uchun **bloklangan** sinovlar | **13** (12 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
+| Ultra-audit fazalari | **§125–§155** — 31 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
 | UI gate'lari | typecheck **PASS**, build **PASS** (`next@14.2.35`), `npm audit` **FAIL** | `apps/ui` |
-| `MANIFEST.sha256` | **PASS** — 483 fayl, 0 xato | `scripts/verify_manifest.py` |
+| `MANIFEST.sha256` | **PASS** — 502 fayl, 0 xato; **va endi toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
 | `production_release` | **NO_GO** | `BACKLOG.json` |
 
 **Muhim:** `production_release: NO_GO` — bu **ataylab**. Tizim hozir
@@ -238,10 +238,14 @@ ochadi.
 
 ## 9. Ultra-audit — bajarilgan fazalar
 
-**47 faza** bajarildi (§1–§154, `ULTRA-AUDIT-ASCII-CELL-UZ.md`). Har bir fazaning
-usuli bir xil: chegarani **o'lchash**, uni **mutatsiya** qilib ko'rish, yashil
-qolganini **qadash**. To'liq ro'yxat va o'lchovlar hujjatda; eng ko'p uchraydigan
-naqshlar quyida.
+Raqamlangan fazalar **§125–§155** — **31 ta**, uzluksiz, bo'shliqsiz
+(`grep -c '^## §'`). Har bir fazaning usuli bir xil: chegarani **o'lchash**, uni
+**mutatsiya** qilib ko'rish, yashil qolganini **qadash**. To'liq ro'yxat va
+o'lchovlar hujjatda; eng ko'p uchraydigan naqshlar quyida.
+
+> Ilgari bu yerda "45 faza (§1–§154)" va "47 faza" yozilgan edi — §0 va §9
+> **bir-biriga zid** raqamlar berardi va ikkisi ham o'lchanmagan edi. Endi
+> raqam hujjatdan sanaladi, taxmin qilinmaydi.
 
 | Faza | Mavzu | Topilgan nuqson |
 |---|---|---|
@@ -258,7 +262,8 @@ naqshlar quyida.
 | §151 | tashqi provayder transporti (4 modul) | **client id shakli hech narsa bilan qadalmagan** — qoidani o'chirish mumkin edi |
 | §152 | planner, speech, baza o'qish, CRM reconcile | 28/28 RED — bitta ham yashil yo'q |
 | §153 | boshqaruv tekisligi (`platform_api.py`, 88 `Field`) | **avtonomiya shiftlari 10× kengaytirilsa ham birorta test qizarmasdi**; uchta konstanta birlashib ketgan |
-| §154 | Windows uchun bloklangan yuza | yozuv **11** der edi, o'lchandi — **12**; `O_NOFOLLOW` yettitasini bloklaydi |
+| §154 | Windows uchun bloklangan yuza | yozuv **11** der edi, o'lchandi — **12** |
+| §155 | `app/` qatlami, o'qilmaydigan to'plam, va **ikki gate** | `tests/` da qadalgan chegara qadalgan emas (uni **hech bir gate yurgizmaydi**); §154 ning o'z yozuvi **13** va **6** bo'lishi kerak edi; `MANIFEST` **toza eksportda 403/498 mismatch** — gate o'zi aytgan joyda qizil edi; `verify_offline.py` **tugata olmaydi** edi, va men unga socket soldim |
 
 **Eng muhim o'lchov (IV faza):** eski kodda **600 000 – 899 999 so'm**
 (haqiqiy 3x–4.5x mediana) invoice'lar **`ready_for_approval`** qaytarardi —
@@ -295,15 +300,29 @@ Ya'ni qolgan UI ishi — bitta **tool chaqirish yuzasi**, alohida panel emas.
 
 ---
 
-## 11. Test infratuzilmasi — §154 da o'lchangan holat
+## 11. Test infratuzilmasi — o'lchangan holat (§154–§155)
 
 | Savol | Javob |
 |---|---|
-| Offline to'plam | **2 892 sinov**, `failures=1, errors=11, skipped=1` |
-| Windows uchun bloklangan | **12** (11 error + 1 failure) — `test_platform_baseline.py` qadaydi |
-| Ularning **yagona** sababi | `os.O_NOFOLLOW` — **7 tasi** |
+| Offline to'plam (`runtime_tests`) | **3 000 sinov**, `failures=1, errors=12, skipped=1` |
+| Windows uchun bloklangan | **13** (12 error + 1 failure) — `test_platform_baseline.py` qadaydi |
+| Eng katta **yagona** sabab | `os.O_NOFOLLOW` — **6 tasi** |
+| Ikkinchi sabab (nomi yo'q edi) | `symlink_privilege` (`OSError`, `WinError 1314`) — **2 tasi** |
+| Sabab **haqiqatan sabab**mi? | ha — `test_each_recorded_reason_is_the_actual_cause` har bir bloklangan sinovni **yurgizib**, ko'tarilgan istisnoni qatordagi sababga solishtiradi |
 | `integration_tests` | **95 sinov, 95 pass, 50 s** — ilgari **yig'ilmasdi** (`conftest.py` qo'shildi) |
 | `integration_tests` gate'da | **yo'q** — FastAPI/HTTPX talab qiladi, offline Computer'da yurmaydi |
-| Linux/macOS CI yurishi | **hali yo'q** — 12 bloklangan sinov **hech qachon** POSIX'da yurmagan |
-| Umumiy baseline fixture (413 s to'plam uchun) | **hali yo'q** |
+| **`api-python/tests/`** | **33 qizil, 172 pass, 4 skip** — va uni **hech bir gate yurgizmaydi** |
+| POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
+| **Node runner** (`apps/runner/test.js`) | **11 / 24 qizil** Windows'da — `privateFile()` `(mode & 0o077) === 0` ni talab qiladi, Windows POSIX ruxsat bitlarini modellashtirmaydi. **Qadalmagan** |
+| `verify_offline.py` | endi **tugatadi** (§155); Windows'da `python_runtime` va `node_runner` FAIL — **platforma**, kod emas |
+| Umumiy baseline fixture (deyarli 3 daqiqalik to'plam uchun) | **hali yo'q** |
+
+**`tests/` — alohida gap.** U `tests/` nomi bilan yuradi, lekin
+`.github/workflows/verify.yml` faqat `runtime_tests` va `integration_tests` ni
+yurgizadi. Ya'ni 33 qizil sinov hech kimga ko'rinmaydi, va **o'sha to'plamdagi
+qadam o'qilmaydi** (§155). Uning qizilligi tasodifiy emas: 10 tasi ataylab
+bekor qilingan marshrut (`410 Gone`), 15 tasi eskirgan javob shakli, 4 tasi
+legacy runner WebSocket, 3 tasi kontrakt surilishi, 1 tasi auth statusi.
+Qaror talab qilinadi: **tuzatish**, yoki **nafaqaga chiqarish** — lekin
+"qizil va o'qilmaydigan" holicha qoldirish emas.
 

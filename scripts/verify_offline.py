@@ -128,10 +128,21 @@ def run(root: Path, output: Path) -> dict:
         for name, command, cwd in jobs:
             start = time.monotonic()
             try:
+                # ``errors='replace'`` because the two ends of this pipe do not have
+                # to agree on an encoding. The child writes with whatever its locale
+                # picked -- on a Russian Windows, ``[WinError 1314]`` carries Cyrillic
+                # from FormatMessage -- while the parent decodes with its own
+                # preference, and an ambient ``PYTHONIOENCODING`` is enough to make
+                # them differ. Without this the reader thread raises
+                # UnicodeDecodeError, ``result.stdout`` comes back None, and the gate
+                # dies with a TypeError from write_text instead of reporting a result.
+                # A mojibake log line is a far better outcome than a gate that cannot
+                # finish on the platform it is meant to check.
                 result = subprocess.run(command, cwd=cwd, env=env, text=True,
+                                        errors='replace',
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         timeout=JOB_TIMEOUT_OVERRIDES.get(name, JOB_TIMEOUT_SECONDS))
-                code, text = result.returncode, result.stdout
+                code, text = result.returncode, result.stdout or ''
             except subprocess.TimeoutExpired as exc:
                 code = 124
                 text = exc.stdout or ''

@@ -7,7 +7,13 @@ from .config import validate_runtime_config
 
 SECRET = validate_runtime_config().jwt_secret
 ALGORITHM = "HS256"
+
+# Declared bounds (§155).  Named so that a test can address the *number* rather
+# than the name: the session lifetime used to be a bare ``900`` in the middle of
+# a ternary, which no test could reach, so widening it was silent.
 TTL_SECONDS = 24 * 3600
+MIN_TOKEN_TTL_SECONDS = 1
+SESSION_TOKEN_TTL_SECONDS = 900
 
 
 ISSUER = "agent-platform"
@@ -18,8 +24,10 @@ def issue_token(tenant_id: str, subject: str = "operator", role: str = "operator
                 token_type: str = "user", device_id: str = "", generation: int = 0,
                 session_id: str = "", ttl_seconds: int | None = None) -> str:
     now = int(time.time())
-    ttl = ttl_seconds if ttl_seconds is not None else (900 if session_id else TTL_SECONDS)
-    if type(ttl) is not int or not 1 <= ttl <= TTL_SECONDS: raise ValueError("Invalid token lifetime")
+    ttl = ttl_seconds if ttl_seconds is not None else (
+        SESSION_TOKEN_TTL_SECONDS if session_id else TTL_SECONDS)
+    if type(ttl) is not int or not MIN_TOKEN_TTL_SECONDS <= ttl <= TTL_SECONDS:
+        raise ValueError("Invalid token lifetime")
     return jwt.encode({"tenant_id": tenant_id, "sub": subject, "role": role,
                        "token_type": token_type, "device_id": device_id,
                        "generation": generation, "iss": ISSUER, "aud": AUDIENCE,
