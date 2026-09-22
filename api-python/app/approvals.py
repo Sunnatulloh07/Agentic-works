@@ -17,6 +17,33 @@ from . import storage
 router = APIRouter()
 _lock = threading.Lock()
 
+# Declared bounds (§156).
+#
+# ``MAX_PENDING_ROWS`` is the queue an operator sees.  It was a default argument, so
+# the ceiling could move without a test noticing -- and how much pending work an
+# operator is shown is exactly the sort of thing a default argument should not own.
+MAX_PENDING_ROWS = 100
+
+# ``MAX_REASON_CHARS`` bounds the free text an approver types.  It is stored and
+# later rendered back to the operator, so it is a ceiling on both.
+MAX_REASON_CHARS = 200
+
+# ``APPROVAL_ID_BYTES`` is entropy, not cosmetics.  The id is ``<tenant>-<hex>``, so
+# twelve hex characters is 48 bits; halving it makes ids collide sooner and makes a
+# pending approval guessable from its neighbours.
+APPROVAL_ID_BYTES = 12
+
+# The decision vocabulary, named ONCE.  It used to be written out twice -- once in
+# ``FileApprovalStore.decide`` and once in the ``/decide`` route -- so the two could
+# drift about what a decision even is, and only one of them is the copy that answers
+# ``422`` while the other raises ``ValueError``.
+DECISIONS = ("approved", "rejected")
+
+# The phone mask.  The ``{9,16}`` quantifier is a PII bound and is pinned
+# BEHAVIOURALLY rather than named: building the pattern from an f-string would trade
+# a readable regex for a name nobody reads, and feeding the mask one character below
+# its floor proves the same thing.  Nine is the shortest real body after ``+998``;
+# anything shorter is left alone, and that is the leak this bound documents.
 PHONE_MASK = re.compile(r"\+998[\d\s\-()]{9,16}")
 
 
@@ -68,7 +95,7 @@ class FileApprovalStore:
                                         decided_by=r["decided_by"] or "",
                                         reason=r["reason"] or "")
             ap = Approval(
-                id=f"{tenant}-{uuid.uuid4().hex[:12]}",
+                id=f"{tenant}-{uuid.uuid4().hex[:APPROVAL_ID_BYTES]}",
                 tenant=tenant, kind=kind, agent_id=agent_id, summary=summary, payload=payload,
             )
             full_payload = {**payload, "channel": channel}
@@ -81,7 +108,7 @@ class FileApprovalStore:
             )
             return ap
 
-    def pending(self, tenant: str, limit: int = 100) -> list[dict]:
+    def pending(self, tenant: str, limit: int = MAX_PENDING_ROWS) -> list[dict]:
         c = storage.db()
         out = []
         for r in c.execute(
@@ -123,7 +150,7 @@ class FileApprovalStore:
 
     def decide(self, approval_id: str, decision: str, reason: str = "", actor: str = "legacy-admin") -> dict:
         """Avval ish (outbox), keyin belgi. Xato bo'lsa pending qoladi."""
-        if decision not in ("approved", "rejected"):
+        if decision not in DECISIONS:
             raise ValueError("decision: approved|rejected")
         from .orders import Order, validate_order_payload
         from .packs import load_pack
@@ -164,12 +191,12 @@ class FileApprovalStore:
                     _trace.log({"tenant": r["tenant"], "agent": r["agent"],
                                 "action": f"ladder_{after}"})
             c.execute("UPDATE approvals SET status=?, decided_at=?, decided_by=?, reason=? WHERE id=?",
-                      ("approved" if decision == "approved" else "rejected",
-                       int(time.time()), actor, re.sub(r"[<>]", "", reason or "")[:200],
+                      (decision, int(time.time()), actor,
+                       re.sub(r"[<>]", "", reason or "")[:MAX_REASON_CHARS],
                        approval_id))
             c.commit()
             return {"id": r["id"], "tenant": r["tenant"], "kind": r["kind"], "agent_id": r["agent"],
-                    "summary": r["summary"], "status": "approved" if decision == "approved" else "rejected"}, order_id
+                    "summary": r["summary"], "status": decision}, order_id
 
 
 _store: FileApprovalStore | None = None
@@ -241,7 +268,7 @@ def decide(
         raise HTTPException(status_code=404, detail="topilmadi")  # mavjudligini bildirmaymiz
     if not scope_ok(rec["tenant"], x_admin_token, request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-    if req.decision not in ("approved", "rejected"):
+    if req.decision not in DECISIONS:
         raise HTTPException(status_code=422, detail="decision: approved|rejected")
     try:
         from .auth import verify_claims

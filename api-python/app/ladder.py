@@ -12,6 +12,24 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 LEVELS = ["human_led", "human_assisted", "autonomous"]
+
+# Declared bounds (§156).  These three numbers ARE the policy: they decide when an
+# agent stops needing a human, and nothing read them.  They were constructor
+# defaults, so the promotion rule could be loosened without a single test changing
+# colour -- ``LadderStore(min_tasks=1)`` promotes after one successful task, and the
+# only signal would have been that agents became autonomous sooner.
+DEFAULT_MIN_TASKS = 30
+DEFAULT_MAX_ERR = 0.05
+DEFAULT_DEMOTE_ERR = 0.20
+
+# The stored outcome history is never shorter than this, whatever ``min_tasks`` is.
+# It used to be a second bare ``30`` sitting one line under the default above: two
+# literals that had to agree, and nothing that made them.  The floor matters because
+# ``record`` trims outcomes to ``[-window:]`` while promotion needs
+# ``total >= min_tasks`` -- so a window below ``min_tasks`` makes promotion
+# UNREACHABLE, and a dead rule raises nothing.
+MIN_WINDOW = 30
+
 _lock = threading.Lock()
 
 
@@ -21,8 +39,8 @@ def key(tenant: str, agent_id: str) -> str:
 
 
 class LadderStore:
-    def __init__(self, min_tasks: int = 30,
-                 max_err: float = 0.05, demote_err: float = 0.20,
+    def __init__(self, min_tasks: int = DEFAULT_MIN_TASKS,
+                 max_err: float = DEFAULT_MAX_ERR, demote_err: float = DEFAULT_DEMOTE_ERR,
                  auto_cap: bool = True) -> None:
         """auto_cap=True: avtomatik faqat human_assisted gacha;
         autonomous — faqat owner endpoint (audit S29: self-approve farming)."""
@@ -30,7 +48,7 @@ class LadderStore:
         self.max_err = max_err
         self.demote_err = demote_err
         self.auto_cap = auto_cap
-        self.window = max(30, min_tasks)
+        self.window = max(MIN_WINDOW, min_tasks)
 
     def _read_all(self) -> dict:
         from . import storage

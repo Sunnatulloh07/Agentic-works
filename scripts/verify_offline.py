@@ -50,6 +50,23 @@ WINDOWS_PASSTHROUGH = ('SystemRoot', 'SystemDrive', 'windir', 'COMSPEC', 'PATHEX
 # Windows host, so the old single 90s limit truncated the run instead of failing it.
 JOB_TIMEOUT_SECONDS = 90
 JOB_TIMEOUT_OVERRIDES = {'python_runtime': 600}
+# Dependencies the Python jobs cannot even IMPORT without. Checked before the jobs
+# run; see the refusal in ``run()``.
+#
+# This is deliberately NARROWER than the list the summary reports. ``psycopg`` and
+# ``redis`` are database drivers: their absence makes a handful of contract tests
+# skip, it does not stop the suite from importing. Blocking on them would refuse a
+# perfectly usable environment -- and did, on the first attempt, against the very
+# virtualenv this repository's baseline was measured in.
+#
+# ``cryptography`` is in this list and was NOT in the reported one below, which is a
+# gap the refusal exposed: a run without it produced **164 errors** -- the vault and
+# OAuth suites -- and the summary would never have named the package once.
+REQUIRED_DEPENDENCIES = ('pytest', 'fastapi', 'httpx', 'pydantic', 'jwt', 'yaml',
+                         'cryptography')
+# Reported in ``summary.json``: the required set plus the optional drivers, whose
+# absence is information about coverage rather than a reason to refuse.
+HTTP_DEPENDENCIES = REQUIRED_DEPENDENCIES + ('psycopg', 'redis')
 BUN_SYNTAX = """const fs=require('node:fs');const path=require('node:path');
 const root=process.argv[2];let checked=0;const errors=[];
 function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})) {
@@ -92,6 +109,24 @@ def child_env(temp: Path, home: Path) -> dict:
 
 
 def run(root: Path, output: Path) -> dict:
+    # Refuse before spending three minutes proving the environment is wrong; see
+    # REQUIRED_DEPENDENCIES for why this is a refusal and not a summary field. The
+    # check comes before the evidence directory is created, so a refusal does not
+    # leave an empty run behind to be mistaken for a completed one.
+    missing = [name for name in REQUIRED_DEPENDENCIES
+               if importlib.util.find_spec(name) is None]
+    if missing:
+        raise SystemExit(
+            'REFUSED: %s cannot import %s.\n'
+            'Every Python job in this gate runs with that same interpreter, so it would\n'
+            'report a whole suite of import errors that are really one missing\n'
+            'environment -- and the two are indistinguishable: python_runtime: FAIL,\n'
+            'exit 1, either way.\n'
+            'Run this script with the environment under test, for example:\n'
+            '  python -m venv .venv\n'
+            '  .venv/bin/pip install -r api-python/requirements.txt\n'
+            '  .venv/bin/python scripts/verify_offline.py'
+            % (sys.executable, ', '.join(missing)))
     output.mkdir(parents=True, exist_ok=False)
     results = []
     with tempfile.TemporaryDirectory(prefix='platform-offline-') as tmp:
@@ -170,11 +205,10 @@ def run(root: Path, output: Path) -> dict:
     syntax = {'name': 'python_syntax', 'status': 'FAIL' if failures else 'PASS', 'checked': checked, 'errors': failures}
     (output / 'python_syntax.json').write_text(json.dumps(syntax, ensure_ascii=False, indent=2) + '\n')
     results.append(syntax)
-    missing = [name for name in ['pytest', 'fastapi', 'httpx', 'pydantic', 'jwt', 'yaml', 'psycopg', 'redis']
-               if importlib.util.find_spec(name) is None]
     summary = {'kind': 'offline_verification_only', 'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                'python': sys.version.split()[0], 'results': results,
-               'http_dependencies_missing': missing,
+               'http_dependencies_missing': [name for name in HTTP_DEPENDENCIES
+                                             if importlib.util.find_spec(name) is None],
                'optional_database_dependencies_missing': [name for name in ['psycopg','pymysql','pymongo','redis','pyodbc','oracledb','boto3','cassandra','neo4j','elasticsearch']
                                                           if importlib.util.find_spec(name) is None],
                'not_performed': ['dependency-backed HTTP tests', 'Next/React typecheck', 'Next production build',

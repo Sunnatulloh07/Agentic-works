@@ -6,6 +6,10 @@
 > **Yangilandi: 2026-09-21 (kechki sessiya)** — UI qatlami, chegara auditi §151–§154,
 > `retry.py`, DR drill, manifest generator, `integration_tests` tuzatildi.
 > Batafsil: `PROGRESS-UZ.md`.
+>
+> **Yangilandi: 2026-09-22** — chegara auditi §155–§156 (`app/` qatlami, tasdiq
+> navbati va avtonomiya zinapoyasi), `MANIFEST` portativligi, `verify_offline.py`
+> qo'riqchisi. Batafsil: `PROGRESS-UZ.md` V05Z–V062.
 
 ## 0. Hozirgi holat — bir qarashda
 
@@ -15,10 +19,10 @@
 | Registry tool'lari | **88** (known **89**) | `build_registry()` |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
 | `app/` modullari | **40** fayl | `api-python/app/` |
-| Offline testlar | **3 000** | `Ran 3000 tests` |
+| Offline testlar | **3 076** | `Ran 3076 tests` |
 | Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`) |
 | Windows uchun **bloklangan** sinovlar | **13** (12 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
-| Ultra-audit fazalari | **§125–§155** — 31 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
+| Ultra-audit fazalari | **§125–§156** — 32 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
 | UI gate'lari | typecheck **PASS**, build **PASS** (`next@14.2.35`), `npm audit` **FAIL** | `apps/ui` |
 | `MANIFEST.sha256` | **PASS** — 502 fayl, 0 xato; **va endi toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
 | `production_release` | **NO_GO** | `BACKLOG.json` |
@@ -238,7 +242,7 @@ ochadi.
 
 ## 9. Ultra-audit — bajarilgan fazalar
 
-Raqamlangan fazalar **§125–§155** — **31 ta**, uzluksiz, bo'shliqsiz
+Raqamlangan fazalar **§125–§156** — **32 ta**, uzluksiz, bo'shliqsiz
 (`grep -c '^## §'`). Har bir fazaning usuli bir xil: chegarani **o'lchash**, uni
 **mutatsiya** qilib ko'rish, yashil qolganini **qadash**. To'liq ro'yxat va
 o'lchovlar hujjatda; eng ko'p uchraydigan naqshlar quyida.
@@ -264,6 +268,7 @@ o'lchovlar hujjatda; eng ko'p uchraydigan naqshlar quyida.
 | §153 | boshqaruv tekisligi (`platform_api.py`, 88 `Field`) | **avtonomiya shiftlari 10× kengaytirilsa ham birorta test qizarmasdi**; uchta konstanta birlashib ketgan |
 | §154 | Windows uchun bloklangan yuza | yozuv **11** der edi, o'lchandi — **12** |
 | §155 | `app/` qatlami, o'qilmaydigan to'plam, va **ikki gate** | `tests/` da qadalgan chegara qadalgan emas (uni **hech bir gate yurgizmaydi**); §154 ning o'z yozuvi **13** va **6** bo'lishi kerak edi; `MANIFEST` **toza eksportda 403/498 mismatch** — gate o'zi aytgan joyda qizil edi; `verify_offline.py` **tugata olmaydi** edi, va men unga socket soldim |
+| §156 | tasdiq navbati va avtonomiya zinapoyasi | `LadderStore` va `FileApprovalStore` ning **gate ichida birorta iste'molchisi yo'q** — yagona qoplama gatesiz, 33 qizil `tests/`; `MIN_WINDOW` — ikkinchi yalang'och `30`, va undan past oyna **ko'tarilishni imkonsiz** qiladi (o'lik qoida, hech narsa ko'tarmaydi); siyosat uchligi konstruktor default'i edi (`min_tasks=1` — bitta vazifadan keyin avtonomiya); telefon maskasi **ikki tomondan** sizadi; `verify_offline.py` noto'g'ri interpreter bilan **164 xato** beradi va buni **aytmaydi** |
 
 **Eng muhim o'lchov (IV faza):** eski kodda **600 000 – 899 999 so'm**
 (haqiqiy 3x–4.5x mediana) invoice'lar **`ready_for_approval`** qaytarardi —
@@ -300,11 +305,11 @@ Ya'ni qolgan UI ishi — bitta **tool chaqirish yuzasi**, alohida panel emas.
 
 ---
 
-## 11. Test infratuzilmasi — o'lchangan holat (§154–§155)
+## 11. Test infratuzilmasi — o'lchangan holat (§154–§156)
 
 | Savol | Javob |
 |---|---|
-| Offline to'plam (`runtime_tests`) | **3 000 sinov**, `failures=1, errors=12, skipped=1` |
+| Offline to'plam (`runtime_tests`) | **3 076 sinov**, `failures=1, errors=12, skipped=1` |
 | Windows uchun bloklangan | **13** (12 error + 1 failure) — `test_platform_baseline.py` qadaydi |
 | Eng katta **yagona** sabab | `os.O_NOFOLLOW` — **6 tasi** |
 | Ikkinchi sabab (nomi yo'q edi) | `symlink_privilege` (`OSError`, `WinError 1314`) — **2 tasi** |
@@ -314,7 +319,7 @@ Ya'ni qolgan UI ishi — bitta **tool chaqirish yuzasi**, alohida panel emas.
 | **`api-python/tests/`** | **33 qizil, 172 pass, 4 skip** — va uni **hech bir gate yurgizmaydi** |
 | POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
 | **Node runner** (`apps/runner/test.js`) | **11 / 24 qizil** Windows'da — `privateFile()` `(mode & 0o077) === 0` ni talab qiladi, Windows POSIX ruxsat bitlarini modellashtirmaydi. **Qadalmagan** |
-| `verify_offline.py` | endi **tugatadi** (§155); Windows'da `python_runtime` va `node_runner` FAIL — **platforma**, kod emas |
+| `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` FAIL — **platforma**, kod emas |
 | Umumiy baseline fixture (deyarli 3 daqiqalik to'plam uchun) | **hali yo'q** |
 
 **`tests/` — alohida gap.** U `tests/` nomi bilan yuradi, lekin

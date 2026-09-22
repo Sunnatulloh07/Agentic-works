@@ -6483,3 +6483,250 @@ Yangi sinovlar `scripts/test_manifest.py` da: CRLF va LF **bir xil** xesh beradi
 yakka CR esa muallif tanlagan bayt); normalizatsiya **chunk chegarasidan** o'tadi;
 va CRLF'da yozilgan manifest LF'da **PASS** beradi — ya'ni "bu yerda yoz, u yerda
 tekshir" xossasi qadalgan.
+## §156. Fazza ellik birinchi — tasdiq navbati va avtonomiya zinapoyasi: **gatesiz to'plam yagona qoplama edi**
+
+### §156.1. §155 topilmasi qayerga tegishli ekani o'lchandi
+
+§155 shunday dedi: `tests/` da qadalgan chegara — qadalgan emas, chunki uni **hech
+bir gate yurgizmaydi**. Bu fazada o'sha gapning **manzili** aniqlandi:
+
+| Modul | Gate ichida kim sinaydi | Umuman kim sinaydi |
+|---|---|---|
+| `app/ladder.py` → `LadderStore` | **hech kim** | `tests/conftest.py`, `tests/test_stage2.py` |
+| `app/approvals.py` → `FileApprovalStore` | **hech kim** | `tests/conftest.py`, `tests/test_stage1.py`, `tests/test_stage2.py`, `tests/test_gaps.py`, `tests/test_audit_fixes.py` |
+
+`runtime_tests` va `integration_tests` bo'ylab qidiruv bu ikki store'ning boshqa
+iste'molchisini topmaydi. Ularni import qiladigan `app/` modullari — `main.py`,
+`operator.py`, `pipeline.py`, `stats.py` — faqat router ulaydi.
+
+Ya'ni: **"agent qachon odamsiz ishlay boshlaydi"** degan savolning javobi
+(`LadderStore`) va **"write-harakat operator roziligisiz o'tmaydi"** degan
+qoidaning saqlagichi (`FileApprovalStore`) butunlay **qizil va gatesiz** to'plamda
+qadalgan edi. Bu §155 ning eng qimmatli satri edi; bu faza uni to'laydi.
+
+### §156.2. Sanab chiqilgan chegaralar
+
+| Modul | Chegara | Qiymat | Oldin |
+|---|---|---|---|
+| `ladder.py` | ko'tarilish ostonasi | 30 vazifa | konstruktor default'i |
+| `ladder.py` | ko'tarilish xato ulushi | 0.05 | konstruktor default'i |
+| `ladder.py` | tushish xato ulushi | 0.20 | konstruktor default'i |
+| `ladder.py` | avtomatik shift | yoniq | konstruktor default'i |
+| `ladder.py` | oyna poli | 30 | **nomsiz ikkinchi literal** |
+| `ladder.py` | oyna ifodasi | `max(MIN_WINDOW, min_tasks)` | **nomsiz** |
+| `ladder.py` | pog'ona tartibi | `LEVELS` | nomsiz |
+| `approvals.py` | navbat shifti | 100 qator | default argument |
+| `approvals.py` | sabab shifti | 200 belgi | **nomsiz literal** |
+| `approvals.py` | id entropiyasi | 12 hex belgi | **nomsiz literal** |
+| `approvals.py` | qaror lug'ati | 2 so'z | **ikki marta yozilgan** |
+| `approvals.py` | telefon maskasi poli | 9 belgi | regex kvantifikatorida |
+| `approvals.py` | telefon maskasi shifti | 16 belgi | regex kvantifikatorida |
+
+### §156.3. `MIN_WINDOW` — **o'lik qoida**, va u hech narsa ko'tarmaydi
+
+Bu fazaning eng muhim chegara topilmasi. `MIN_WINDOW` — `min_tasks` default'i ostida
+turgan **ikkinchi yalang'och `30`**: mos kelishi shart bo'lgan ikki literal, va
+ularni mos qiladigan hech narsa yo'q edi.
+
+Ular **haqiqatan** mos kelishi shart, va sabab kosmetik emas:
+
+```
+record:    entry["outcomes"] = (entry.get("outcomes", []) + [bool(ok)])[-self.window:]
+record:    if total >= self.min_tasks:
+```
+
+`record` tarixni `[-window:]` gacha qisqartiradi, ko'tarilish esa `total >= min_tasks`
+talab qiladi. Ya'ni **`window < min_tasks` bo'lsa, `total` bu songa hech qachon
+yetmaydi** — agent hech qachon ko'tarilmaydi. Bu **o'lik qoida**: u hech qachon
+ishlamaydi va **hech qanday istisno ko'tarmaydi**. `max(MIN_WINDOW, min_tasks)`
+savolni butunlay olib tashlaydi, va o'lchov poli ikki tomonida ham o'tkazildi:
+
+| `min_tasks` | 1 | 5 | 29 | 30 | 31 | 100 |
+|---|---|---|---|---|---|---|
+| `window` | 30 | 30 | 30 | 30 | **31** | **100** |
+
+### §156.4. Siyosat uchligi — bu sozlama emas, **javob**
+
+`min_tasks`, `max_err`, `demote_err` — "agent qachon odamsiz ishlashni boshlaydi"
+degan savolning javobi. Ular konstruktor default'i edi, ya'ni:
+
+```python
+LadderStore(min_tasks=1)   # bitta muvaffaqiyatli vazifadan keyin ko'taradi
+```
+
+...va **birorta testning rangi o'zgarmasdi**. Yagona signal — agentlar tezroq
+avtonom bo'lib qolgani. Endi uchtasi ham matritsada qizil.
+
+`auto_cap` ham shu yerda: `auto_cap=True` — avtomatik ko'tarilish faqat
+`human_assisted` gacha, `autonomous` esa faqat owner endpoint'idan. Bu audit S29
+qo'riqchisi (self-approve farming). Default'ni `False` qilish — agent o'z
+write-harakatlarini o'zi tasdiqlay oladigan holat.
+
+### §156.5. `DECISIONS` — lug'at ikki marta yozilgan, uchinchi nusxa ortiqcha edi
+
+Qaror lug'ati (`approved` / `rejected`) ikki joyda yozilgan edi: store `ValueError`
+ko'taradi, marshrut `422` qaytaradi, va **ikkisini mos qiladigan hech narsa yo'q**.
+Uchinchi nusxa esa umuman ortiqcha edi:
+
+```python
+("approved" if decision == "approved" else "rejected", ...)
+```
+
+Yuqoridagi qo'riqchidan keyin bu shunchaki `decision`. Uchta yozuv o'rniga bitta
+manba qoldi: `DECISIONS`, ikkala qo'riqchi joyda ham.
+
+### §156.6. Telefon maskasi — ikki tomoni ham **sizib chiqadi**
+
+`PHONE_MASK = \+998[\d\s\-()]{9,16}`. Kvantifikator PII chegarasi, va u **nom
+bilan emas, xatti-harakat bilan** qadalgan: nomlash uchun pattern'ni f-string'dan
+qurish kerak bo'lardi — o'qiladigan regex'ni hech kim o'qimaydigan nomga
+almashtirish. Uni pol va shiftning bir belgi narisidan oziqlantirish aynan shu
+gapni isbotlaydi. Va ikkala tomon ham **sizib chiqadi** — ikkisi ham o'lchandi va
+testda **sizib chiqish sifatida** yozilgan:
+
+| Tana belgilari | Natija |
+|---|---|
+| 8 | `+99890123456` — **maskalanmagan** |
+| 9 | `+998***` |
+| 16 | `+998***` |
+| 17 | `+998***6` — **dumi qolgan** |
+
+Ya'ni `+998` dan keyin to'qqiz belgidan **qisqa** raqam (qisqartirilgan yoki
+to'liq terilmagan) operator ekraniga **o'z holida** chiqadi; o'n oltitadan
+**uzuni** esa oxirini saqlab qoladi. Yana bir mayda iz: ajratgich yutiladi, shuning
+uchun `call +998 90 123 45 67 now` → `call +998***now`.
+
+Bu ikki chekka bu fazada **kiritilmagan** nuqson emas — ular allaqachon shu holatda
+edi. Ular shu fazada **yozib qo'yildi**, chunki chegara endi nomlangan va uni
+o'zgartirish qanday natija berishini bilish kerak.
+
+### §156.7. O'lchov xatosi: `storage.reset()` faylni **o'chirmaydi**
+
+Bu modulning dastlabki probe'i (`_probe156.py`) bir xil `APP_DB` da o'nlab
+ssenariy yurgizdi va **siyosat deb oldingi ssenariyning qoldig'ini** o'qidi:
+
+```
+errs=0 -> human_assisted      <- to'g'ri
+errs=1 -> human_assisted      <- oldingi ssenariydan meros
+after 29 successes: human_assisted   <- 29 < 30, ko'tarilmasligi kerak edi
+```
+
+Sabab: `storage.reset()` faqat **ulanishni yopadi**, faylni qoldiradi. Har bir
+testga alohida `APP_DB` berilgach raqamlar izchil bo'ldi:
+
+```
+29 successes -> human_led | 30 -> human_assisted
+errs=1 (0.0333) -> human_assisted | errs=2 (0.0667) -> human_led
+6/30 (==0.20) -> demoted emas | 7/30 (0.2333) -> bir pog'ona pastga
+```
+
+Bu §155.6 dagi bilan **bir sinf**: o'lchov to'g'ri ko'rinadi, lekin o'lchanayotgan
+narsa boshqa. Farqi shundaki, u yerda sabab test to'plamida, bu yerda **mening
+probe'imda** edi.
+
+### §156.8. Natija — 38/38 qizil
+
+| Modul | Mutatsiya | Natija |
+|---|---|---|
+| `app/ladder.py` | 19 | 19 RED |
+| `app/approvals.py` | 19 | 19 RED |
+| **Jami** | **38** | **38 RED, 0 GREEN, 0 o'lchanmagan** |
+
+Har ikki modulda `CONTROL GREEN` va `restore verified: YES`; sidecar qolmadi.
+Yangi to'plam `runtime_tests/test_approval_ladder_bounds.py` — **76 sinov**, yashil.
+
+Chegara qadalgan joyning **o'zida** o'lchash uchun ikki sinov ataylab shunday
+tanlandi: `min_tasks=30` da 5% **hech qachon butun songa tushmaydi** (1.5), shuning
+uchun `<=` ni `<` dan ajratib bo'lmasdi. `min_tasks=20` esa tushiradi — bitta xato
+yigirmada **aynan** 5%. `demote_err` uchun ayni shu narsa 6/30 = 0.20 bilan
+bajariladi.
+
+### §156.9. Halol cheklov: **mustaqil iste'molchi yo'q**
+
+§155 da o'lchov spetsifikatsiyasi **ikki fayl** edi: `test_app_layer_bounds` (qadam)
+va `test_identity_store` (iste'molchi — haqiqiy sessiya, taklifnoma, parol yaratadi).
+Bu fazada **ikkinchi fayl yo'q**: `grep` boshqa iste'molchini topmaydi.
+
+Shuning uchun bu yerda qadamlarning kuchi **boshqacha**, va uni yozib qo'yish kerak:
+ular **xatti-harakat** bilan qadalgan — haqiqiy SQLite orqali haqiqiy store'ni
+yurgizadi va haqiqiy qatorni qaytarib o'qiydi — lekin **mustaqil chaqiruvchi**
+kengaytirilgan chegarani sezmaydi. Bu §155 dan **kuchsizroq**, va yashirmasdan
+shunday yozildi.
+### §156.10. `verify_offline.py` o'lchagan narsani aytmaydi: **164 xato, 12 emas**
+
+Gate Python ishlarini `sys.executable` bilan yurgizadi — ya'ni uni **kim ishga
+tushirgan** bo'lsa, o'sha interpreter bilan. Bu ataylab: muhit ham o'lchanayotgan
+narsaning bir qismi. Lekin shu sababli **noto'g'ri ishga tushirish haqiqiy
+nuqsondan farq qilmaydi**.
+
+Men gate'ni boshqariladigan venv o'rniga yalang'och `python` (3.13.12, site-packages
+yo'q) bilan yurgizdim:
+
+| | To'g'ri venv | Yalang'och `python` |
+|---|---|---|
+| `Ran` | **2905** | 2905 |
+| Signature | `failures=1, errors=12, skipped=1` | **`failures=2, errors=164, skipped=1`** |
+| `python_runtime` | `FAIL` | `FAIL` |
+| Chiqish kodi | `1` | `1` |
+
+Ikkisi ham bir xil satr bosadi, ikkisi ham `1` bilan chiqadi. `summary.json` ularni
+**ajratmaydi**.
+
+164 xatoning sababi bitta: `ModuleNotFoundError: No module named 'fastapi'` —
+`fastapi` import qiladigan **har bir modul umuman import bo'lmaydi**:
+
+```
+ERROR: test_app_layer_bounds (unittest.loader._FailedTest.test_app_layer_bounds)
+ERROR: test_approval_ladder_bounds (unittest.loader._FailedTest.test_approval_ladder_bounds)
+ERROR: test_control_plane_bounds (unittest.loader._FailedTest.test_control_plane_bounds)
+ModuleNotFoundError: No module named 'fastapi'
+```
+
+Qolgan ~150 tasi `cryptography` yo'qligidan (`Secret encryption failed`).
+
+**Eng achchiq joyi:** ro'yxat allaqachon bor edi — lekin **eng oxirida**,
+`summary.json` ichida `http_dependencies_missing` deb hisoblanardi: uch daqiqalik
+traceback'dan keyin, o'quvchi bilib izlashi kerak bo'lgan maydonda.
+
+Tuzatish: ishlar boshlanishidan **oldin** rad etish, interpreter nomini aytib, va
+dalil papkasi yaratilishidan **oldin** — shunda rad etish tugallangan yurishga
+o'xshab qoladigan bo'sh papka qoldirmaydi.
+
+**Ikki ro'yxat, va nega torrog'i to'g'ri.** Birinchi urinishda men `psycopg` va
+`redis` ni ham blokladim — va gate **shu repozitoriyning bazaviy o'lchovi olingan
+venv**ni rad etdi:
+
+```
+REFUSED: ...envs\default\Scripts\python.exe cannot import psycopg, redis.
+```
+
+Ular — baza drayverlari: yo'qligi bir nechta kontrakt testini **skip** qiladi,
+to'plamning import bo'lishini to'xtatmaydi. Shuning uchun:
+
+* `REQUIRED_DEPENDENCIES` — import uchun zarur, **bloklaydi**;
+* `HTTP_DEPENDENCIES` — yuqoridagilar + ixtiyoriy drayverlar, `summary.json` da
+  **xabar qilinadi**.
+
+Va rad etish ochib bergan bo'shliq: **`cryptography` ikkala ro'yxatning hech
+birida yo'q edi.** Uning yo'qligi 164 xatoning ko'p qismini berdi, `summary.json`
+esa bu paketni **bir marta ham** nomlamagan bo'lardi. Endi u bloklovchi ro'yxatda.
+
+### §156.11. Bo'sh papka — bu rad etishning isboti **emas**
+
+§156.10 ni tuzatgandan keyin men `docs/verification/` ostidagi bo'sh papkani
+"rad etilgan yurishning qoldig'i" deb o'qib **o'chirdim**. U qoldiq emas edi:
+u **hozir yurgizilgan** gate'ning tirik dalil papkasi edi.
+
+Gate papkani **birinchi** yaratadi, `*.log` fayllarni esa har bir ish
+**tugagach** yozadi. Ya'ni `python_runtime` (uch daqiqa) ishlayotgan vaqtda papka
+**bo'sh bo'lishi kerak**. Yurish birinchi log'ni yozmoqchi bo'lganda
+`FileNotFoundError` bilan o'ldi.
+
+Bu §155.6 bilan **bir sinf**: signal bir narsaning isboti deb o'qildi, aslida
+boshqa narsaning isboti edi. Bo'sh papka "rad etilgan" bilan ham, "ishlayotgan"
+bilan ham mos keladi; ikkisini faqat **jarayonlar jadvali** ajratadi.
+
+Aynan shu xato qilinishiga sabab bo'lgan narsa ham bor edi: oldingi sessiyadan
+`local-20260922T025813390316Z` degan **haqiqiy** bo'sh qoldiq qolgan edi. Endi
+qo'riqchi `mkdir` dan **oldin** ishlagani uchun rad etish umuman papka
+yaratmaydi, va bu noaniqlik yo'q.

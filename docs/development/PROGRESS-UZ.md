@@ -2114,3 +2114,158 @@ FAILED (failures=1, errors=12, skipped=1)
 yozilgan moduldan emas.
 
 ---
+## V061 — Tasdiq navbati va avtonomiya zinapoyasi: **38 mutatsiya, 38 qizil** (§156)
+
+### Nima qilindi
+
+§155 "o'qilmaydigan to'plamdagi qadam — qadam emas" dedi. Bu fazada o'sha gapning
+**manzili** aniqlandi: `LadderStore` va `FileApprovalStore` ning **gate ichida
+birorta ham iste'molchisi yo'q**. Ular faqat `tests/` da (qizil, gatesiz) qadalgan
+edi, va `runtime_tests`/`integration_tests` bo'ylab qidiruv boshqa iste'molchi
+topmaydi.
+
+Nomlangan chegaralar: `ladder.py` da to'rtta siyosat soni + oyna poli + oyna
+ifodasi; `approvals.py` da navbat shifti, sabab shifti, id entropiyasi,
+`DECISIONS`, telefon maskasi. Jami **38 mutatsiya, 38 qizil, 0 GREEN,
+0 o'lchanmagan**; ikki modulda ham `CONTROL GREEN`, `restore verified: YES`.
+Yangi to'plam: `runtime_tests/test_approval_ladder_bounds.py` — **76 sinov**.
+
+### `MIN_WINDOW` — o'lik qoida, va u hech narsa ko'tarmaydi
+
+`min_tasks` default'i ostida **ikkinchi yalang'och `30`** turgan edi: mos kelishi
+shart bo'lgan ikki literal, ularni mos qiladigan hech narsa yo'q.
+
+```
+record:  entry["outcomes"] = (... + [bool(ok)])[-self.window:]
+record:  if total >= self.min_tasks:
+```
+
+Tarix `[-window:]` gacha qisqaradi, ko'tarilish `total >= min_tasks` talab qiladi.
+Ya'ni `window < min_tasks` bo'lsa `total` bu songa **hech qachon yetmaydi** — agent
+hech qachon ko'tarilmaydi. Bu o'lik qoida, va u **hech qanday istisno
+ko'tarmaydi**. `max(MIN_WINDOW, min_tasks)` savolni olib tashladi; o'lchov poli
+ikki tomonida ham o'tkazildi: `{1,5,29} → 30`, `{31,100} → 31,100`.
+
+### Siyosat uchligi konstruktor default'i edi
+
+`min_tasks`, `max_err`, `demote_err` — "agent qachon odamsiz ishlashni boshlaydi"
+degan savolning javobi — konstruktor default'i edi. Ya'ni
+`LadderStore(min_tasks=1)` bitta muvaffaqiyatli vazifadan keyin ko'tarardi va
+**birorta testning rangi o'zgarmasdi**; yagona signal agentlarning tezroq avtonom
+bo'lib qolgani. `auto_cap` default'i ham shu yerda: uni `False` qilish agentga o'z
+write-harakatlarini o'zi tasdiqlash imkonini beradi (audit S29).
+
+### `DECISIONS` — uchinchi nusxa ortiqcha edi
+
+Qaror lug'ati ikki joyda yozilgan edi (store `ValueError`, marshrut `422`), va
+uchinchi nusxa — `"approved" if decision == "approved" else "rejected"` — yuqoridagi
+qo'riqchidan keyin shunchaki `decision`. Uchta yozuv o'rniga bitta manba qoldi.
+
+### Telefon maskasi ikki tomondan ham sizadi
+
+| Tana belgilari | Natija |
+|---|---|
+| 8 | **maskalanmagan** |
+| 9–16 | `+998***` |
+| 17 | `+998***6` — **dumi qolgan** |
+
+Ikkisi ham testda **sizib chiqish sifatida** yozildi, tuzatish sifatida emas: ular
+allaqachon shu holatda edi, va chegara endi nomlangan.
+
+### O'lchov xatosi — `storage.reset()` faylni **o'chirmaydi**
+
+Modulning dastlabki probe'i bir xil `APP_DB` da o'nlab ssenariy yurgizib,
+**oldingi ssenariyning qoldig'ini siyosat deb** o'qidi (`errs=1` "ko'taradi",
+29 muvaffaqiyatdan keyin `human_assisted` — holbuki 29 < 30). Sabab: `reset()`
+faqat ulanishni yopadi, faylni qoldiradi. Har bir testga alohida `APP_DB`
+berilgach raqamlar izchil bo'ldi:
+
+```
+29 -> human_led | 30 -> human_assisted
+errs=1 (0.0333) -> human_assisted | errs=2 (0.0667) -> human_led
+6/30 (==0.20) -> tushmadi | 7/30 (0.2333) -> bir pog'ona pastga
+```
+
+Bu §155.6 bilan **bir sinf**: o'lchov to'g'ri ko'rinadi, lekin o'lchanayotgan narsa
+boshqa. Farqi shundaki, u yerda sabab test to'plamida, bu yerda **probe'ning
+o'zida** edi.
+
+### Qadamni aynan chegarada o'lchash
+
+`min_tasks=30` da 5% **hech qachon butun songa tushmaydi** (1.5), shuning uchun
+`<=` ni `<` dan ajratib bo'lmasdi. `min_tasks=20` tushiradi — bitta xato yigirmada
+**aynan** 5%. `demote_err` uchun ayni shu 6/30 = 0.20 bilan bajariladi. Ikkisi ham
+mutatsiya matritsasida qizil.
+
+### Halol cheklov: **mustaqil iste'molchi yo'q**
+
+§155 da o'lchov spetsifikatsiyasi ikki fayl edi — qadam
+(`test_app_layer_bounds`) va iste'molchi (`test_identity_store`). Bu fazada
+ikkinchisi **yo'q**: qadamlar xatti-harakat bilan qadalgan (haqiqiy SQLite orqali
+haqiqiy store), lekin **mustaqil chaqiruvchi** kengaytirilgan chegarani sezmaydi.
+Bu §155 dan kuchsizroq, va yashirmasdan shunday yozildi.
+## V062 — Gate o'lchagan narsani aytmaydi: **164 xato, 12 emas** (§156 davomi)
+
+### Nima bo'ldi
+
+`verify_offline.py` Python ishlarini `sys.executable` bilan yurgizadi — uni kim
+ishga tushirgan bo'lsa, o'sha interpreter bilan. Bu ataylab (muhit ham
+o'lchanayotgan narsaning bir qismi), lekin natijada **noto'g'ri ishga tushirish
+haqiqiy nuqsondan farq qilmaydi**.
+
+Men gate'ni boshqariladigan venv o'rniga yalang'och `python` bilan yurgizdim:
+
+| | To'g'ri venv | Yalang'och `python` |
+|---|---|---|
+| Signature | `failures=1, errors=12, skipped=1` | **`failures=2, errors=164, skipped=1`** |
+| `python_runtime` | `FAIL` | `FAIL` |
+| Chiqish kodi | `1` | `1` |
+
+164 xatoning sababi bitta: `ModuleNotFoundError: No module named 'fastapi'`.
+`fastapi` import qiladigan har bir modul **umuman import bo'lmaydi**, shuning uchun
+`test_app_layer_bounds`, `test_control_plane_bounds` va
+`test_approval_ladder_bounds` `unittest.loader._FailedTest` ga aylanadi. Qolgan
+~150 tasi `cryptography` yo'qligidan.
+
+**Ro'yxat allaqachon bor edi** — lekin eng oxirida, `summary.json` ichida
+`http_dependencies_missing` deb: uch daqiqalik traceback'dan keyin, o'quvchi bilib
+izlashi kerak bo'lgan maydonda.
+
+### Tuzatish
+
+Ishlar boshlanishidan **oldin** rad etish — interpreter nomini aytib, va dalil
+papkasi yaratilishidan **oldin**, shunda rad etish tugallangan yurishga o'xshab
+qoladigan bo'sh papka qoldirmaydi:
+
+```
+REFUSED: ...python\versions\3.13.12\python.exe cannot import pytest, fastapi, httpx,
+pydantic, jwt, yaml, cryptography.
+```
+
+**Ikki ro'yxat, va nega torrog'i to'g'ri.** Birinchi urinishda `psycopg` va
+`redis` ham bloklandi — va gate **shu repozitoriyning bazaviy o'lchovi olingan
+venv**ni rad etdi. Ular baza drayverlari: yo'qligi bir nechta kontrakt testini
+skip qiladi, import bo'lishni to'xtatmaydi. Shuning uchun:
+
+* `REQUIRED_DEPENDENCIES` — import uchun zarur, **bloklaydi**;
+* `HTTP_DEPENDENCIES` — yuqoridagilar + ixtiyoriy drayverlar, **xabar qilinadi**.
+
+Va rad etish ochib bergan bo'shliq: **`cryptography` ikkala ro'yxatning hech
+birida yo'q edi** — uning yo'qligi 164 xatoning ko'p qismini berdi, summary esa
+bu paketni bir marta ham nomlamagan bo'lardi. Endi u bloklovchi ro'yxatda.
+
+### Ikkinchi xato — va u §155.6 bilan bir sinf
+
+Tuzatishdan keyin men `docs/verification/` ostidagi **bo'sh** papkani "rad
+etilgan yurishning qoldig'i" deb o'qib o'chirdim. U qoldiq emas edi — u **hozir
+yurgizilgan** gate'ning **tirik** dalil papkasi edi.
+
+Gate papkani birinchi yaratadi, `*.log` larni esa har bir ish **tugagach** yozadi;
+ya'ni `python_runtime` (uch daqiqa) ishlayotganda papka **bo'sh bo'lishi kerak**.
+Yurish birinchi log'ni yozmoqchi bo'lganda `FileNotFoundError` bilan o'ldi.
+
+Bo'sh papka "rad etilgan" bilan ham, "ishlayotgan" bilan ham mos keladi; ikkisini
+faqat **jarayonlar jadvali** ajratadi. Xatoni qilinishiga sabab bo'lgan narsa ham
+bor edi: oldingi sessiyadan haqiqiy bo'sh qoldiq qolgan edi. Endi qo'riqchi
+`mkdir` dan oldin ishlagani uchun rad etish umuman papka yaratmaydi va bu
+noaniqlik yo'q.
