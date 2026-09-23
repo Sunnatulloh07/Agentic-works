@@ -1,10 +1,14 @@
-"""OpenAI-compatible structured planner. Output is untrusted; Engine validates again."""
+"""Structured planner, OpenAI or Anthropic dialect. Output is untrusted; Engine validates again."""
 import json
 import os
 from .tools import post_json, config, secret
 from .usage_budget import metered_completion
-from .model_response import parse_decision
-from .model_transport import headers as model_headers, transport_for
+from .model_response import parse_anthropic_decision, parse_decision
+from .model_transport import (completion_body, completion_url,
+                              headers as model_headers, provider, transport_for)
+
+PLAN_OUTPUT_TOKENS = 2000
+MAX_PLAN_BYTES = 30000
 
 
 class Planner:
@@ -34,11 +38,13 @@ class Planner:
                 'the provided conversation_id. No runner tools may be planned from channel messages. '
                 'If no supported tool can fulfil request, use reports.summary only if genuinely relevant; '
                 'otherwise return an empty steps array, which is safely rejected. JSON schema: '+json.dumps(schema))
-        response=metered_completion(self.engine,tenant,cfg,transport_for(cfg,self.transport),cfg.get('base_url','https://api.openai.com/v1').rstrip('/')+'/chat/completions',{
-            'model':model,'messages':[{'role':'system','content':system},{'role':'user','content':json.dumps(context,ensure_ascii=False)}],
-            'temperature':0,'max_tokens':2000,'response_format':{'type':'json_object'}
-        },model_headers(cfg,secret))
-        plan=parse_decision(response,30000)
+        # The dialect changes the envelope only. Prompt text, bounds and every
+        # re-validation below are identical for both providers.
+        parse=parse_anthropic_decision if provider(cfg)=='anthropic' else parse_decision
+        response=metered_completion(self.engine,tenant,cfg,transport_for(cfg,self.transport),completion_url(cfg),
+            completion_body(cfg,model,system,json.dumps(context,ensure_ascii=False),PLAN_OUTPUT_TOKENS),
+            model_headers(cfg,secret))
+        plan=parse(response,MAX_PLAN_BYTES)
         if not isinstance(plan,dict) or set(plan)!={'agent','steps'}:raise ValueError('Invalid plan object')
         if not isinstance(plan['agent'],str) or plan['agent'] not in {a['id'] for a in agents}:raise ValueError('Unknown agent')
         self.engine._validated(tenant,plan['agent'],plan['steps'])

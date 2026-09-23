@@ -30,7 +30,7 @@ P8d (`whatsapp_window_from_inbound_events`) yuqoridagi 3-topilmani **yopdi**, le
 
 ## Audit, 2026-09-20 — PRD §2.8 ni kodga qarshi tekshirish (P8L)
 
-PRD §2.8 oyna holatini Business Graph'ning `customer` entity'siga `wa_window_until` atributi sifatida qo'shishni so'raydi. Bu **rad etildi**, lekin "qilmadik" va "qila olmadik" hisobotda bir xil ko'rinadi — shuning uchun sabab **o'lchandi** (`scripts/probe_wa_window_graph_attribute.py`, `PROVEN`; hisobot `V05-BLOCKS-MESSAGING-UZ.md`).
+PRD §2.8 oyna holatini Business Graph'ning `customer` entity'siga `wa_window_until` atributi sifatida qo'shishni so'raydi. Bu **rad etildi**, lekin "qilmadik" va "qila olmadik" hisobotda bir xil ko'rinadi — shuning uchun sabab **o'lchandi** (`scripts/probes/probe_wa_window_graph_attribute.py`, `PROVEN`; hisobot `V05-BLOCKS-MESSAGING-UZ.md`).
 
 **Mexanik sabab:** grafda atribut — bu `row.get(field)`, ya'ni **ko'chirilgan katak**, hisoblangan qiymat emas. Shuning uchun `wa_window_until` deklaratsiyasi oynani **inson qo'lda yozadigan** ustunga bog'lardi, va u mijoz yozganda o'zi **yangilanmaydi**. Probe buni ko'rsatdi: 2020-yilda tugagan oyna `complete=true`, `source_errors=[]` bilan qaytadi — graf eski katakni joriydan **ajrata olmaydi**.
 

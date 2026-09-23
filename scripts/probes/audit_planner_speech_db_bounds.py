@@ -72,8 +72,8 @@ a widened bound would actually be felt.
 
 Run from the repository root::
 
-    python scripts/audit_planner_speech_db_bounds.py
-    python scripts/audit_planner_speech_db_bounds.py --check
+    python scripts/probes/audit_planner_speech_db_bounds.py
+    python scripts/probes/audit_planner_speech_db_bounds.py --check
 """
 import os
 import sys

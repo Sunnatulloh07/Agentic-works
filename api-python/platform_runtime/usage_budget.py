@@ -202,6 +202,37 @@ def token_cost(input_tokens, output_tokens, pricing):
     return amount((input_tokens * input_rate + output_tokens * output_rate + 999999) // 1000000)
 
 
+def provider_tokens(usage, name):
+    """One provider receipt -> (prompt_tokens, completion_tokens).
+
+    OpenAI reports two numbers. Anthropic reports input in THREE buckets --
+    ``input_tokens`` plus ``cache_creation_input_tokens`` and
+    ``cache_read_input_tokens`` (skill, python/claude-api/README.md ->
+    Verifying Cache Hits) -- and output as ``output_tokens``
+    (curl/examples.md -> Parsing the response).
+
+    All three input buckets are charged here at the full input rate. That is a
+    deliberate upper bound, not the provider's arithmetic: a cache READ bills
+    at roughly a tenth of an uncached input token and a cache WRITE at about
+    1.25x, so this ledger OVERSTATES a cache-heavy call. This is a local
+    spending guard, so erring towards holding money the tenant may not owe is
+    the safe direction; an owner reconciles against the real invoice.
+
+    Missing or non-integer counts raise, which keeps the reservation.
+    """
+    if name == 'anthropic':
+        if not {'input_tokens', 'output_tokens'}.issubset(usage):
+            raise ValueError('Model usage receipt missing')
+        counts = [usage['input_tokens'], usage.get('cache_creation_input_tokens', 0),
+                  usage.get('cache_read_input_tokens', 0), usage['output_tokens']]
+        for n in counts:
+            if type(n) is not int: raise ValueError('Invalid provider token usage')
+        return counts[0] + counts[1] + counts[2], counts[3]
+    if not {'prompt_tokens', 'completion_tokens'}.issubset(usage):
+        raise ValueError('Model usage receipt missing')
+    return usage['prompt_tokens'], usage['completion_tokens']
+
+
 def metered_completion(engine, tenant, cfg, transport, url, body, headers, request_key=None):
     """Optional pricing configuration enables mandatory ledger reservation.
 
@@ -209,8 +240,9 @@ def metered_completion(engine, tenant, cfg, transport, url, body, headers, reque
     Model JSON validity is separate from whether the provider incurred a charge.
     """
     from .engine import encode
-    from .model_transport import validate_url
+    from .model_transport import provider, validate_url
     validate_url(cfg, url)  # Configuration errors must not consume a reservation.
+    name = provider(cfg)    # An unknown dialect must not reserve either.
     if 'usage_budget_required' in cfg and type(cfg['usage_budget_required']) is not bool:
         raise ValueError('usage_budget_required must be boolean')
     pricing = cfg.get('usage_budget')
@@ -230,9 +262,9 @@ def metered_completion(engine, tenant, cfg, transport, url, body, headers, reque
     try:
         response = transport(url, body, headers)
         usage = response.get('usage') if isinstance(response, dict) else None
-        if not isinstance(usage, dict) or not {'prompt_tokens', 'completion_tokens'}.issubset(usage):
+        if not isinstance(usage, dict):
             raise ValueError('Model usage receipt missing')
-        actual = token_cost(usage['prompt_tokens'], usage['completion_tokens'], pricing)
+        actual = token_cost(*provider_tokens(usage, name), pricing)
     except Exception:
         budget.uncertain(tenant, rid)
         raise RuntimeError('Metered model call failed or usage unavailable; reconciliation required') from None

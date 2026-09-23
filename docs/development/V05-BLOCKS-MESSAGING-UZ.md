@@ -83,7 +83,7 @@ qilinadi. `_parse_timestamp(ISO_Z) == _parse_timestamp(ISO_OFFSET)` testi qulfla
 
 ### 3. O‘lchov: probe, e’lon emas
 
-`scripts/probe_whatsapp_window.py` haqiqiy `send` ni sanovchi transportga qarshi
+`scripts/probes/probe_whatsapp_window.py` haqiqiy `send` ni sanovchi transportga qarshi
 yurgizadi. Natija (haqiqiy chiqish):
 
 ```
@@ -197,7 +197,7 @@ Guruhlar:
 - `scripts/check_whatsapp_example.py` — namunani modulning **o‘z** validatoridan
   o‘tkazadi; toifasiz shablon, sunset API, naive vaqt tamg‘asi va schema
   chegaralarini **o‘lchaydi**.
-- `scripts/probe_whatsapp_window.py` — §3 dagi isbot.
+- `scripts/probes/probe_whatsapp_window.py` — §3 dagi isbot.
 - `config/agent-capabilities.example.yaml` — `sales.whatsapp` (`human_assisted`,
   `allowed_recipients`) va `sales.support_view` (faqat o‘qish) qo‘shildi.
   Tekshiruv: 13 agent, 32 tool havolasi, 0 noma’lum.
@@ -279,7 +279,7 @@ uchun u uchta mustaqil yo‘nalishdan **sinovdan o‘tkaziladi**:
    tekshiriladi. `pay_invoice` qo‘shgan kontribyutor shu yerda yiqiladi — bu
    ataylab: kafolat faylni o‘qimagan odamdan ham omon qolishi kerak.
 
-2. **Registry orqali** (`scripts/probe_document_no_payment.py`): beshta tool
+2. **Registry orqali** (`scripts/probes/probe_document_no_payment.py`): beshta tool
    **uchta ladder**da (`human_led`, `human_assisted`, **`autonomous`**), haqiqiy
    `Engine` + haqiqiy SQLite, tarmoq o‘rnida **hisoblagich** bilan. Natija:
 
@@ -541,7 +541,7 @@ Guruhlar:
   o‘tkazadi; to‘lov shaklidagi kalit yo‘qligini, noma’lum kalit rad etilishini,
   manfiy tolerantlik rad etilishini, butun minor units + float rad etilishini,
   satr yig‘indisi mos kelmasligini **o‘lchaydi**.
-- `scripts/probe_document_no_payment.py` — §2 dagi isbot (4 bo‘lim).
+- `scripts/probes/probe_document_no_payment.py` — §2 dagi isbot (4 bo‘lim).
 - `config/agent-capabilities.example.yaml` — `finance.ap_clerk` (2 write + 3 read,
   `human_assisted`) va `finance.ap_reviewer` (faqat o‘qish) qo‘shildi.
   Tekshiruv: **15 agent, 37 tool havolasi, 0 noma’lum**.
@@ -903,7 +903,7 @@ baseline** (`LOCAL-VERIFICATION-UZ.md` ga qarang). Yangi blok baseline’ga
   app secret va verify token **farqli** ekanini, o‘rnatilmagan o‘zgaruvchi
   **rad** etilishini, buzuq havola **rad** etilishini, va token app secret ga
   **tushmasligini** o‘lchaydi.
-- `scripts/probe_whatsapp_signature.py` — 5 bo‘lim, `PROVEN` chiqaradi;
+- `scripts/probes/probe_whatsapp_signature.py` — 5 bo‘lim, `PROVEN` chiqaradi;
   nima **isbotlanmaganini** ham ochiq yozadi (2.1).
 - `config/agent-capabilities.example.yaml` — o‘zgarishsiz (kiruvchi oqim tool
   emas, shuning uchun agent e’lon qilinmadi — ataylab).
@@ -1074,7 +1074,7 @@ Yangi testlar:
 
 ### 5. Probe
 
-`scripts/probe_whatsapp_window_sources.py` — 4 bo‘lim, `PROVEN` chiqaradi:
+`scripts/probes/probe_whatsapp_window_sources.py` — 4 bo‘lim, `PROVEN` chiqaradi:
 
 1. **Faqat tasdiqlangan xabar oyna ochadi** — soxta imzo bilan 0 ta oyna.
 2. **Eskirgan jadval yopiq oynani qayta ochmaydi** — *yangi* jadval qiymati

@@ -41,7 +41,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / 'api-python'))
+sys.path.insert(0, str(HERE.parents[1] / 'api-python'))
 
 from platform_runtime.engine import Engine, Forbidden  # noqa: E402
 from platform_runtime.oee import andon, oee_config, report  # noqa: E402

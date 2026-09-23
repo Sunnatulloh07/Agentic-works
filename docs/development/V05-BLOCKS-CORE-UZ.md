@@ -242,7 +242,7 @@ for entity_id in ids:
 `resolve()` esa ichida **`preflight()` + manbani to‘liq o‘qishni** qaytadan
 bajaradi. Ya’ni o‘qish **id soniga chiziqli** o‘sardi.
 
-**O‘lchandi** — `scripts/probe_graph_amplification.py`, haqiqiy `Engine` va
+**O‘lchandi** — `scripts/probes/probe_graph_amplification.py`, haqiqiy `Engine` va
 haqiqiy test harness (`test_business_graph.RecordingTransport`) ustida:
 
 | Chaqiruv | Id | Provider GET |
@@ -360,7 +360,7 @@ oyna va limit chegarasi, truncation, xarajat atributsiyasi halolligi,
 in-flight/spent ajratmasi, `failure_rate`, `not_recorded`, kill switch,
 credential sizib chiqmasligi.
 
-`scripts/probe_graph_amplification.py` — N+1 ni **o‘lchaydigan** diagnostika
+`scripts/probes/probe_graph_amplification.py` — N+1 ni **o‘lchaydigan** diagnostika
 skripti (tuzatishdan keyin ham regressiyani tutish uchun qoldi).
 
 `config/agent-capabilities.example.yaml` — 5 agent, **noma’lum tool yo‘q**.
@@ -847,7 +847,7 @@ Modul docstring’ida shunday yozilgan:
 > *CRM o‘qiy olmaydigan supervisor, CRM o‘qiy oladigan agentga yo‘naltirib, o‘zi
 > o‘sha ma’lumotni qo‘lga kiritolmaydi.*
 
-Bu **docstring dalil emas**, shuning uchun `scripts/probe_supervisor_authority.py`
+Bu **docstring dalil emas**, shuning uchun `scripts/probes/probe_supervisor_authority.py`
 buni o‘lchaydi. Probe eng keskin holatni yasaydi: hech qanday ma’lumot tool’i
 tutmagan supervisor, `connectors.read` tutgan bo‘lim agentiga yo‘naltiradi.
 
@@ -978,7 +978,7 @@ Eng muhim to‘rtta test:
 | `app/worker.py` | **Tick qo‘shilmadi** — ataylab: yo‘naltirish jadval emas, on-demand amal |
 | `config/supervisor.example.json` | **Yangi**: section xaritasi misoli + chegara izohlari |
 | `config/agent-capabilities.example.yaml` | `mgmt.router` misoli + UPA izohi |
-| `scripts/probe_supervisor_authority.py` | **Yangi**: vakolat meros qilinmasligini **o‘lchaydi** |
+| `scripts/probes/probe_supervisor_authority.py` | **Yangi**: vakolat meros qilinmasligini **o‘lchaydi** |
 
 `PUT .../{section}` **owner-only**, chunki u qaysi agent rahbarga javob berishini
 hal qiladi — bu **marshrut vakolati** o‘zgarishi, shaxsiy sozlama emas.
@@ -1354,7 +1354,7 @@ Darvoza **har qanday provayder I/O sidan oldin** ishlaydi — ya’ni noto‘g�
 
 ### 3. Asosiy xavfsizlik xossasi — da’vo emas, **o‘lchov**
 
-`scripts/probe_vision_biometric_gate.py` buni o‘lchaydi: bir xil chaqiruv uch
+`scripts/probes/probe_vision_biometric_gate.py` buni o‘lchaydi: bir xil chaqiruv uch
 `ladder` darajasida yurgiziladi va har biri **nechta provayder so‘rovi**
 yaratgani sanaladi. Muhim raqam — birinchi ikkitasining **rad etilishi** emas,
 **nol GET** bilan rad etilishi: ma’lumotni o‘qib bo‘lgach rad etadigan darvoza

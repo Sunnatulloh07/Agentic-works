@@ -27,7 +27,7 @@ yo'q, shuning uchun `production_release` **NO_GO** bo'lib qoladi.
 `erp.posting_status` (read). `build_registry()` **69 → 72**,
 `known_tool_names()` **70 → 73**.
 **Yangi test:** `runtime_tests/test_erp.py`, **54** test.
-**Yangi probe:** `scripts/probe_erp_posting_boundary.py` — 5 bo'lim, **PROVEN**.
+**Yangi probe:** `scripts/probes/probe_erp_posting_boundary.py` — 5 bo'lim, **PROVEN**.
 
 ---
 
@@ -251,7 +251,7 @@ acceptance yo'q, shuning uchun `production_release` **NO_GO** bo'lib qoladi.
 **Yangi tool:** 2 ta, **ikkalasi ham read** — `escalation.preview`,
 `escalation.schedules`. `build_registry()` **72 → 74**.
 **Yangi test:** `runtime_tests/test_escalation.py`, **45** test.
-**Yangi probe:** `scripts/probe_escalation_boundary.py` — 6 bo'lim, **PROVEN**.
+**Yangi probe:** `scripts/probes/probe_escalation_boundary.py` — 6 bo'lim, **PROVEN**.
 
 ---
 
@@ -438,7 +438,7 @@ acceptance yo'q, shuning uchun `production_release` **NO_GO** bo'lib qoladi.
 **Yangi tool:** 3 ta, **uchalasi ham read** — `manufacturing.bom`,
 `manufacturing.cycle`, `manufacturing.yield`. `build_registry()` **74 → 77**.
 **Yangi test:** `runtime_tests/test_manufacturing.py`, **64** test.
-**Yangi probe:** `scripts/probe_manufacturing_boundary.py` — 6 bo'lim,
+**Yangi probe:** `scripts/probes/probe_manufacturing_boundary.py` — 6 bo'lim,
 **22 o'lchangan xossa**, hammasi PASS.
 
 ---
@@ -686,7 +686,7 @@ acceptance yo'q, shuning uchun `production_release` **NO_GO** bo'lib qoladi.
 **Yangi tool:** 2 ta, **ikkalasi ham read** — `oee.report`, `oee.andon`.
 `build_registry()` **77 → 79**.
 **Yangi test:** `runtime_tests/test_oee.py`, **63** test.
-**Yangi probe:** `scripts/probe_oee_boundary.py` — 6 bo'lim,
+**Yangi probe:** `scripts/probes/probe_oee_boundary.py` — 6 bo'lim,
 **78 o'lchangan xossa**, hammasi PASS.
 
 ---
@@ -982,7 +982,7 @@ acceptance yo'q, `production_release` **NO_GO** bo'lib qoladi.
 `telephony.call_events`, `telephony.summary`. `build_registry()` **79 → 82**.
 **Yangi test:** `runtime_tests/test_telephony.py`, **57** test (54 + audit
 tuzatishlarining 3 regressiya testi).
-**Yangi probe:** `scripts/probe_telephony_consent.py` — 7 bo'lim,
+**Yangi probe:** `scripts/probes/probe_telephony_consent.py` — 7 bo'lim,
 **69 o'lchangan xossa**, hammasi PASS.
 **Yangi config:** `config/telephony.example.json` + `scripts/check_telephony_example.py`.
 
@@ -1107,7 +1107,7 @@ ro'yxatni noqonuniy qilishning usuli.
   platforma qo'ng'iroq nima uchun uzun yoki qisqa bo'lganini **bilmaydi**.
 * **Yozish yo'li yo'q.** Uchala tool ham `read` ro'yxatida.
 
-### 6. O'lchangan xossalar (`scripts/probe_telephony_consent.py`, 7 bo'lim)
+### 6. O'lchangan xossalar (`scripts/probes/probe_telephony_consent.py`, 7 bo'lim)
 
 | Bo'lim | Nima o'lchanadi |
 |---|---|
@@ -1203,7 +1203,7 @@ acceptance yo'q, `production_release` **NO_GO** bo'lib qoladi.
 `build_registry()` **82 → 84**.
 **Yangi test:** `TelephonyStageBTests` — **24** yangi test metodi (ota-sinfdan
 57 tasini meros oladi; `test_telephony.py` jami **137** test).
-**Probe:** `scripts/probe_telephony_consent.py` 8-bo'lim — **29** yangi o'lchangan
+**Probe:** `scripts/probes/probe_telephony_consent.py` 8-bo'lim — **29** yangi o'lchangan
 xossa (jami **69 → 98**), hammasi PASS.
 **Config:** `config/telephony.example.json` ga `throughput` + `retention_days`;
 `check_telephony_example.py` **12 → 22** PASS.
@@ -1371,7 +1371,7 @@ acceptance yo'q, `production_release` **NO_GO** bo'lib qoladi.
 **Modul o'zgarishi:** `escalation.py` — `source` tanlovchi (`workforce` |
 `telephony`), `SOURCE_TOOLS`, `_telephony_items`, digestga ikki yangi fakt.
 **Yangi test:** `test_escalation.py` **45 → 106** (61 meros + 16 yangi metod).
-**Probe:** `scripts/probe_escalation_boundary.py` — **21 → 36** o'lchangan xossa
+**Probe:** `scripts/probes/probe_escalation_boundary.py` — **21 → 36** o'lchangan xossa
 (9-bo'limga chiqdi), hammasi PASS.
 **Config:** `config/escalation.example.yaml` + `check_escalation_example.py`
 ikkala manbani o'rgatadi.
@@ -1577,7 +1577,7 @@ tanlashga ruxsat bergan bo'lardi.
 
 ### 3. Yetti chegara (hammasi **o'lchangan**, tasvirlanmagan)
 
-`scripts/probe_inventory_boundary.py` — **68 xossa, 6 bo'lim, 68 pass, 0 fail**.
+`scripts/probes/probe_inventory_boundary.py` — **68 xossa, 6 bo'lim, 68 pass, 0 fail**.
 
 1. **Narx manbasi bilan keladi.** Manbasiz raqam — sotuvchi himoya qila olmaydigan raqam.
 2. **Ziddiyat ko'rsatiladi.** `report` (default) da **hech narsa tanlanmaydi**; `primary_wins`

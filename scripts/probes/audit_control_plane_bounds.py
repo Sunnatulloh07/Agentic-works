@@ -42,8 +42,8 @@ seventy-minute one.
 
 Run from the repository root::
 
-    python scripts/audit_control_plane_bounds.py
-    python scripts/audit_control_plane_bounds.py --check
+    python scripts/probes/audit_control_plane_bounds.py
+    python scripts/probes/audit_control_plane_bounds.py --check
 """
 import os
 import sys

@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from .engine import encode, Conflict
 
 # The bounds this module enforces, named. A scan selected this module because it
@@ -30,6 +31,12 @@ MEMORY_SEARCH_LIMIT = 10
 RECORDS_LIST_LIMIT = 50
 CREDENTIAL_NAME = re.compile(r'[A-Z][A-Z0-9_]*')
 RISK_LEVELS = frozenset({'read', 'write', 'destructive', 'physical'})
+# A tenant's own configuration lives in its pack directory. The charset and the
+# default directory are app/packs.py's, restated rather than imported: the
+# runtime may not depend on the API layer, so the duplication is the boundary.
+TENANT_NAME = re.compile(r'[A-Za-z0-9_-]+')
+PACK_INTEGRATIONS_FILE = 'integrations.yaml'
+DEFAULT_PACKS_DIR = Path(__file__).resolve().parents[2] / 'packs'
 
 
 def validate_schema(value,schema,depth=0):
@@ -141,8 +148,54 @@ def post_json(url,body,headers=None,timeout=PROVIDER_TIMEOUT_SECONDS):
         return json.loads(raw)
 
 
+def pack_integrations_path(tenant):
+    """<PACKS_DIR>/<tenant>/integrations.yaml -- the tenant's OWN config file.
+
+    The name is matched against the pack charset BEFORE anything is joined, so
+    '..' or a separator never reaches the filesystem, and the resolved path is
+    then checked against the root the way app.packs.load_pack checks a pack, in
+    case PACKS_DIR or a pack directory is a symlink pointing out of bounds.
+    PACKS_DIR is read per call and never cached: it is environment, and
+    environment changes between calls.
+    """
+    if not isinstance(tenant,str) or not TENANT_NAME.fullmatch(tenant):raise RuntimeError('Invalid tenant name')
+    root=Path(os.environ.get('PACKS_DIR') or DEFAULT_PACKS_DIR).resolve()
+    target=(root/tenant/PACK_INTEGRATIONS_FILE).resolve()
+    if root not in target.parents:raise RuntimeError('Tenant configuration outside packs directory')
+    return target
+
+
+def read_pack_integrations(path):
+    """Parse a pack-local integrations file, refusing every failure out loud.
+
+    A file that EXISTS is authoritative: it is never skipped in favour of the
+    operator JSON, because a silent fallback would let one typo in a tenant's
+    own file be ignored while the tenant kept running on operator config. PyYAML
+    is imported here rather than at module scope -- platform_runtime must stay
+    importable, and its offline suite runnable, without it -- but a missing
+    parser is a refusal, not a reason to serve the other source.
+    """
+    try:
+        import yaml
+    except ImportError:raise RuntimeError(f'Integration configuration unreadable: PyYAML required for {path}')
+    try:
+        data=yaml.safe_load(path.read_text(encoding='utf-8'))
+    except (OSError,UnicodeError,yaml.YAMLError) as exc:
+        raise RuntimeError(f'Integration configuration unreadable: {path} ({exc})')
+    if not isinstance(data,dict):raise RuntimeError(f'Integration configuration must be a mapping: {path}')
+    return data
+
+
 def config(tenant):
     # Credentials are configured per tenant, never sent in pack or API output.
+    # The tenant's own pack directory comes FIRST (tamoyil 1: yangi mijoz =
+    # yangi YAML). Before this, every module resolved tenant configuration
+    # through one operator-side JSON, so most of a non-retail tenant's config
+    # lived outside its pack and onboarding was not YAML work. The JSON is the
+    # unchanged fallback for tenants that have not moved -- same reads, same
+    # messages, so no caller's error path shifted.
+    local=pack_integrations_path(tenant)
+    if local.is_file():return read_pack_integrations(local)
     path=os.environ.get('PLATFORM_INTEGRATIONS_FILE','')
     if not path:raise RuntimeError('Integration configuration missing')
     with open(path,encoding='utf-8') as f:data=json.load(f)

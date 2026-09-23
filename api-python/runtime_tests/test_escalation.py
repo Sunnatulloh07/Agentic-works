@@ -28,12 +28,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from platform_runtime.engine import Engine, Forbidden, NotFound
+from platform_runtime.engine import Engine, Forbidden, NotFound, RateLimited
 from platform_runtime.escalation import (
     LEDGER_FAILED,
     LEDGER_QUEUED,
     LEDGER_SENT,
+    LEDGER_SUBMITTED,
+    LEDGER_UNCERTAIN,
     LIMITS,
+    MAX_DELIVERY_ATTEMPTS,
     EscalationLoop,
 )
 from platform_runtime.tools import Tool, build_registry
@@ -49,8 +52,11 @@ POLICY = {
     'tools': ['sheets.rows', 'workforce.workload', 'telegram.send',
               'escalation.preview', 'escalation.schedules'],
     'allowed_connections': [CONNECTION, 'google'],
+    # An escalation is delivered as an engine task. Unattended delivery needs an
+    # autonomous agent whose recipient the pack allowlists; anything else waits
+    # in the approval queue, which the human_assisted test below asserts.
     'allowed_recipients': [RECIPIENT],
-    'ladder': 'human_assisted',
+    'ladder': 'autonomous',
 }
 
 WORKFORCE = {
@@ -194,13 +200,22 @@ class EscalationTests(unittest.TestCase):
             c.execute('UPDATE p_escalation SET next_due=0 WHERE tenant=?', (TENANT,))
 
     def run_tick(self, rows=None):
-        """A tick with the Sheets hop replaced, so the cycle is deterministic."""
+        """One full cycle with the Sheets hop replaced: submit, dispatch, settle.
+
+        The loop only submits the delivery; the engine performs the send on its
+        own tick and the next loop tick reads the verdict back into the ledger.
+        Returns whether the loop advanced a due schedule, as before.
+        """
         self.transport.payload = self.payload(rows)
         with patch('platform_runtime.sheets.configured_manager') as manager:
             manager.return_value.access.return_value.access_token = 'fake-token'
             with patch('platform_runtime.sheets._http_get',
                        side_effect=lambda url, token: self.transport(url, token)):
-                return self.loop.tick(TENANT)
+                advanced = self.loop.tick(TENANT)
+                while self.engine.tick(TENANT):
+                    pass
+                self.loop.tick(TENANT)
+                return advanced
 
     def call_preview(self, rows=None, **args):
         self.transport.payload = self.payload(rows)
@@ -213,6 +228,17 @@ class EscalationTests(unittest.TestCase):
 
     def ledger(self):
         return self.loop.ledger(TENANT, 'daily')
+
+    def task_of(self, entry):
+        """The engine task a ledger row's run_id names."""
+        with self.engine.read() as c:
+            return c.execute('SELECT * FROM p_tasks WHERE tenant=? AND id=?',
+                             (TENANT, entry['run_id'])).fetchone()
+
+    def audits(self, action):
+        with self.engine.read() as c:
+            return c.execute('SELECT count(*) n FROM p_audit WHERE tenant=? AND action=?',
+                             (TENANT, action)).fetchone()['n']
 
     # ---------------------------------------------------------- registration
 
@@ -423,7 +449,8 @@ class EscalationTests(unittest.TestCase):
         self.run_tick()
         entry = self.ledger()[0]
         self.assertEqual(entry['status'], LEDGER_SENT)
-        self.assertEqual(entry['run_id'], '9001')
+        # run_id is the engine task that carried the send, not a provider id.
+        self.assertEqual('succeeded', self.task_of(entry)['status'])
 
     def test_a_bare_ledger_list_cannot_say_whether_it_is_the_whole_ledger(self):
         """The HTTP route returned `entries` as a bare list, so "how many
@@ -570,22 +597,56 @@ class EscalationTests(unittest.TestCase):
         self.assertGreater(schedule['next_due'], self.clock.now)
 
     def test_a_failed_send_does_not_advance_the_ledger_to_sent(self):
+        """A provider exception on an external write is `uncertain`, not `failed`.
+
+        The engine cannot know whether Telegram delivered before it stopped
+        answering, so the ledger mirrors the engine's verdict rather than assuming
+        the manager was not told.
+        """
         self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
         self.configure()
         self.fail_send = True
         self.due()
         self.assertTrue(self.run_tick())
         self.assertEqual(self.sent, [])
-        self.assertEqual(self.ledger()[0]['status'], LEDGER_FAILED)
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_UNCERTAIN)
+        self.assertEqual('uncertain', self.task_of(self.ledger()[0])['status'])
 
-    def test_a_failed_send_never_duplicates_within_the_cooldown(self):
-        """A stuck send must not become a message storm when the provider recovers."""
+    def test_an_uncertain_send_is_never_repeated_for_the_same_item(self):
+        """A send that may have gone out is terminal; a "just in case" retry is a
+        second message the manager cannot un-read."""
         self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
         self.configure()
         self.fail_send = True
         self.due()
         self.run_tick()
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_UNCERTAIN)
         self.fail_send = False
+        self.clock.advance(86401)
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_UNCERTAIN)
+
+    def test_a_refused_submission_never_duplicates_within_the_cooldown(self):
+        """A submission the ENGINE refuses is `failed`, and retryable on a cooldown.
+
+        A provider exception can no longer produce a `failed` row — the engine
+        answers that with `uncertain` — so the retry path is exercised where it
+        actually happens now: the engine rejecting the submission. `RateLimited`
+        (the queue-full refusal) is raised directly rather than by filling a
+        thousand pending tasks, because the thousand rows would test SQLite, not
+        this loop's handling of the refusal.
+        """
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.configure()
+        self.due()
+        with patch.object(self.engine, 'submit',
+                          side_effect=RateLimited('Task queue full')):
+            self.assertTrue(self.run_tick())
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_FAILED)
+        # Still inside the cooldown: no second attempt.
         self.due()
         self.run_tick()
         self.assertEqual(self.sent, [])
@@ -594,6 +655,54 @@ class EscalationTests(unittest.TestCase):
         self.due()
         self.run_tick()
         self.assertEqual(len(self.sent), 1)
+
+    def test_a_failed_delivery_is_not_retried_past_the_attempt_cap(self):
+        """`failed` is retryable after the cooldown — without a cap, forever.
+
+        The row is written directly as a delivery that has already spent its whole
+        budget, with the cooldown long past, so only the cap can stop the retry.
+        The exhaustion is audited once: a silent cap would leave a work item the
+        manager was never told about and nothing saying why the attempts stopped.
+        """
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.configure()
+        self.due()
+        self.run_tick()
+        self.assertEqual(1, len(self.sent))
+        self.sent.clear()
+        with self.engine.tx() as c:
+            c.execute('''UPDATE p_escalation_ledger
+              SET status=?,attempt=?,last_attempt=0,last_error='' WHERE tenant=?''',
+                      (LEDGER_FAILED, MAX_DELIVERY_ATTEMPTS, TENANT))
+        # A new day, so the delivery key is new too: nothing but the cap is
+        # standing between this row and a second message.
+        self.clock.advance(86400)
+        self.due()
+        self.run_tick()
+        self.assertEqual([], self.sent)
+        self.assertEqual(1, self.audits('escalation.exhausted'))
+        # And the cap is not re-audited on every cycle that meets the same row.
+        self.due()
+        self.run_tick()
+        self.assertEqual([], self.sent)
+        self.assertEqual(1, self.audits('escalation.exhausted'))
+
+    def test_one_attempt_short_of_the_cap_still_delivers(self):
+        """The cap is `attempt >= MAX`, so the last attempt in the budget is used."""
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.configure()
+        self.due()
+        self.run_tick()
+        self.sent.clear()
+        with self.engine.tx() as c:
+            c.execute('''UPDATE p_escalation_ledger
+              SET status=?,attempt=?,last_attempt=0,last_error='' WHERE tenant=?''',
+                      (LEDGER_FAILED, MAX_DELIVERY_ATTEMPTS - 1, TENANT))
+        self.clock.advance(86400)
+        self.due()
+        self.run_tick()
+        self.assertEqual(1, len(self.sent))
+        self.assertEqual(0, self.audits('escalation.exhausted'))
 
     def test_a_read_denied_by_policy_disables_the_schedule_with_a_reason(self):
         """A configuration that can no longer be authorized must not spin forever."""
@@ -640,6 +749,95 @@ class EscalationTests(unittest.TestCase):
         self.assertEqual(stopped['enabled'], 0)
         self.due()
         self.assertFalse(self.run_tick())
+
+    # ------------------------------------------- delivery is an engine task
+
+    def test_delivery_is_an_engine_step_not_a_direct_provider_call(self):
+        """The one property this refactor exists for: no send outside the engine."""
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.configure()
+        self.due()
+        self.run_tick()
+        with self.engine.read() as c:
+            steps = [dict(r) for r in c.execute('''SELECT s.tool,s.status,s.approval_needed,t.channel
+              FROM p_steps s JOIN p_tasks t ON t.id=s.task WHERE s.tenant=?''', (TENANT,))]
+        self.assertEqual(1, len(steps))
+        self.assertEqual('telegram.send', steps[0]['tool'])
+        self.assertEqual('succeeded', steps[0]['status'])
+        self.assertEqual('cron', steps[0]['channel'])
+        self.assertEqual(0, steps[0]['approval_needed'])
+
+    def test_a_human_assisted_agent_waits_for_approval_before_delivery(self):
+        """An escalation is not exempt from the ladder: the engine decides."""
+        self.policy = dict(POLICY, ladder='human_assisted')
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.configure()
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.sent, [])
+        entry = self.ledger()[0]
+        self.assertEqual(entry['status'], LEDGER_SUBMITTED)
+        task = self.task_of(entry)
+        self.assertEqual('waiting_approval', task['status'])
+        # The operator approves the exact message; the engine then delivers it and
+        # the next loop tick settles the ledger.
+        with self.engine.read() as c:
+            step = c.execute('SELECT id FROM p_steps WHERE task=?', (task['id'],)).fetchone()['id']
+        self.engine.approve(TENANT, step, OWNER, 'approved', 'owner')
+        while self.engine.tick(TENANT):
+            pass
+        self.loop.tick(TENANT)
+        self.assertEqual(1, len(self.sent))
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_SENT)
+
+    def test_losing_the_allowlist_after_configure_disables_the_schedule(self):
+        """The recipient is re-checked by the engine at submit, not only at configure."""
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.configure()
+        self.policy = dict(POLICY, allowed_recipients=[])
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_FAILED)
+        self.assertEqual(0, self.loop.schedule(TENANT, 'daily')['enabled'])
+
+    def test_a_crash_between_submit_and_mark_reuses_the_same_task(self):
+        """The task key is one per (schedule, day, batch), so a retry cannot double-send.
+
+        The digest text is not part of the key, and here it genuinely drifts: the
+        stale row disappears from the register between the crash and the retry, so
+        the second submission carries different text under the same key. That is
+        the `Conflict` branch, and it must resolve to the task already submitted
+        rather than to a second message.
+        """
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)],
+                     ['u2', 'Vali', 'Eski', 'ochiq', day(-200)]]
+        self.configure(max_age_days=30)
+        self.due()
+        original_mark = self.loop._mark
+        calls = []
+
+        def crash_once(*args, **kwargs):
+            if kwargs.get('run_id') and not calls:
+                calls.append(1)
+                raise RuntimeError('worker died after submit')
+            return original_mark(*args, **kwargs)
+
+        with patch.object(self.loop, '_mark', side_effect=crash_once):
+            with self.assertRaises(RuntimeError):
+                self.run_tick()
+        # The claimed row is still queued (it was never marked), so the next tick
+        # re-claims the same item and re-submits the same key.
+        self.rows = [['u1', 'Ali', 'Hisobot', 'ochiq', day(-3)]]
+        self.clock.advance(120)
+        self.due()
+        self.run_tick()
+        with self.engine.read() as c:
+            tasks = c.execute("SELECT count(*) n FROM p_tasks WHERE tenant=? AND channel='cron'",
+                              (TENANT,)).fetchone()['n']
+        self.assertEqual(1, tasks)
+        self.assertEqual(1, len(self.sent))
+        self.assertEqual(self.ledger()[0]['status'], LEDGER_SENT)
 
     # ------------------------------------------------------------------ honesty
 
@@ -794,7 +992,11 @@ class EscalationTelephonySourceTests(EscalationTests):
         return matrix(self.TP_HEADER, rows)
 
     def run_tp_tick(self, rows, consent=None):
-        """A tick with both Sheets ranges scripted and the send replaced."""
+        """One full cycle with both Sheets ranges scripted and the send replaced.
+
+        Same shape as the parent's ``run_tick``: the loop submits, the engine
+        dispatches, the next loop tick settles the ledger.
+        """
         self.transport.payload = self.tp_rows(rows)
         consent_payload = matrix(self.TP_CONSENT_HEADER,
                                  self.tp_consent if consent is None else consent)
@@ -808,7 +1010,11 @@ class EscalationTelephonySourceTests(EscalationTests):
         with patch('platform_runtime.sheets.configured_manager') as manager:
             manager.return_value.access.return_value.access_token = 'fake-token'
             with patch('platform_runtime.sheets._http_get', side_effect=route):
-                return self.loop.tick(TENANT)
+                advanced = self.loop.tick(TENANT)
+                while self.engine.tick(TENANT):
+                    pass
+                self.loop.tick(TENANT)
+                return advanced
 
     # ------------------------------------------------------ the source switch
 

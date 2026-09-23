@@ -1,14 +1,14 @@
 """Diagnostic: prove the provider-GET cost of graph.search/graph.conflicts scales
 linearly with the number of entity ids, i.e. the id list is re-read for every id.
 
-Not part of the suite. Run manually: python scripts/probe_graph_amplification.py
+Not part of the suite. Run manually: python scripts/probes/probe_graph_amplification.py
 """
 import os
 import sqlite3
 import sys
 
 # Run from the repository root: the runtime and its tests live under api-python/.
-_API = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api-python')
+_API = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'api-python')
 sys.path.insert(0, _API)
 sys.path.insert(0, os.path.join(_API, 'runtime_tests'))
 

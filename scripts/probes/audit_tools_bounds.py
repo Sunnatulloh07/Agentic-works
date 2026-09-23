@@ -35,7 +35,7 @@ because the test that pins it lives next door -- the instrument, not the code.
 
 Run from the repository root::
 
-    python scripts/audit_tools_bounds.py
+    python scripts/probes/audit_tools_bounds.py
 """
 import os
 import sys

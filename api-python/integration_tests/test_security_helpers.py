@@ -1,7 +1,21 @@
-"""Security regression tests (audit 2026-09-12)."""
+"""Security regression tests (audit 2026-09-12).
+
+Moved here from the retired ``tests/`` suite on 2026-09-22: these two gates test
+live code (``app.packs`` traversal refusal and the ``/auth/token`` admin gate),
+but they need pydantic/FastAPI, so they cannot live in ``runtime_tests/``.
+The ``_isolated_db`` fixture below replaces the retired ``tests/conftest.py``
+``_isolated_stores`` autouse fixture: without it the ``/auth/token`` gate would
+open the developer's real ``data/app.db``.
+"""
 import pytest
 
 from app.packs import PackError, load_pack
+
+
+@pytest.fixture(autouse=True)
+def _isolated_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_DB", str(tmp_path / "app.db"))
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
 
 
 @pytest.mark.parametrize("evil", ["../../etc", "..", "a/b", "/abs", "a..b/../c", ""])

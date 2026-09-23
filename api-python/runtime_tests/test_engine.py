@@ -563,7 +563,10 @@ class EngineTests(unittest.TestCase):
         self.e.accept_event('a','telegram','1',{'text':'x','conversation_id':'123'})
         with self.assertRaises(Forbidden):self.submit([{'tool':'telegram.send','args':{'conversation_id':'attacker','text':'x'}}],channel='telegram')
         tid=self.submit([{'tool':'telegram.send','args':{'conversation_id':'123','text':'x'}}],channel='telegram')
-        self.assertFalse(self.e.tick('a'));self.assertEqual('waiting_approval',self.e.get('a',tid)['status'])
+        # An autonomous agent replying to the verified inbound conversation is
+        # pre-authorised; the destination check above is what keeps it safe.
+        # Full dispatch is covered in test_autonomy_rule with a stubbed provider.
+        self.assertEqual(0,self.e.get('a',tid)['steps'][0]['approval_needed'])
     def test_meta_account_unique_mapping(self):
         from platform_runtime.tools import tenant_for_instagram_account
         from unittest.mock import patch

@@ -7,9 +7,13 @@
 > `retry.py`, DR drill, manifest generator, `integration_tests` tuzatildi.
 > Batafsil: `PROGRESS-UZ.md`.
 >
-> **Yangilandi: 2026-09-22** — chegara auditi §155–§156 (`app/` qatlami, tasdiq
-> navbati va avtonomiya zinapoyasi), `MANIFEST` portativligi, `verify_offline.py`
-> qo'riqchisi. Batafsil: `PROGRESS-UZ.md` V05Z–V062.
+> **Yangilandi: 2026-09-22** — chegara auditi §155–§157 (`app/` qatlami, tasdiq
+> navbati va avtonomiya zinapoyasi, Customer 360), `MANIFEST` portativligi,
+> `verify_offline.py` qo'riqchisi. Batafsil: `PROGRESS-UZ.md` V05Z–V063.
+>
+> **Yangilandi: 2026-09-22 (chuqur ko'rib chiqish)** — **yetib borish (reachability)**
+> o'lchandi, first-run yo'li **o'lik** ekani aniqlandi, `tests/` nafaqaga chiqarish
+> qaroriga o'tdi. Quyidagi §0 va §11 jadvallari shunga ko'ra tuzatildi.
 
 ## 0. Hozirgi holat — bir qarashda
 
@@ -17,18 +21,34 @@
 |---|---|---|
 | Runtime modullari | **43** fayl (retry.py qo'shildi) | `api-python/platform_runtime/` |
 | Registry tool'lari | **88** (known **89**) | `build_registry()` |
+| **Pack'dan yetib boradigan tool'lar** | **12** — 89 dan | yetkazilgan pack'lar: `demo-retail`, `marketing`, `_template` |
+| **Yetib bo'lmaydigan `platform_runtime` LOC** | **81%** | shu uch pack'dan chaqirib bo'lmaydi |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
 | `app/` modullari | **40** fayl | `api-python/app/` |
-| Offline testlar | **3 076** | `Ran 3076 tests` |
+| Offline testlar | **3 148** | `Ran 3148 tests` |
 | Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`) |
 | Windows uchun **bloklangan** sinovlar | **13** (12 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
-| Ultra-audit fazalari | **§125–§156** — 32 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
+| Ultra-audit fazalari | **§125–§157** — 33 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
 | UI gate'lari | typecheck **PASS**, build **PASS** (`next@14.2.35`), `npm audit` **FAIL** | `apps/ui` |
-| `MANIFEST.sha256` | **PASS** — 502 fayl, 0 xato; **va endi toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
+| `MANIFEST.sha256` | **PASS** — 510 fayl, 0 xato; **va endi toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
+| **API bu mashinada ishga tushirilganmi** | **YO'Q** | `.env` yo'q, `config/integrations.json` yo'q, `data/app.db` da faqat migratsiya qatori |
+| **README first-run yo'li** | **O'LIK edi, tuzatildi** | `setup_local.py` → `owner_login.py` = 410 + 403; yagona yo'l `provision_identity.py` |
 | `production_release` | **NO_GO** | `BACKLOG.json` |
 
 **Muhim:** `production_release: NO_GO` — bu **ataylab**. Tizim hozir
 "mijozga topshiriladigan mahsulot" emas, "tekshirilgan platforma yadrosi".
+
+**Ikkinchi muhim gap — yetib borish.** Registry'dagi 89 tool'dan **12 tasigina**
+yetkazib berilayotgan pack'lardan chaqirilishi mumkin. Quyidagi modullarni
+ishlatadigan **birorta pack yo'q**: `erp`, `documents`, `inventory`,
+`business_graph`, `whatsapp`, `whatsapp_inbound`, `telephony`, `assets`, `vision`,
+`manufacturing`, `oee`, `workforce`, `supervisor`, `reengagement`, `escalation`,
+`briefing`, `oversight`. WhatsApp inbound uchun **umuman HTTP route yo'q**.
+
+Bular **muzlatilgan (frozen) preview modullar** — mahsulot funksiyasi emas. Ular test
+va chegara auditi bilan qoplangan, lekin hech bir mijoz konfiguratsiyasi ularga yetib
+bormaydi. Bu hujjatda ular "qurilgan" deb sanaladi, va bu to'g'ri — lekin "qurilgan"
+"yetkazilgan" degani emas.
 
 
 ---
@@ -43,7 +63,8 @@
 - `cells.py` — ASCII-cell invarianti (I faza tuzatishi)
 - `agent_loop.py`, `agent_planner.py` — agent bajarish sikli
 
-**Biznes modullari (hammasi test + probe bilan):**
+**Biznes modullari (hammasi test + probe bilan; hammasi ham `FROZEN_PREVIEW` — §0 ga
+qarang: birorta yetkazilgan pack ularni chaqirmaydi):**
 - `documents.py` — invoice intake, match, fraud signals, posting plan
 - `erp.py` — posting prepare/status/submit
 - `inventory.py` — MoySklad narx/qoldiq/marja
@@ -84,7 +105,12 @@
 - **Observability** — metrika, trace eksport, alerting
 - **DR (disaster recovery)** — backup/restore mashqi yo'q
 - **Rate-limit retry** — provayder 429/5xx uchun backoff yo'q
-- **Real provayder acceptance** — MoySklad, 1C, Meta, Google: `live_verified: False`
+- **Real provayder acceptance** — MoySklad, 1C, Meta, Google: `live_verified: False`.
+  Bu **hammasiga** taalluqli: API bu mashinada hech qachon ishga tushirilmagan
+  (`.env` yo'q, `config/integrations.json` yo'q), shuning uchun **hech bir**
+  integratsiyani `live_verified` deb yozib bo'lmaydi — eng yuqorisi
+  `LOCAL_CONTRACT_TESTED`
+- **WhatsApp inbound HTTP route** — modul bor, **route yo'q**
 
 ---
 
@@ -94,7 +120,15 @@
 
 - **Agent loop**: `agent_loop.py` + `agent_planner.py` — reja → qadam → approval → bajarish
 - **Ladder tizimi**: `autonomous` / `human_assisted` / `human_led`
-- **Approval gate**: har bir `write` tool engine tomonidan ushlanadi
+- **Approval gate**: har bir `write` tool engine tomonidan ushlanadi. **2026-09-22 dan
+  bitta istisno:** `autonomous` agent outbound write'ni per-message tasdiqsiz yuborishi
+  mumkin, faqat qabul qiluvchi pack'ning `allowed_recipients` ro'yxatida bo'lsa yoki task
+  javob berayotgan tasdiqlangan inbound suhbat bo'lsa (`engine.py::_preauthorized`).
+  `destructive` va `physical` **har doim** kutadi; `human_led` / `human_assisted`
+  o'zgarmadi
+- **Brifing va eskalatsiya** endi o'z transportiga ega emas: ikkalasi ham
+  `engine.submit` orqali oddiy engine task'i sifatida yuboriladi va approval gate'ini
+  **chetlab o'tmaydi**; jurnaldagi `submitted` qatori engine verdikti bilan yopiladi
 - **Pack tizimi**: `app/packs.py` — YAML'dan agent yuklash, load-time tool tekshiruvi
 - **Supervisor router**: `supervisor.route` — bo'limga yo'naltirish
 - **Usage budget**: `usage_budget.py` — LLM xarajat byudjeti + reservation
@@ -269,6 +303,7 @@ o'lchovlar hujjatda; eng ko'p uchraydigan naqshlar quyida.
 | §154 | Windows uchun bloklangan yuza | yozuv **11** der edi, o'lchandi — **12** |
 | §155 | `app/` qatlami, o'qilmaydigan to'plam, va **ikki gate** | `tests/` da qadalgan chegara qadalgan emas (uni **hech bir gate yurgizmaydi**); §154 ning o'z yozuvi **13** va **6** bo'lishi kerak edi; `MANIFEST` **toza eksportda 403/498 mismatch** — gate o'zi aytgan joyda qizil edi; `verify_offline.py` **tugata olmaydi** edi, va men unga socket soldim |
 | §156 | tasdiq navbati va avtonomiya zinapoyasi | `LadderStore` va `FileApprovalStore` ning **gate ichida birorta iste'molchisi yo'q** — yagona qoplama gatesiz, 33 qizil `tests/`; `MIN_WINDOW` — ikkinchi yalang'och `30`, va undan past oyna **ko'tarilishni imkonsiz** qiladi (o'lik qoida, hech narsa ko'tarmaydi); siyosat uchligi konstruktor default'i edi (`min_tasks=1` — bitta vazifadan keyin avtonomiya); telefon maskasi **ikki tomondan** sizadi; `verify_offline.py` noto'g'ri interpreter bilan **164 xato** beradi va buni **aytmaydi** |
+| §157 | Customer 360, **ikki yurishli** matritsa | `{1,128}` va `maximum=128` — **bir son ikki joyda**, qaysi biri tor bo'lsa jimgina o'sha yutadi (regex endi konstantadan); dominat shiftlar **to'plam emas, sabab bilan** qadalandi; `status!='deleted'` — **API orqali yetib bo'lmaydigan** to'rt qo'riqchi (qator SQL bilan ekildi); `WRITE_ROLES` — `ROLES` dan bexabar inline subset edi; **birinchi yurishda 60 dan 4 tasi GREEN** — istisno turi rad etishning isboti emas (mutatorlar `get_customer` qaytaradi), ikkinchi yurishda **60/60 RED** |
 
 **Eng muhim o'lchov (IV faza):** eski kodda **600 000 – 899 999 so'm**
 (haqiqiy 3x–4.5x mediana) invoice'lar **`ready_for_approval`** qaytarardi —
@@ -298,28 +333,41 @@ tekshiruv butun oraliqda o'tkazib yuborilgan.
 
 Ya'ni qolgan UI ishi — bitta **tool chaqirish yuzasi**, alohida panel emas.
 
-**Eng muhim xulosa:** backend va agenting **tayyor**, lekin
-`production_release: NO_GO`. Sabab — **operatsion qattiqlashtirish**
-(HA, observability, DR, live acceptance) yo'q. Bu **kod** muammosi emas,
-**yetkazib berish** muammosi.
+**Eng muhim xulosa:** backend **yadrosi** va agenting yozilgan va testlangan, lekin
+`production_release: NO_GO`. Ikki sabab, ikkalasi ham kod sifati emas:
+
+1. **Operatsion qattiqlashtirish yo'q** — HA, observability, DR, live acceptance.
+2. **Yetib borish bo'shlig'i** — 89 tool'dan 12 tasi, `platform_runtime` kodining
+   19% qismi yetkazilgan pack'lardan chaqiriladi. Qolgan 17 modul **muzlatilgan
+   preview**, mahsulot funksiyasi emas (§0).
+
+Bunga qo'shimcha, **birinchi ishga tushirish yo'li o'lik edi**: README'dagi
+`setup_local.py` → `owner_login.py` ketma-ketligi 410 va 403 bilan to'xtardi, UI'da
+token maydoni esa umuman yo'q. Yagona ishlaydigan yo'l — `scripts/provision_identity.py`.
+README va `docs/ONBOARDING-UZ.md` shunga ko'ra qayta yozildi. Ya'ni «kod tayyor, faqat
+yetkazib berish qoldi» degan eski xulosa **to'liq emas** edi: mahsulotga kirish eshigi
+ham yopiq turgan.
 
 ---
 
-## 11. Test infratuzilmasi — o'lchangan holat (§154–§156)
+## 11. Test infratuzilmasi — o'lchangan holat (§154–§157)
 
 | Savol | Javob |
 |---|---|
-| Offline to'plam (`runtime_tests`) | **3 076 sinov**, `failures=1, errors=12, skipped=1` |
+| Offline to'plam (`runtime_tests`) | **3 148 sinov**, `failures=1, errors=12, skipped=1` |
 | Windows uchun bloklangan | **13** (12 error + 1 failure) — `test_platform_baseline.py` qadaydi |
 | Eng katta **yagona** sabab | `os.O_NOFOLLOW` — **6 tasi** |
 | Ikkinchi sabab (nomi yo'q edi) | `symlink_privilege` (`OSError`, `WinError 1314`) — **2 tasi** |
 | Sabab **haqiqatan sabab**mi? | ha — `test_each_recorded_reason_is_the_actual_cause` har bir bloklangan sinovni **yurgizib**, ko'tarilgan istisnoni qatordagi sababga solishtiradi |
 | `integration_tests` | **95 sinov, 95 pass, 50 s** — ilgari **yig'ilmasdi** (`conftest.py` qo'shildi) |
 | `integration_tests` gate'da | **yo'q** — FastAPI/HTTPX talab qiladi, offline Computer'da yurmaydi |
-| **`api-python/tests/`** | **33 qizil, 172 pass, 4 skip** — va uni **hech bir gate yurgizmaydi** |
+| **`api-python/tests/`** | **33 qizil, 172 pass, 4 skip** — va uni **hech bir gate yurgizmaydi**. Qaror qabul qilindi: **nafaqaga chiqarish jarayonda** |
+| CI `http` job | endi **yig'iladi** — `integration_tests/conftest.py` `ENV` va `ALLOW_INSECURE_DEV` ni qo'yib, collection ordering bog'liqligini yo'q qildi |
+| CI `ui_dependency_security` job | **hamon FAIL** — `next@14.2.35` da 1 critical + 1 high; Next 15 + React 19 kerak |
 | POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
 | **Node runner** (`apps/runner/test.js`) | **11 / 24 qizil** Windows'da — `privateFile()` `(mode & 0o077) === 0` ni talab qiladi, Windows POSIX ruxsat bitlarini modellashtirmaydi. **Qadalmagan** |
 | `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` FAIL — **platforma**, kod emas |
+| `test_customer360_bounds.py` (§157) | **72 sinov** (77 subtest), yashil; `scripts/probes/audit_customer360_bounds.py` — **ikki yurishli** matritsa (52 o'z moduli + 8 mustaqil iste'molchi), **60/60 RED** |
 | Umumiy baseline fixture (deyarli 3 daqiqalik to'plam uchun) | **hali yo'q** |
 
 **`tests/` — alohida gap.** U `tests/` nomi bilan yuradi, lekin
@@ -328,6 +376,7 @@ yurgizadi. Ya'ni 33 qizil sinov hech kimga ko'rinmaydi, va **o'sha to'plamdagi
 qadam o'qilmaydi** (§155). Uning qizilligi tasodifiy emas: 10 tasi ataylab
 bekor qilingan marshrut (`410 Gone`), 15 tasi eskirgan javob shakli, 4 tasi
 legacy runner WebSocket, 3 tasi kontrakt surilishi, 1 tasi auth statusi.
-Qaror talab qilinadi: **tuzatish**, yoki **nafaqaga chiqarish** — lekin
-"qizil va o'qilmaydigan" holicha qoldirish emas.
+Qaror qabul qilindi: **nafaqaga chiqarish** (*retirement in progress*). Bu to'plamning
+natijasi acceptance sifatida ishlatilmaydi va uning qizilligi yangi regressiya deb
+hisoblanmaydi.
 

@@ -1,0 +1,176 @@
+{
+  "kind": "offline_verification_only",
+  "created_at": "2026-09-22T16:52:03.080576+00:00",
+  "python": "3.13.14",
+  "results": [
+    {
+      "name": "javascript_typescript_syntax",
+      "status": "BLOCKED",
+      "reason": "Bun unavailable; optional syntax-only check"
+    },
+    {
+      "name": "python_runtime",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\python\\envs\\default\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "runtime_tests",
+        "-v"
+      ],
+      "seconds": 266.579,
+      "log": "python_runtime.log",
+      "tests": 3148
+    },
+    {
+      "name": "release_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\python\\envs\\default\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_release_tools.py",
+        "-v"
+      ],
+      "seconds": 0.295,
+      "log": "release_tools.log",
+      "tests": 3
+    },
+    {
+      "name": "manifest_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\python\\envs\\default\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_manifest.py",
+        "-v"
+      ],
+      "seconds": 1.901,
+      "log": "manifest_tools.log",
+      "tests": 18
+    },
+    {
+      "name": "sqlite_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\python\\envs\\default\\Scripts\\python.exe",
+        "scripts/demo_runtime.py"
+      ],
+      "seconds": 0.44,
+      "log": "sqlite_demo.log"
+    },
+    {
+      "name": "managed_database_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\python\\envs\\default\\Scripts\\python.exe",
+        "scripts/demo_managed_database.py"
+      ],
+      "seconds": 0.554,
+      "log": "managed_database_demo.log"
+    },
+    {
+      "name": "node_runner",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\node\\versions\\22.22.2-2\\node.EXE",
+        "--test",
+        "apps/runner/test.js"
+      ],
+      "seconds": 0.468,
+      "log": "node_runner.log",
+      "tests": 24
+    },
+    {
+      "name": "browser_session_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\node\\versions\\22.22.2-2\\node.EXE",
+        "--test",
+        "apps/ui/lib/session-client.test.mjs"
+      ],
+      "seconds": 0.201,
+      "log": "browser_session_client.log",
+      "tests": 15
+    },
+    {
+      "name": "browser_oauth_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\node\\versions\\22.22.2-2\\node.EXE",
+        "--test",
+        "apps/ui/lib/oauth-client.test.mjs"
+      ],
+      "seconds": 0.185,
+      "log": "browser_oauth_client.log",
+      "tests": 12
+    },
+    {
+      "name": "browser_google_data_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Users\\Sunnatulloh\\.workbuddy-ai\\binaries\\node\\versions\\22.22.2-2\\node.EXE",
+        "--test",
+        "apps/ui/lib/google-data-client.test.mjs"
+      ],
+      "seconds": 0.259,
+      "log": "browser_google_data_client.log",
+      "tests": 16
+    },
+    {
+      "name": "python_syntax",
+      "status": "PASS",
+      "checked": 280,
+      "errors": []
+    }
+  ],
+  "http_dependencies_missing": [
+    "psycopg",
+    "redis"
+  ],
+  "optional_database_dependencies_missing": [
+    "psycopg",
+    "pymysql",
+    "pymongo",
+    "redis",
+    "pyodbc",
+    "oracledb",
+    "boto3",
+    "cassandra",
+    "neo4j",
+    "elasticsearch"
+  ],
+  "not_performed": [
+    "dependency-backed HTTP tests",
+    "Next/React typecheck",
+    "Next production build",
+    "live providers",
+    "live network databases including SQL Server, Oracle, DynamoDB, Cassandra, Neo4j and Elasticsearch",
+    "native macOS F_GETPATH/LaunchAgent",
+    "local model inference",
+    "UI browser acceptance",
+    "production dependency audit",
+    "deployment"
+  ],
+  "release": "NO_GO"
+}

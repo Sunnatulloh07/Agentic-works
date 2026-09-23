@@ -25,6 +25,8 @@ from platform_runtime.briefing import (
     LEDGER_FAILED,
     LEDGER_QUEUED,
     LEDGER_SENT,
+    LEDGER_SUBMITTED,
+    LEDGER_UNCERTAIN,
     Briefing,
     _day_key,
 )
@@ -44,7 +46,11 @@ POLICY = {
     'tools': ['graph.search', 'graph.conflicts', 'connectors.read', 'sheets.rows',
               'telegram.send'],
     'allowed_connections': [CONNECTION, 'google'],
-    'ladder': 'human_assisted',
+    # A digest is delivered as an engine task. Unattended delivery needs an
+    # autonomous agent whose recipient the pack allowlists; anything else waits
+    # in the approval queue, which the human_assisted test below asserts.
+    'allowed_recipients': [RECIPIENT],
+    'ladder': 'autonomous',
 }
 
 SECTIONS = [{'entity': 'order', 'attribute': 'status', 'equals': 'new',
@@ -231,13 +237,27 @@ class BriefingTests(unittest.TestCase):
             c.execute('UPDATE p_briefing SET next_due=0 WHERE tenant=?', (TENANT,))
 
     def run_tick(self):
-        """A tick with the Sheets hop replaced, so the cycle is deterministic."""
+        """One full cycle with the Sheets hop replaced: submit, dispatch, settle.
+
+        The loop only submits; the engine performs the send on its own tick and
+        the next loop tick reads the verdict into the ledger. Returns whether the
+        loop advanced a due schedule, as before.
+        """
         with patch('platform_runtime.sheets.configured_manager') as manager:
             manager.return_value.access.return_value.access_token = 'fake-token'
             self.transport.payload = self._sheet_payload()
             with patch('platform_runtime.sheets._http_get',
                        side_effect=lambda url, token: self.transport(url, token)):
-                return self.briefing.tick(TENANT)
+                advanced = self.briefing.tick(TENANT)
+                while self.engine.tick(TENANT):
+                    pass
+                self.briefing.tick(TENANT)
+                return advanced
+
+    def task_of(self, entry):
+        with self.engine.read() as c:
+            return c.execute('SELECT * FROM p_tasks WHERE tenant=? AND id=?',
+                             (TENANT, entry['run_id'])).fetchone()
 
     def ledger_day(self, day=None):
         rows = self.briefing.ledger(TENANT, 'morning')
@@ -384,7 +404,8 @@ class BriefingTests(unittest.TestCase):
         entry = self.ledger_day()
         self.assertEqual(entry['status'], LEDGER_SENT)
         self.assertEqual(entry['rows'], 1)
-        self.assertEqual(entry['run_id'], '9001')
+        # run_id is the engine task that carried the send, not a provider id.
+        self.assertEqual('succeeded', self.task_of(entry)['status'])
 
     def test_a_bare_ledger_list_cannot_say_whether_it_is_the_whole_ledger(self):
         """The HTTP route returned `entries` as a bare list, so a hundred runs and
@@ -541,11 +562,110 @@ class BriefingTests(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
     def test_a_send_failure_does_not_advance_the_ledger_to_sent(self):
+        """A provider exception on an external write is `uncertain`, not `failed`.
+
+        The engine cannot know whether Telegram delivered before it answered, so
+        the ledger mirrors the engine's verdict and never re-sends the same day.
+        """
         self.configure()
         self.fail_send = True
         self.due()
         self.assertTrue(self.run_tick())
+        self.assertEqual(self.ledger_day()['status'], LEDGER_UNCERTAIN)
+        self.assertEqual('uncertain', self.task_of(self.ledger_day())['status'])
+
+    # ------------------------------------------------- delivery is an engine task
+
+    def test_delivery_is_an_engine_step_not_a_direct_provider_call(self):
+        """The one property this refactor exists for: no send outside the engine."""
+        self.configure()
+        self.due()
+        self.run_tick()
+        with self.engine.read() as c:
+            steps = [dict(r) for r in c.execute('''SELECT s.tool,s.status,s.approval_needed,t.channel
+              FROM p_steps s JOIN p_tasks t ON t.id=s.task WHERE s.tenant=?''', (TENANT,))]
+        self.assertEqual(1, len(steps))
+        self.assertEqual('telegram.send', steps[0]['tool'])
+        self.assertEqual('succeeded', steps[0]['status'])
+        self.assertEqual('cron', steps[0]['channel'])
+        self.assertEqual(0, steps[0]['approval_needed'])
+
+    def test_a_human_assisted_agent_waits_for_approval_before_delivery(self):
+        self.policy = dict(POLICY, ladder='human_assisted')
+        self.configure()
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.sent, [])
+        entry = self.ledger_day()
+        self.assertEqual(entry['status'], LEDGER_SUBMITTED)
+        task = self.task_of(entry)
+        self.assertEqual('waiting_approval', task['status'])
+        # The operator approves the exact digest; the engine then delivers it and
+        # the next loop tick settles the ledger.
+        with self.engine.read() as c:
+            step = c.execute('SELECT id FROM p_steps WHERE task=?', (task['id'],)).fetchone()['id']
+        self.engine.approve(TENANT, step, OWNER, 'approved', 'owner')
+        while self.engine.tick(TENANT):
+            pass
+        self.briefing.tick(TENANT)
+        self.assertEqual(1, len(self.sent))
+        self.assertEqual(self.ledger_day()['status'], LEDGER_SENT)
+
+    def test_a_recipient_outside_the_allowlist_is_refused_at_configure(self):
+        with self.assertRaises(Forbidden):
+            self.briefing.configure(TENANT, 'morning', AGENT, 'stranger', CONNECTION, OWNER,
+                                    sections=SECTIONS)
+
+    def test_an_agent_without_the_notifier_is_refused_at_configure(self):
+        self.policy = dict(POLICY, tools=[t for t in POLICY['tools'] if t != 'telegram.send'])
+        with self.assertRaises(Forbidden):
+            self.configure()
+
+    def test_losing_the_allowlist_after_configure_disables_the_schedule(self):
+        self.configure()
+        self.policy = dict(POLICY, allowed_recipients=[])
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.sent, [])
         self.assertEqual(self.ledger_day()['status'], LEDGER_FAILED)
+        self.assertEqual(0, self.briefing.schedule(TENANT, 'morning')['enabled'])
+
+    def test_an_uncertain_send_is_never_repeated_the_same_day(self):
+        self.configure()
+        self.fail_send = True
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.ledger_day()['status'], LEDGER_UNCERTAIN)
+        self.fail_send = False
+        self.due()
+        self.run_tick()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.ledger_day()['status'], LEDGER_UNCERTAIN)
+
+    def test_a_crash_between_submit_and_mark_reuses_the_same_task(self):
+        """The task key is one per schedule-day, so a retry cannot double-send."""
+        self.configure()
+        self.due()
+        original_mark = self.briefing._mark
+        calls = []
+
+        def crash_once(*args, **kwargs):
+            if kwargs.get('run_id') and not calls:
+                calls.append(1)
+                raise RuntimeError('worker died after submit')
+            return original_mark(*args, **kwargs)
+        with patch.object(self.briefing, '_mark', side_effect=crash_once):
+            with self.assertRaises(RuntimeError):
+                self.run_tick()
+        # The day row is still queued (never marked), so the next tick re-claims it.
+        self.clock.advance(120)  # the minute-level stamp changes the digest text
+        self.due()
+        self.run_tick()
+        with self.engine.read() as c:
+            tasks = c.execute("SELECT count(*) n FROM p_tasks WHERE tenant=? AND channel='cron'",
+                              (TENANT,)).fetchone()['n']
+        self.assertEqual(1, tasks)
+        self.assertEqual(1, len(self.sent))
 
     def test_a_send_failure_never_produces_a_duplicate_on_the_next_day(self):
         """A stuck day must not bleed into the next day's delivery."""

@@ -70,8 +70,8 @@ the point: ``test_oauth``, ``test_local_model_transport``, ``test_model_response
 
 Run from the repository root::
 
-    python scripts/audit_transport_bounds.py
-    python scripts/audit_transport_bounds.py --check
+    python scripts/probes/audit_transport_bounds.py
+    python scripts/probes/audit_transport_bounds.py --check
 """
 import os
 import sys

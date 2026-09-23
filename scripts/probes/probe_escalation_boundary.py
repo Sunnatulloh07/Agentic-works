@@ -26,7 +26,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'api-python'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'api-python'))
 
 from platform_runtime.engine import Engine, Forbidden
 from platform_runtime.escalation import DELIVERY_TOOLS, EscalationLoop

@@ -17,7 +17,7 @@
 >
 > Kelajakdagi ishtirokchi faqat shu hujjatni o'qib, audio yo'lini qayta qursa —
 > bu regressiya. Amaldagi manbalar: `docs/prd-v05/*`, `api-python/platform_runtime/telephony.py`,
-> `scripts/probe_telephony_consent.py`.
+> `scripts/probes/probe_telephony_consent.py`.
 
 Ushbu hujjat Agent Platform loyihasining O'zbekiston va Markaziy Osiyo bozoridagi barcha real CRM tizimlari bilan integratsiyalashuvi, ko'p kanalli (Call-markaz, Telegram, WhatsApp, Instagram) ma'lumotlarni CRM'ga yig'ish, audio va matnli suhbatlarni qayd etish hamda AI agentlarning ushbu lidlar ustida uzluksiz avtonom ishlash (qayta yozish, qayta qo'ng'iroq qilish) siklini belgilaydi.
 

@@ -57,8 +57,8 @@ turn a 3-minute matrix into a 10-minute one for no additional coverage.
 
 Run from the repository root::
 
-    python scripts/audit_app_layer_bounds.py
-    python scripts/audit_app_layer_bounds.py --check
+    python scripts/probes/audit_app_layer_bounds.py
+    python scripts/probes/audit_app_layer_bounds.py --check
 """
 import os
 import sys

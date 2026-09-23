@@ -1,4 +1,14 @@
-"""Explicit local-loopback mode for OpenAI-compatible local inference.
+"""Provider dialects and the explicit local-loopback mode.
+
+Two request shapes leave this platform. ``openai`` is the historical default and
+is unchanged byte for byte. ``anthropic`` is the Messages API, whose wire shape
+is taken from the bundled ``claude-api`` skill, ``curl/examples.md``:
+
+    curl https://api.anthropic.com/v1/messages \\
+      -H "Content-Type: application/json" \\
+      -H "x-api-key: $ANTHROPIC_API_KEY" \\
+      -H "anthropic-version: 2023-06-01" \\
+      -d '{"model": ..., "max_tokens": ..., "messages": [{"role": "user", ...}]}'
 
 Only numeric loopback HTTP endpoints can omit provider authentication. The
 cloud default remains HTTPS + a configured API secret. No NotebookLM hosting.
@@ -17,6 +27,15 @@ MAX_PORT = 65535
 MAX_LOCAL_REQUEST_BYTES = 128000
 MAX_LOCAL_RESPONSE_BYTES = 128000
 LOCAL_TIMEOUT_SECONDS = 30
+
+SUPPORTED_PROVIDERS = frozenset({'openai', 'anthropic'})
+OPENAI_BASE_URL = 'https://api.openai.com/v1'
+OPENAI_PATH = '/chat/completions'
+# Skill, curl/examples.md -> Required Headers: `anthropic-version` value `2023-06-01`.
+# It is the API version, not a model version, and is required on every request.
+ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+ANTHROPIC_VERSION = '2023-06-01'
+ANTHROPIC_PATH = '/v1/messages'
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -42,7 +61,54 @@ def validate_url(cfg,url):
         raise ValueError('Cloud model HTTPS required')
 
 
+def provider(cfg):
+    name=cfg.get('provider','openai')
+    if name not in SUPPORTED_PROVIDERS:raise ValueError('Unknown model provider')
+    return name
+
+
+def completion_url(cfg):
+    """The single-completion endpoint of the configured dialect."""
+    if provider(cfg)=='anthropic':
+        return str(cfg.get('base_url',ANTHROPIC_BASE_URL)).rstrip('/')+ANTHROPIC_PATH
+    return str(cfg.get('base_url',OPENAI_BASE_URL)).rstrip('/')+OPENAI_PATH
+
+
+def completion_body(cfg,model,system,user_text,max_tokens):
+    """The request body of the configured dialect. The prompt text is identical.
+
+    Anthropic takes the system prompt as a TOP-LEVEL `system` field, not as a
+    `messages` entry with role `system` (skill, curl/examples.md -> Prompt
+    Caching, which sends `"system": [...]` alongside `"messages"`). Two OpenAI
+    fields are deliberately absent rather than translated:
+
+    * `temperature` -- removed on the current Claude models; the skill's
+      Thinking & Effort table records it as "Removed - 400" for Opus 5, Opus
+      4.8/4.7, Sonnet 5 and the Fable family, so sending it would fail the call.
+    * `response_format` -- the OpenAI JSON-object switch has no Anthropic
+      counterpart. Anthropic's equivalent is structured outputs
+      (`output_config.format` with a JSON schema), and the skill's raw-HTTP
+      document gives no `output_config.format` example -- only
+      `output_config.effort` -- so this adapter does NOT guess that wire shape.
+      Strict JSON comes from the system prompt, which already demands exactly
+      one JSON object, and from `parse_anthropic_decision`, which refuses
+      anything else. The engine re-validates the decision afterwards either way.
+    """
+    if provider(cfg)=='anthropic':
+        return {'model':model,'max_tokens':max_tokens,'system':system,
+                'messages':[{'role':'user','content':user_text}]}
+    return {'model':model,'messages':[{'role':'system','content':system},{'role':'user','content':user_text}],
+            'temperature':0,'max_tokens':max_tokens,'response_format':{'type':'json_object'}}
+
+
 def headers(cfg,resolve_secret):
+    if provider(cfg)=='anthropic':
+        # `x-api-key`, never `Authorization: Bearer` -- skill, curl/examples.md
+        # -> Required Headers. Content-Type is added by the transport itself.
+        version={'anthropic-version':ANTHROPIC_VERSION}
+        if local_mode(cfg) and not cfg.get('key_env'):
+            return version
+        return {'x-api-key':resolve_secret(cfg,'key_env'),**version}
     if local_mode(cfg) and not cfg.get('key_env'):
         return {}
     return {'Authorization':'Bearer '+resolve_secret(cfg,'key_env')}

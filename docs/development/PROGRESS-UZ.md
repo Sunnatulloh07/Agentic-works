@@ -3,6 +3,37 @@
 Joriy source **v0.5**. Ish davom etmoqda, **IN_PROGRESS**, production **NO_GO**. To‘liq PRD
 100% tugamagan.
 
+**Holat bloki (2026-09-22 chuqur ko‘rib chiqishi):**
+
+- API bu mashinada **hech qachon ishga tushirilmagan** — `api-python/.env` yo‘q,
+  `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori.
+  Shuning uchun **hech bir** integratsiya `live_verified` emas; eng yuqorisi
+  `LOCAL_CONTRACT_TESTED`.
+- `runtime_tests`: **3 239 sinov**, Windows’da `failures=1, errors=12` — **13 tasi
+  Windows-only** (`os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink privilegiyasi, POSIX fayl
+  rejimlari). `integration_tests`: **95/95 PASS**
+  (`ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`).
+- `api-python/tests/` (legacy): **nafaqaga chiqarildi (2026-09-22)**. U 33 qizil / 172 pass
+  edi va hech bir gate uni yurgizmasdi; tirik kodni sinaydigan 5 fayl
+  `integration_tests/` ga ko‘chirildi (`test_packs_contract`, `test_pack_persona`,
+  `test_lang`, `test_config`, `test_security_helpers`), qolgani o‘chirildi — sabablar
+  `api-python/integration_tests/LEGACY-RETIRED.md` da.
+- CI: `http` job endi **yig‘iladi** (`integration_tests/conftest.py`);
+  `ui_dependency_security` **hamon FAIL** (`next@14.2.35`: 1 critical + 1 high; Next 15 +
+  React 19 kerak).
+- Yetib borish: registry’dagi **89** tool’dan **12 tasi** yetkazilgan pack’lardan
+  chaqiriladi; `platform_runtime` kodining **81%** yetib bo‘lmaydi. 17 modul
+  (`erp`, `documents`, `inventory`, `business_graph`, `whatsapp`, `whatsapp_inbound`,
+  `telephony`, `assets`, `vision`, `manufacturing`, `oee`, `workforce`, `supervisor`,
+  `reengagement`, `escalation`, `briefing`, `oversight`) — **muzlatilgan preview**,
+  mahsulot funksiyasi emas.
+- First-run: eski `setup_local.py` → `owner_login.py` yo‘li **o‘lik** (410 + 403, UI’da
+  token maydoni yo‘q). Yagona ishlaydigan yo‘l — `scripts/provision_identity.py`; qarang
+  `docs/ONBOARDING-UZ.md`.
+
+Quyidagi sessiya yozuvlari xronologik, eng yangisi tepada emas — har biri o‘z sanasidagi
+o‘lchovni saqlaydi.
+
 ## Mahsulotlashtirish sessiyasi: UI qatlami, chegara auditi §151–§152, DR
 
 Bu sessiya **kod emas, yetkazib berish** bo‘shlig‘ini yopishga qaratildi. Har bir da’vo
@@ -173,7 +204,7 @@ o‘zgarmadi.
 har bir id uchun `resolve()` chaqirardi, `resolve()` esa **har safar**
 `preflight()` + manbani **qaytadan to‘liq o‘qiydi**. Ya’ni 8 id uchun
 `graph.conflicts` — **9 provider GET**. O‘lchandi:
-`scripts/probe_graph_amplification.py`. Tuzatildi: yangi `_collect_all()` har
+`scripts/probes/probe_graph_amplification.py`. Tuzatildi: yangi `_collect_all()` har
 manbani **aynan bir marta** o‘qib, kuzatuvlarni id bo‘yicha savatlarga ajratadi;
 `search`/`conflicts`/`identifiers` endi shu savatdan foydalanadi. Natija:
 **9 GET → 1 GET**, tartib va javob shakli o‘zgarmagan. 6 yangi regressiya testi
@@ -236,7 +267,7 @@ I/O sidan **oldin** chaqiradigani. Ya’ni **talab emas, usul** rad etildi.
 
 Atribut o‘rniga **qo‘riqchi testlar** (`WaLifecycleGuardTests`, 6 metod → 52
 to‘plam testi) va
-`scripts/probe_wa_window_graph_attribute.py` (`PROVEN`) yozildi — shunda bu xato
+`scripts/probes/probe_wa_window_graph_attribute.py` (`PROVEN`) yozildi — shunda bu xato
 kelajakda **jimgina** qaytolmaydi. **Yangi tool yo‘q**
 (`build_registry()=69`). Hisobot: `V05-BLOCKS-MESSAGING-UZ.md`.
 
@@ -277,7 +308,7 @@ hujjatni ko‘rmay qolardi, ya’ni ikki marta yozish sharti.
 **qabul qiluvchisi yo‘q** — qo‘riqchisi hujjat identifikatsiyasi.
 
 54 test (`test_erp.py`), `config/erp_posting.example.json` +
-`scripts/check_erp_example.py`, `scripts/probe_erp_posting_boundary.py`
+`scripts/check_erp_example.py`, `scripts/probes/probe_erp_posting_boundary.py`
 (`PROVEN`, 5 bo‘lim). Registr **69 → 72**. Hisobot:
 `V05-BLOCKS-OPS-UZ.md`.
 
@@ -464,7 +495,7 @@ sanaladi; router bo‘lgan agentga yo‘naltirish standart holatda **rad etiladi
 run yaratish tool emas, ya’ni chegarani **kod** majburlaydi.
 
 **Asosiy xavfsizlik xossasi — o‘lchangan, da’vo qilinmagan.**
-`scripts/probe_supervisor_authority.py`: hech qanday ma’lumot tool’i tutmagan
+`scripts/probes/probe_supervisor_authority.py`: hech qanday ma’lumot tool’i tutmagan
 supervisor `connectors.read` tutgan agentga yo‘naltiradi → supervisor policy’si
 **bayt-bayt bir xil** qoladi, va maqsad **o‘zida yo‘q** tool’ni ishlatmoqchi
 bo‘lsa **rad etiladi**. Ya’ni cheklov **bajaruvchiga** bog‘lanadi: *vakolat
@@ -517,7 +548,7 @@ mumkin, va darvoza **har qanday provayder I/O sidan oldin** ishlaydi.
 
 
 **Asosiy xavfsizlik xossasi — o‘lchangan, da’vo qilinmagan.**
-`scripts/probe_vision_biometric_gate.py` uch `ladder` darajasida bir xil
+`scripts/probes/probe_vision_biometric_gate.py` uch `ladder` darajasida bir xil
 chaqiruvni yurgizib, har biri **nechta provayder so‘rovi** yaratganini sanaydi:
 
 ```
@@ -600,7 +631,7 @@ Bu «tutamiz va retry qilamiz» emas, bu **provider I/O dan oldin rad etish**.
   shuning uchun alohida konfiguratsiya kalitlari. Send faqat **o‘z** kalitini
   o‘qiydi.
 
-**Probe bilan o‘lchandi** (`scripts/probe_whatsapp_window.py`, haqiqiy chiqish):
+**Probe bilan o‘lchandi** (`scripts/probes/probe_whatsapp_window.py`, haqiqiy chiqish):
 
 ```
 open window + text                     sent                                                1 POST
@@ -1476,8 +1507,8 @@ bo'lishadi).
 
 ### Qaytarish matritsasi — **9/9 yashil → 9/9 qizil**
 
-Yangi qayta ishlatiladigan asbob: `scripts/revert_matrix.py`; faza skripti
-`scripts/audit_oauth_bounds.py`. Nazorat yashil, keyin **to'qqizta mutatsiya
+Yangi qayta ishlatiladigan asbob: `scripts/probes/revert_matrix.py`; faza skripti
+`scripts/probes/audit_oauth_bounds.py`. Nazorat yashil, keyin **to'qqizta mutatsiya
 hammasi yashil** — ya'ni **49 test butun oqimni uchidan-uchiga yurardi va
 bittasi ham chegarani o'lchamagan edi**. Oqim testi oqim ishlashini isbotlaydi;
 u shift **256** ekanini **257** dan ajratmaydi. Tuzatishdan keyin **9/9 qizil**,
@@ -1486,7 +1517,7 @@ tiklash tasdiqlangan.
 **Qo'shilgan:** `test_oauth.py` da `DeclaredBoundTests` — **8 sinov** (49 → 57),
 har biri literalni **aniq satr** bilan qadaydi **va** chegarani **ikki tomondan**
 yuradi. Sinf **`OAuthTests` dan meros olmaydi** — pastga qarang.
-`scripts/probe_oauth_boundaries.py` — **48 xossa, 48 pass**, 4 bo'lim.
+`scripts/probes/probe_oauth_boundaries.py` — **48 xossa, 48 pass**, 4 bo'lim.
 
 ### O'z xatolarim (yashirilmadi)
 
@@ -1576,7 +1607,7 @@ qayta o'lchaydi.
 Ikki rejim **konstanta emas** — shu fazada tuzatilgan ikki nuqson, chunki
 qadalgan bo'lmasa tuzatish **jimgina qaytarilishi** mumkin edi.
 
-**Asbob yaxshilandi:** `scripts/revert_matrix.py` endi **bir nechta** test
+**Asbob yaxshilandi:** `scripts/probes/revert_matrix.py` endi **bir nechta** test
 faylini bitta yurishda o'lchaydi (dotted spec). Bitta fayl bilan chegaralansak,
 **qo'shni fayldagi** sinov qadaydigan chegara **yolg'on YASHIL** chiqardi.
 Eski `*.py` rejimi o'zgarmadi.
@@ -1587,7 +1618,7 @@ Eski `*.py` rejimi o'zgarmadi.
   **literalni** qadaydi (konstantani moduldan **qayta o'qimaydi** — §142.5 da
   oltita chegara aynan shu sababdan yashil chiqqan) va chegarani **ikki tomondan**
   yuradi.
-- `scripts/probe_tools_boundaries.py` — **66 xossa, 66 pass**, 6 bo'lim.
+- `scripts/probes/probe_tools_boundaries.py` — **66 xossa, 66 pass**, 6 bo'lim.
 - `tools.py`: nomlangan konstanta **0 → 11**; 303 → **343 satr**.
 - `test_registration_contract.py` docstring'i tuzatildi — u endi **eski** xabarni
   tasvirlab qolgan edi (hujjat kodga zid bo'lsa, foydalanuvchi hujjatga yuradi).
@@ -1711,8 +1742,8 @@ xatosi endi kutishdan **oldin** topiladi. (Bu xato **ikki marta** to'langan edi.
 
 - `test_secret_vault.py`: `DeclaredBoundTests` — **11 sinov** (11 → **22**), har
   biri chegarani **ikki tomondan** yuradi va **literalni** qadaydi.
-- `scripts/probe_vault_boundaries.py` — **99 xossa, 99 pass**, 9 bo'lim.
-- `scripts/audit_vault_bounds.py` — **17 mutatsiya**, 17/17 qizil, 0 yashil.
+- `scripts/probes/probe_vault_boundaries.py` — **99 xossa, 99 pass**, 9 bo'lim.
+- `scripts/probes/audit_vault_bounds.py` — **17 mutatsiya**, 17/17 qizil, 0 yashil.
 - `secret_vault.py`: nomlangan konstanta **0 → 12**; 99 → **147 satr**.
 
 ### O'z xatolarim
@@ -1812,7 +1843,7 @@ guruh, va ular endi 16 mutatsiya bilan qadalgan.
 
 - `runtime_tests/test_control_plane_bounds.py` — **50 sinov**, uch qatlam
   (literal, xulq, struktura).
-- `scripts/audit_control_plane_bounds.py` — **61 mutatsiya**, 61/61 qizil.
+- `scripts/probes/audit_control_plane_bounds.py` — **61 mutatsiya**, 61/61 qizil.
 - `platform_api.py`: nomlangan konstanta **0 → 90**; 717 → **913 satr**.
 
 ### O'z xatolarim
@@ -2010,9 +2041,9 @@ tuzatish, yo nafaqaga chiqarish kerak.
 | Fayl | Nima |
 |---|---|
 | `api-python/runtime_tests/test_app_layer_bounds.py` | **48 sinov** (qadamlar + struktura qo'riqchisi) |
-| `scripts/audit_app_layer_bounds.py` | 31 mutatsiya, 7 modul |
+| `scripts/probes/audit_app_layer_bounds.py` | 31 mutatsiya, 7 modul |
 | `scripts/append_doc_section.py` | marker bilan **bir marta** qo'shuvchi (ikki marta yozishni to'sadi) |
-| `scripts/revert_matrix.py` | `drop_sidecar()` — o'lchov endi o'zini tozalay olmagani uchun o'lmaydi |
+| `scripts/probes/revert_matrix.py` | `drop_sidecar()` — o'lchov endi o'zini tozalay olmagani uchun o'lmaydi |
 | `api-python/runtime_tests/test_platform_baseline.py` | 12 → **13**, `symlink_privilege`, **sababni tekshiruvchi** sinov |
 
 ### Natija
@@ -2269,3 +2300,71 @@ faqat **jarayonlar jadvali** ajratadi. Xatoni qilinishiga sabab bo'lgan narsa ha
 bor edi: oldingi sessiyadan haqiqiy bo'sh qoldiq qolgan edi. Endi qo'riqchi
 `mkdir` dan oldin ishlagani uchun rad etish umuman papka yaratmaydi va bu
 noaniqlik yo'q.
+
+## V063 — Customer 360: **bir son ikki joyda** va **60 mutatsiyadan 4 tasi yashil** (§157)
+
+### Nima bo'ldi
+
+§156 halol cheklov bilan tugadi: `LadderStore` va `FileApprovalStore` ni gate ichida hech
+kim ishlatmaydi, qadamlar **mustaqil iste'molchisiz** edi. §157 o'sha bo'shliqni
+**o'lchadi**: `app/` qatlamining eng ko'p chegarali fayli `customer360.py` olindi — va
+uning **uchta mustaqil iste'molchisi** bor (`test_customer360`, `test_identity_hardening`,
+`test_control_plane_authority`).
+
+Uchta asosiy topilma:
+
+1. **`{1,128}` va `maximum=128` — bir son, ikki joy.** `_id` avval `_text`, keyin `_ID_RE`
+   ni tekshiradi; regex kvantifikatori o'sha sonni ikkinchi marta yozgan edi. `{1,12}`
+   qilish hech qanday xatolik ko'tarmaydi — qaysi biri tor bo'lsa **jimgina o'sha yutadi**.
+   Endi regex konstantadan quriladi — ikkinchi literal **yo'q** (§156 dagi
+   `max(MIN_WINDOW, min_tasks)` bilan bir harakat).
+
+2. **Dominat shiftlar.** `kind`, `channel`, `status`, `currency` uzunlikka, keyin lug'atga
+   tekshiriladi — shuning uchun ularning shiftlari **to'plamni** emas, ish hajmini
+   chegaralaydi. Ular **sabab** bilan qadalandi: 33 belgili `kind` uzunlik sababidan, 10
+   belgilisi lug'at sababidan rad etiladi — ikki xil sabab, bir xil istisno turi.
+
+3. **`status!='deleted'` — hech bir test yeta olmaydigan qo'riqchi.** `create_customer`
+   `deleted` ni rad etadi, shuning uchun API orqali bu qatorni yarata olmaydigan test
+   **yo'q**. To'rt predikat, nol qoplama. Qator SQL bilan ekildi.
+
+Va uchta yangi qadam turi: `LIMIT 100` **to'rt marta**; yozuv rollari `{'owner','operator'}`
+`identity_store.ROLES` dan bexabar **inline** edi (endi `WRITE_ROLES` + subset testi);
+sahifalash oynasi xabar matnida **uchinchi marta** yozilgan edi (`"limit 1..100"` — endi
+f-string).
+
+### Matritsa — ikki yurish
+
+`customer360.py` ning **mustaqil iste'molchisi bor**, shuning uchun matritsa **ikki marta**
+yurgizildi: **pass A** — faqat yangi modul (52 mutatsiya), **pass B** — faqat uchta
+iste'molchi (8 mutatsiya). Bu §156 ning "qadam — lekin mustaqil chaqiruvchi sezmaydi"
+gapini **o'lchangan** da'voga aylantiradi.
+
+**Birinchi yurish: 60 dan 4 tasi GREEN.** To'rtdan uchtasi — bitta oila, va u bu fazaning
+eng qimmatli darsi:
+
+> **Istisno turi — rad etishning isboti emas.** Har bir mutator oxirida `get_customer` ni
+> qaytaradi; qo'riqchi o'chirilganda ham chaqiruv "rad etiladi" — faqat **bir qator
+> keyinroq**, yozuv allaqachon bo'lgach. `assertRaises(X)` buni ajratmaydi.
+
+* `_ensure_customer` predikati — jetim qator yozilardi; endi `count == 0` bilan qadalgan.
+* `_ensure_customer` o'chirilishi — yo'q customerga kontakt yozilardi; `count == 0`.
+* actor tekshiruvi — keyingi qator rad etardi, lekin **xabar** o'zgarardi; endi xabar bilan.
+* `verified is not True` — noto'g'ri yurishga yozilgan edi; pass B ga ko'chirildi.
+
+**Ikkinchi yurish: 60/60 RED, 0 GREEN, 0 o'lchanmagan**, ikkala `restore verified: YES`.
+
+### Natija
+
+- `app/customer360.py` — 17 konstanta + `WRITE_ROLES`; `{1,128}`/`maximum=128` juftligi
+  birlashtirildi; `LIMIT 100` × 4 → konstanta; xabar f-string.
+- `runtime_tests/test_customer360_bounds.py` — **72 sinov** (77 subtest), yashil.
+- `scripts/probes/audit_customer360_bounds.py` — ikki yurishli matritsa, 60 mutatsiya.
+- Gate: `Ran 3148 tests, FAILED (failures=1, errors=12, skipped=1)` — 13 tasi platforma
+  sababli bloklangan (§154), **modulimdan nol**; MANIFEST 510 fayl, PASS.
+
+### Keyingi qadam
+
+`app/` qatlamida qolgan modullar: `storage.py` (260 satr), `pipeline.py` (167), `main.py`
+(137) — ularning chegaralari boshqa sinfda; `apps/runner/portable_fs.py`. Keyin:
+`api-python/tests/` (33 qizil, gatesiz) ning taqdiri — tiklash yoki o'chirish.

@@ -305,7 +305,38 @@ class Engine:
                           (tenant,step["id"],step["claim"],self.clock())).fetchone()
             return bool(row)
 
-    def _validated(self, tenant, agent, steps):
+    def _origin(self, c, tenant, channel, event_key):
+        """The verified inbound event a channel task answers, or None.
+
+        Only channels that own an inbound stream can bind a reply to its origin;
+        a cron or web task has no origin and its outbound steps must be allowlisted.
+        """
+        if channel not in OUTBOUND_CHANNELS:
+            return None
+        row = c.execute('SELECT payload FROM p_events WHERE tenant=? AND channel=? AND event_key=?',
+                        (tenant, channel, event_key)).fetchone()
+        if not row:
+            return None
+        return {'channel': channel, 'conversation_id': json.loads(row['payload']).get('conversation_id')}
+
+    @staticmethod
+    def _preauthorized(policy, name, args, origin):
+        """An outbound write whose destination the tenant already authorised.
+
+        Two shapes, one rule: the pack allowlisted the recipient, or the recipient
+        is the verified inbound conversation this task answers. Only an autonomous
+        agent earns the exemption, and the caller has already excluded destructive
+        and physical risk, which always wait for a human (PRD F5).
+        """
+        if policy.get('ladder') != 'autonomous' or name not in OUTBOUND_TOOLS:
+            return False
+        recipient = args.get(DIRECT_DESTINATION_FIELD[name])
+        if recipient in policy.get('allowed_recipients', []):
+            return True
+        return bool(origin and name == origin['channel'] + '.send'
+                    and recipient == origin['conversation_id'])
+
+    def _validated(self, tenant, agent, steps, origin=None):
         policy = self.policy(tenant, agent)
         if policy.get('ladder') not in {'human_led','human_assisted','autonomous'}:
             raise Forbidden('Invalid autonomy policy')
@@ -335,8 +366,15 @@ class Engine:
             if name in {'database.read', 'database.plan_write', 'database.write'}:
                 from .database.gateway import validate_step
                 database_binding = validate_step(tenant, agent, name, args)
-            needed = (spec.risk != 'read' or policy['ladder'] == 'human_led'
-                      or name in policy.get('approval', []))
+            # Approval is the default for every write. The one exemption is an
+            # autonomous agent sending to a destination the tenant pre-authorised;
+            # human_led gates everything, required_for gates by name, and
+            # destructive or physical risk is never unattended.
+            needed = (policy['ladder'] == 'human_led'
+                      or name in policy.get('approval', [])
+                      or spec.risk in ('destructive', 'physical')
+                      or (spec.risk != 'read'
+                          and not self._preauthorized(policy, name, args, origin)))
             device = step.get('device', '')
             if not isinstance(device, str) or len(device)>128:
                 raise ValueError('Invalid device')
@@ -361,7 +399,8 @@ class Engine:
         """Internal: caller owns the write transaction; never calls providers."""
         for v in (tenant,channel,event_key,agent,actor):
             if not isinstance(v,str) or not v or len(v)>256: raise ValueError('Invalid identity')
-        validated = self._validated(tenant,agent,steps)
+        origin = self._origin(c, tenant, channel, event_key)
+        validated = self._validated(tenant,agent,steps,origin)
         # External destinations are authorized in the engine, not just in LLM prompting.
         # The destination field differs per channel ('conversation_id' for the chat
         # channels, 'contact' for WhatsApp) but the rule is one rule: a direct
@@ -482,7 +521,7 @@ class Engine:
             if device:
                 d=c.execute('SELECT revoked FROM p_devices WHERE tenant=? AND id=?',(tenant,device)).fetchone()
                 if not d or d['revoked']: raise Forbidden('Device revoked or unknown')
-            rows=c.execute("SELECT s.*,t.agent,t.actor creator,t.channel FROM p_steps s JOIN p_tasks t ON t.id=s.task WHERE s.tenant=? AND s.device=? AND s.status IN ('queued','waiting_approval') AND t.status IN ('queued','running','waiting_approval') AND NOT EXISTS(SELECT 1 FROM p_steps prev WHERE prev.task=s.task AND prev.position<s.position AND prev.status!='succeeded') ORDER BY t.created,s.position",(tenant,device)).fetchall()
+            rows=c.execute("SELECT s.*,t.agent,t.actor creator,t.channel,t.event_key FROM p_steps s JOIN p_tasks t ON t.id=s.task WHERE s.tenant=? AND s.device=? AND s.status IN ('queued','waiting_approval') AND t.status IN ('queued','running','waiting_approval') AND NOT EXISTS(SELECT 1 FROM p_steps prev WHERE prev.task=s.task AND prev.position<s.position AND prev.status!='succeeded') ORDER BY t.created,s.position",(tenant,device)).fetchall()
             for row in rows:
                 r=dict(row)
                 try:
@@ -495,7 +534,10 @@ class Engine:
                     continue
                 try:
                     self.require_authority(c,tenant,r['channel'],r['creator'])
-                    validated=self._validated(tenant,r['agent'],[{'tool':r['tool'],'args':json.loads(r['args']),'device':r['device']}])[0]
+                    # The origin event is re-read so an unattended reply is re-bound
+                    # to the same verified conversation it was submitted against.
+                    origin=self._origin(c,tenant,r['channel'],r['event_key'])
+                    validated=self._validated(tenant,r['agent'],[{'tool':r['tool'],'args':json.loads(r['args']),'device':r['device']}],origin)[0]
                 except (ValueError,LookupError,PermissionError):
                     validated=None
                 if validated is None or validated[4]!=r['fingerprint']:

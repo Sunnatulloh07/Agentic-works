@@ -28,13 +28,20 @@ here:
   does not know why a task is late (PRD v0.5 §8).
 * The escalation is **read + notify only**. The one write it can perform is
   ``telegram.send`` addressed to an operator-configured recipient — the same
-  "tell the manager" channel the briefing uses — so no approval is required, and
-  hiding a fact report behind an approval would only train operators to approve
-  reflexively. It cannot message a customer, cannot reassign a task, cannot
-  close anything. The escalation names a problem; fixing it stays a human act.
+  "tell the manager" channel the briefing uses. It cannot message a customer,
+  cannot reassign a task, cannot close anything. The escalation names a problem;
+  fixing it stays a human act.
 
 Boundaries that make this safe to schedule:
 
+* **The delivery is an engine task, not a direct provider call.** This loop owns
+  no send of its own: it submits ``telegram.send`` to the engine on the ``cron``
+  channel and the engine decides whether a human approves it, dispatches it,
+  leases it and records its verdict. That is what gives the send a step row, an
+  approval gate, a recipient re-check at dispatch time and the ``uncertain``
+  discipline every other external write on this platform has. A coordinator that
+  called the handler itself would be the one external write with none of them —
+  which is exactly what this module used to be.
 * Every read goes through the ordinary ``workforce.workload`` tool handler, so
   the register declaration, A1 allowlist, agent tool permission and connection
   allowlist all apply unchanged. This module adds no new data path.
@@ -55,6 +62,7 @@ Boundaries that make this safe to schedule:
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import re
 
@@ -84,9 +92,27 @@ SOURCE_TOOLS = {
 
 # Ledger states. Only 'queued' is repeatable; every terminal outcome stays closed
 # so a manager is not told the same thing twice inside the cooldown window.
+#
+# 'submitted' is the handover: the escalation became an ordinary engine task and
+# every row of the batch carries its id. The engine decides whether a human must
+# approve the send and whether it went out; a later tick reads that verdict back
+# into the ledger. 'uncertain' is terminal, like 'sent': the provider may have
+# delivered before it stopped answering, and a second send would be a duplicate
+# the manager cannot un-read.
 LEDGER_QUEUED = 'queued'
+LEDGER_SUBMITTED = 'submitted'
 LEDGER_SENT = 'sent'
 LEDGER_FAILED = 'failed'
+LEDGER_UNCERTAIN = 'uncertain'
+# How the engine's task status settles a submitted ledger row.
+_TASK_TO_LEDGER = {'succeeded': LEDGER_SENT, 'failed': LEDGER_FAILED,
+                   'cancelled': LEDGER_FAILED, 'uncertain': LEDGER_UNCERTAIN}
+# Task channel for the delivery. 'cron' means the engine re-checks the owner's
+# membership at submit and again at dispatch, as it does for every scheduled task.
+DELIVERY_CHANNEL = 'cron'
+# Written into ``last_error`` the first time the attempt cap actually stops a
+# retry, so the exhaustion is audited once instead of on every cycle forever.
+EXHAUSTED = 'delivery_exhausted'
 
 SCHEDULE_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_.-]{0,63}$')
 NAME_RE = re.compile(r'^[a-z0-9][a-z0-9_.-]{0,63}$')
@@ -95,6 +121,15 @@ MAX_TITLE = 120
 MAX_RECIPIENT = 128
 MAX_OVERDUE = 50
 MAX_DIGEST_LINES = 40
+# How many times one work item's delivery may be attempted before its ledger row
+# is terminal. A ``failed`` row is retryable once the cooldown elapses, and
+# without a cap "retryable after the cooldown" means *forever*: an item whose
+# delivery can never be authorized would be re-claimed every cooldown until the
+# register itself changed, which is an unbounded loop wearing a schedule's
+# clothes. Five attempts span five cooldowns — five days at the default — which
+# is long enough to outlast a provider outage and short enough that a
+# permanently broken key stops instead of grinding.
+MAX_DELIVERY_ATTEMPTS = 5
 
 # Bounds on every knob, so a typo becomes a refusal rather than a stampede.
 LIMITS = {
@@ -145,6 +180,21 @@ def _identifier(value, name, maximum=64):
 
 def _day(now):
     return datetime.datetime.fromtimestamp(int(now), datetime.timezone.utc).strftime('%Y-%m-%d')
+
+
+def _delivery_key(schedule, claimed, now):
+    """The engine idempotency key for one batch: ``(schedule, day, batch digest)``.
+
+    Deterministic in the claimed work items, and only in them: the digest *text*
+    can drift between two attempts at the same batch (a stale count changes, a
+    title is edited) and a key that included the text would then submit a second
+    task for a message the manager may already have received. Sorting the keys
+    means the register's row order cannot change the key either.
+    """
+    batch = json.dumps(sorted((item['person'], item['task'], item['due'])
+                              for item in claimed), ensure_ascii=False)
+    fingerprint = hashlib.sha256(batch.encode('utf-8')).hexdigest()[:16]
+    return f"escalation:{schedule['id']}:{_day(now)}:{fingerprint}"
 
 
 class EscalationLoop:
@@ -319,15 +369,25 @@ class EscalationLoop:
         "invoice #12 is late" every single day for as long as it stays late, which
         is how an alert channel gets muted.
 
-        ``failed`` is retryable after the cooldown, because a provider outage is
-        transient and the manager genuinely has not been told. A ``queued`` row
-        (a worker crashed between claim and mark) is retryable immediately, since
-        nothing was delivered.
+        ``submitted`` means the engine is holding this batch right now — the send
+        may be waiting for an approval or already on the wire — so claiming it
+        again would queue a second copy of a message that is still in flight.
+        ``uncertain`` is terminal for the same reason ``sent`` is: the provider
+        stopped answering mid-send and may well have delivered, and a "just in
+        case" retry is how a manager gets told the same thing twice.
+
+        ``failed`` is retryable after the cooldown, because a refused submission
+        is often transient and the manager genuinely has not been told — but only
+        up to ``MAX_DELIVERY_ATTEMPTS``, after which the row is terminal. Without
+        that cap a permanently unauthorizable item is retried every cooldown for
+        as long as the register carries it. A ``queued`` row (a worker crashed
+        between claim and mark) is retryable immediately, since nothing was
+        delivered.
 
         The key is the work item, not the person, so a manager is told "this
         invoice is late" rather than "this person is late".
         """
-        row = c.execute('''SELECT attempt,status,last_attempt FROM p_escalation_ledger
+        row = c.execute('''SELECT attempt,status,last_attempt,last_error FROM p_escalation_ledger
           WHERE tenant=? AND schedule=? AND person=? AND task=? AND due=?''',
                         (tenant, schedule['id'], person, task, due)).fetchone()
         if row is None:
@@ -338,12 +398,17 @@ class EscalationLoop:
                       (tenant, schedule['id'], person, task, due, LEDGER_QUEUED,
                        now, now, now))
             return 1
-        if row['status'] == LEDGER_SENT:
-            # Delivered once. The work item is the key, and this item has already
-            # been reported; re-reporting it on a timer is the failure mode this
-            # module exists to avoid.
+        if row['status'] in (LEDGER_SENT, LEDGER_SUBMITTED, LEDGER_UNCERTAIN):
+            # Reported, in flight, or possibly reported. The work item is the key,
+            # and re-reporting it on a timer is the failure mode this module
+            # exists to avoid.
             return None
         if row['status'] == LEDGER_FAILED:
+            # The attempt budget is checked BEFORE the cooldown: an exhausted row
+            # is terminal, not merely resting.
+            if row['attempt'] >= MAX_DELIVERY_ATTEMPTS:
+                self._exhausted(c, tenant, schedule, person, task, due, row, now)
+                return None
             # Retryable, but only after the cooldown, so a provider outage does not
             # become a message storm when it recovers.
             if row['last_attempt'] + schedule['cooldown_seconds'] > now:
@@ -356,6 +421,28 @@ class EscalationLoop:
                             (LEDGER_QUEUED, now, now, tenant, schedule['id'], person,
                              task, due, row['last_attempt']))
         return row['attempt'] + 1 if updated.rowcount == 1 else None
+
+    def _exhausted(self, c, tenant, schedule, person, task, due, row, now):
+        """Record the attempt cap once, the first cycle it actually stops a retry.
+
+        A silent cap is a silent loss: the manager was never told about this work
+        item and nothing in the ledger would say why the attempts stopped. The
+        marker is written with a compare-and-set so a second worker reaching the
+        same row does not audit the same exhaustion twice, and the audit rides the
+        caller's transaction so the marker and the audit row commit together.
+        """
+        if row['last_error'] == EXHAUSTED:
+            return
+        updated = c.execute('''UPDATE p_escalation_ledger SET last_error=?,updated=?
+          WHERE tenant=? AND schedule=? AND person=? AND task=? AND due=? AND last_error!=?''',
+                            (EXHAUSTED, now, tenant, schedule['id'], person, task, due,
+                             EXHAUSTED))
+        if updated.rowcount == 1:
+            # The work item and its due date, never the person: an exhausted
+            # delivery is a fact about a message, not about an employee.
+            self.engine.audit(c, tenant, '', 'escalation.exhausted', 'escalation-loop',
+                              {'schedule': schedule['id'], 'task': task, 'due': due,
+                               'attempts': row['attempt']})
 
     def _mark(self, tenant, schedule, person, task, due, status, run_id='', error=''):
         e = self.engine
@@ -586,24 +673,82 @@ class EscalationLoop:
                      'jazolash qarori qabul qilmaydi. Qaror menejerniki.')
         return '\n'.join(lines)[:4000]
 
-    def _deliver(self, tenant, schedule, text):
-        """Send the escalation through the ordinary write tool.
+    def _deliver(self, tenant, schedule, text, claimed, now):
+        """Hand the escalation to the engine as an ordinary task; return its id.
 
-        The recipient is operator configuration and the agent must hold it in its
-        ``allowed_recipients`` (enforced at configure time and again by the engine
-        at submit), so the escalation can only ever reach the manager.
+        This loop never calls a provider. The engine decides whether a human must
+        approve the send: an autonomous agent whose recipient the pack allowlists
+        goes out unattended, anything else waits in the approval queue. Either way
+        the send has a step, an audit row, a lease, a recipient re-check at
+        dispatch and the uncertain discipline every other external write has.
+
+        The key is deterministic in ``(schedule, day, batch)``. The day alone
+        would be wrong here: unlike a briefing, an escalation is not a daily
+        artefact — a second cycle on the same day legitimately carries *different*
+        overdue items and must be able to submit a second task. Hashing the
+        claimed keys means the same batch on the same day is always the same task,
+        so a crash between submit and mark re-submits rather than double-sends,
+        while a genuinely new batch is a new key.
         """
-        tool = self.engine.registry.get('telegram.send')
         args = {'conversation_id': schedule['recipient'], 'text': text}
-        tool.validate(args)
-        return tool.handler(self.engine, tenant, schedule['agent'], args,
-                            'escalation:' + schedule['id'])
+        key = _delivery_key(schedule, claimed, now)
+        try:
+            return self.engine.submit(tenant, DELIVERY_CHANNEL, key, schedule['agent'],
+                                      [{'tool': 'telegram.send', 'args': args}],
+                                      schedule['actor'])
+        except Conflict:
+            # Same key, different text: this batch was already submitted and the
+            # digest drifted (a stale count changed, a title was edited) before the
+            # ledger was marked. Reuse that task rather than sending a second one.
+            with self.engine.read() as c:
+                row = c.execute('SELECT id FROM p_tasks WHERE tenant=? AND channel=? AND event_key=?',
+                                (tenant, DELIVERY_CHANNEL, key)).fetchone()
+            if not row:
+                raise
+            return row['id']
+
+    def _settle(self, tenant):
+        """Read the engine's verdict on every submitted escalation back into the ledger.
+
+        Bookkeeping only: it never sends, never advances a schedule and never
+        counts as work for the caller's return value. Rows are settled per task,
+        because one delivery carries a whole batch and a manager reading the audit
+        trail wants one line per message, not one per late invoice.
+        """
+        e = self.engine
+        with e.read() as c:
+            pending = [dict(r) for r in c.execute('''SELECT l.schedule,l.run_id,
+                 t.status task_status,count(*) items
+              FROM p_escalation_ledger l JOIN p_tasks t ON t.id=l.run_id AND t.tenant=l.tenant
+              WHERE l.tenant=? AND l.status=?
+              GROUP BY l.schedule,l.run_id,t.status''', (tenant, LEDGER_SUBMITTED))]
+        for row in pending:
+            verdict = _TASK_TO_LEDGER.get(row['task_status'])
+            if not verdict:
+                # Still queued, running or waiting for an approval. The engine owns
+                # it; a later tick reads the answer.
+                continue
+            with e.tx() as c:
+                c.execute('''UPDATE p_escalation_ledger SET status=?,updated=?
+                  WHERE tenant=? AND schedule=? AND run_id=? AND status=?''',
+                          (verdict, e.clock(), tenant, row['schedule'], row['run_id'],
+                           LEDGER_SUBMITTED))
+            e.audit_write(tenant,
+                          'escalation.' + ('delivered' if verdict == LEDGER_SENT else verdict),
+                          'escalation-loop',
+                          {'schedule': row['schedule'], 'task': row['run_id'],
+                           'items': row['items']})
 
     # ------------------------------------------------------------------ cycle
 
     def tick(self, tenant):
-        """Advance at most one due schedule. One read, one delivery, no blind retries."""
+        """Advance at most one due schedule. One read, one submission, no blind retries.
+
+        Returns True when a due schedule was advanced. Settling earlier
+        submissions is bookkeeping and never counts as work.
+        """
         e = self.engine
+        self._settle(tenant)
         with e.read() as c:
             frozen = c.execute('SELECT stopped FROM p_freeze WHERE tenant=?', (tenant,)).fetchone()
             if frozen and frozen['stopped']:
@@ -673,10 +818,20 @@ class EscalationLoop:
 
         text = self._digest(tenant, schedule, claimed, now, stale=stale)
         try:
-            result = self._deliver(tenant, schedule, text)
+            task = self._deliver(tenant, schedule, text, claimed, now)
+        except Forbidden as error:
+            # The engine refused the submission: the agent lost the notifier, or the
+            # recipient left the pack allowlist since configure. A schedule that can
+            # no longer be authorized is disabled with a reason rather than retried
+            # every cooldown until the attempt cap retires it item by item.
+            for item in claimed:
+                self._mark(tenant, schedule, item['person'], item['task'], item['due'],
+                           LEDGER_FAILED, error=type(error).__name__)
+            self._disable(tenant, schedule, 'delivery_denied:' + type(error).__name__)
+            return True
         except Exception as error:
-            # No delivery happened. The rows stay failed and the cooldown gates the
-            # next attempt, so a stuck send never produces a duplicate escalation.
+            # No task exists. The rows stay failed and the cooldown gates the next
+            # attempt, so a refused submission never produces a duplicate escalation.
             for item in claimed:
                 self._mark(tenant, schedule, item['person'], item['task'], item['due'],
                            LEDGER_FAILED, error=type(error).__name__)
@@ -685,15 +840,15 @@ class EscalationLoop:
             self._advance(tenant, schedule, now)
             return True
 
-        run_id = ''
-        if isinstance(result, dict):
-            run_id = str(result.get('external_id') or result.get('id') or '')[:64]
+        # The engine owns the send from here. Whether it went out, waited for an
+        # approval, or came back uncertain is read into the ledger by _settle.
         for item in claimed:
             self._mark(tenant, schedule, item['person'], item['task'], item['due'],
-                       LEDGER_SENT, run_id=run_id)
-        e.audit_write(tenant, 'escalation.delivered', 'escalation-loop',
+                       LEDGER_SUBMITTED, run_id=task)
+        e.audit_write(tenant, 'escalation.submitted', 'escalation-loop',
                       {'schedule': schedule['id'], 'recipient': schedule['recipient'],
-                       'items': len(claimed), 'seen': len(items), 'stale': stale})
+                       'task': task, 'items': len(claimed), 'seen': len(items),
+                       'stale': stale})
         self._advance(tenant, schedule, now)
         return True
 

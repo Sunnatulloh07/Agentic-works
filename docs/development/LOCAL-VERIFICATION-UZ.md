@@ -293,7 +293,7 @@ sonlar) to'plamga **18** sinov qo'shdi. Imzo **o'zgarmadi**:
 | `errors` | **11** — hammasi POSIX-only, yuqoridagi jadval bilan bir xil |
 | `skipped` | **1** — Windows symlink huquqi |
 
-Probe (`scripts/probe_truncation_verdict.py`) ham o'sdi: **334 → 1683** xossa,
+Probe (`scripts/probes/probe_truncation_verdict.py`) ham o'sdi: **334 → 1683** xossa,
 **1683/1683** yashil. Bu ikki faza o'zgargan fayllar:
 
 | Fayl | Nima o'zgardi |

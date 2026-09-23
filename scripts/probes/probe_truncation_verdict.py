@@ -1,7 +1,7 @@
 """Measure the `truncated` verdict every bounded tool reports, and the one way it
 used to lie.
 
-Run:  python scripts/probe_truncation_verdict.py
+Run:  python scripts/probes/probe_truncation_verdict.py
 Exit: 0 when every measured property holds, 1 when any does not.
 
 A probe is not a test. A test asserts that a path returns what it should; a probe
@@ -37,7 +37,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api-python'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'api-python'))
 
 from platform_runtime.business_graph import conflicts, search, timeline  # noqa: E402
 from platform_runtime.documents import (duplicates, fraud_signals, normalize,  # noqa: E402
@@ -832,7 +832,7 @@ def section_engine_clock():
 
     # The engine's own readers: does each consult engine.clock()?
     modules = {'escalation': 0, 'usage_budget': 0, 'workforce': 0, 'whatsapp': 0}
-    root = Path(__file__).resolve().parents[1] / 'api-python' / 'platform_runtime'
+    root = Path(__file__).resolve().parents[2] / 'api-python' / 'platform_runtime'
     for name in modules:
         text = (root / f'{name}.py').read_text(encoding='utf-8')
         modules[name] = text.count('engine.clock()') + text.count('_engine_now(engine)')
@@ -915,7 +915,7 @@ def section_expiry_boundary():
                expect_flip)
 
     # The three store readers must agree with each other at equality.
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     text = (root / 'app' / 'identity_store.py').read_text(encoding='utf-8')
     inclusive_sites = text.count("expires']<=time.time()") + text.count("expires']<=now")
     listing = "AND expires>?" in text
@@ -967,7 +967,7 @@ def section_approval_deadline():
         record(f'approval {label}: <= and < differ',
                (at >= deadline) != (at > deadline), expect_flip)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     engine = (root / 'platform_runtime' / 'engine.py').read_text(encoding='utf-8')
 
     # Both readers must be inclusive, and there must be exactly one of each: a
@@ -1067,7 +1067,7 @@ def section_lease_bound():
     record('an inclusive finish overlaps at equality (both fire)',
            (now >= now) is True and (now <= now) is True, True)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     engine = (root / 'platform_runtime' / 'engine.py').read_text(encoding='utf-8')
 
     # Exactly two sites of the strict form -- the finish guard and the dispatch fence --
@@ -1123,7 +1123,7 @@ def section_event_lease():
         record(f'event dequeue {label}: <= and < differ',
                (lease <= now) != (lease < now), lease == now)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     engine = (root / 'platform_runtime' / 'engine.py').read_text(encoding='utf-8')
 
     # The dequeue is inclusive, once.
@@ -1197,7 +1197,7 @@ def section_quota_windows():
     record('a window reset makes the daily cap reachable twice in two seconds',
            (cap <= cap) and (cap <= cap), True)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     engine = (root / 'platform_runtime' / 'engine.py').read_text(encoding='utf-8')
 
     # All three bounds, each asserted as a literal so a drift is a visible diff.
@@ -1277,7 +1277,7 @@ def section_device_cascade():
     record('the new generation is the only one that matches',
            (g_new == g_new) and (g_old == g_new), False)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     engine = (root / 'platform_runtime' / 'engine.py').read_text(encoding='utf-8')
     api = (root / 'app' / 'platform_api.py').read_text(encoding='utf-8')
 
@@ -1330,7 +1330,7 @@ def section_identity_throttle():
     """
     print('=== 21: the fixed-window throttle, three bounds ===')
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'app' / 'identity_store.py').read_text(encoding='utf-8')
 
     record('the refusal bound is strict (`>`), so the limit-th call is accepted',
@@ -1398,7 +1398,7 @@ def section_oauth_deadlines():
     """
     print('=== 22: oauth deadline readers, four senses ===')
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'oauth.py').read_text(encoding='utf-8')
 
     record('the state TTL is 600 seconds from begin()',
@@ -1459,7 +1459,7 @@ def section_cooldown_windows():
     """
     print('=== 23: escalation and reengagement time windows ===')
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     esc = (root / 'platform_runtime' / 'escalation.py').read_text(encoding='utf-8')
     re_ = (root / 'platform_runtime' / 'reengagement.py').read_text(encoding='utf-8')
 
@@ -1541,7 +1541,7 @@ def section_oversight_and_supervisor_bounds():
     """
     print('=== 24: oversight windows and supervisor bound ceilings ===')
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     ov = (root / 'platform_runtime' / 'oversight.py').read_text(encoding='utf-8')
     sup = (root / 'platform_runtime' / 'supervisor.py').read_text(encoding='utf-8')
 
@@ -1669,7 +1669,7 @@ def section_erp_bounds():
     from platform_runtime.erp import (ErpError, MAX_AMOUNT_MINOR, _amount,  # noqa: E402
                                       _date_text, _dig, _text)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'erp.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_erp.py').read_text(encoding='utf-8')
 
@@ -1809,7 +1809,7 @@ def section_unrepresentable_numbers():
     from platform_runtime import (business_graph as bg, inventory as inv,  # noqa: E402
                                   manufacturing as mfg, oee, workforce as wf)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     huge = 10 ** 400
 
     # --- four cell readers: unrepresentable means unreadable, never fatal -----
@@ -1903,7 +1903,7 @@ def section_database_contract_bounds():
     print('=== 27: managed database contract bounds ===')
     from platform_runtime.database import contract as c  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     database = root / 'platform_runtime' / 'database'
     src = (database / 'contract.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_managed_database.py').read_text(encoding='utf-8')
@@ -2022,7 +2022,7 @@ def section_agent_loop_bounds():
     from platform_runtime.engine import Engine, RateLimited  # noqa: E402
     from platform_runtime.tools import Registry, Tool, obj, build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'agent_loop.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_agent_loop.py').read_text(encoding='utf-8')
     lines = set(src.splitlines())
@@ -2185,7 +2185,7 @@ def section_route_surface_vs_ui():
     print('=== 29: declared route surface vs what the UI can reach ===')
     import re  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     app = root / 'api-python' / 'app'
     ui = root / 'apps' / 'ui'
 
@@ -2301,7 +2301,7 @@ def section_budget_and_schema_bounds():
     from platform_runtime.usage_budget import (MAX_AMOUNT, UsageBudget, amount,  # noqa: E402
                                                bounded, token_cost)
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     guard = (root / 'runtime_tests' / 'test_usage_budget.py').read_text(encoding='utf-8')
     adapter_guard = (root / 'runtime_tests' / 'test_adapters.py').read_text(encoding='utf-8')
 
@@ -2492,7 +2492,7 @@ def section_whatsapp_bounds():
 
     from platform_runtime import whatsapp, whatsapp_inbound  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     outbound_guard = (root / 'runtime_tests' / 'test_whatsapp.py').read_text(encoding='utf-8')
     inbound_guard = (root / 'runtime_tests' / 'test_whatsapp_inbound.py').read_text(encoding='utf-8')
 
@@ -2645,7 +2645,7 @@ def section_telephony_bounds():
     from platform_runtime import telephony as T  # noqa: E402
     from platform_runtime import vision as V  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'telephony.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_telephony.py').read_text(encoding='utf-8')
     vision_guard = (root / 'runtime_tests' / 'test_vision.py').read_text(encoding='utf-8')
@@ -2782,7 +2782,7 @@ def section_connector_bounds():
     from platform_runtime.engine import Forbidden, encode  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'connectors.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_connector_authority.py').read_text(encoding='utf-8')
     contract_guard = (root / 'runtime_tests' / 'test_connector_contract.py').read_text(encoding='utf-8')
@@ -3028,7 +3028,7 @@ def section_knowledge_bounds():
     from platform_runtime.engine import Engine  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'knowledge.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_knowledge.py').read_text(encoding='utf-8')
 
@@ -3244,7 +3244,7 @@ def section_vision_bounds():
     from platform_runtime.engine import Engine  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'vision.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_vision.py').read_text(encoding='utf-8')
 
@@ -3489,7 +3489,7 @@ def section_asset_bounds():
     from platform_runtime.engine import Engine  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'assets.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_assets.py').read_text(encoding='utf-8')
 
@@ -3809,7 +3809,7 @@ def section_sheets_bounds():
     from platform_runtime.engine import Engine  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'sheets.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_sheets.py').read_text(encoding='utf-8')
 
@@ -4058,7 +4058,7 @@ def section_documents_bounds():
 
     from platform_runtime import documents as D  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'documents.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_documents.py').read_text(encoding='utf-8')
 
@@ -4346,7 +4346,7 @@ def section_crm_bounds():
     from platform_runtime.engine import Engine  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     gateway_src = (root / 'platform_runtime' / 'crm' / 'crm_gateway.py').read_text(
         encoding='utf-8')
     engine_src = (root / 'platform_runtime' / 'engine.py').read_text(encoding='utf-8')
@@ -4699,7 +4699,7 @@ def section_crm_adapter_bounds():
         provider_price,
     )
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     crm_dir = root / 'platform_runtime' / 'crm'
     guard = (root / 'runtime_tests'
              / 'test_crm_adapter_boundaries.py').read_text(encoding='utf-8')
@@ -4969,7 +4969,7 @@ def section_reengagement_bounds():
     from platform_runtime.engine import Engine  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     src = (root / 'platform_runtime' / 'reengagement.py').read_text(encoding='utf-8')
     guard = (root / 'runtime_tests' / 'test_reengagement.py').read_text(encoding='utf-8')
     api = (root / 'app' / 'platform_api.py').read_text(encoding='utf-8')
@@ -5273,7 +5273,7 @@ def section_supervisor_bounds():
     from platform_runtime.engine import Engine, Forbidden  # noqa: E402
     from platform_runtime.tools import build_registry  # noqa: E402
 
-    root = Path(__file__).resolve().parents[1] / 'api-python'
+    root = Path(__file__).resolve().parents[2] / 'api-python'
     sup_src = (root / 'platform_runtime' / 'supervisor.py').read_text(encoding='utf-8')
     ovs_src = (root / 'platform_runtime' / 'oversight.py').read_text(encoding='utf-8')
     guard_sup = (root / 'runtime_tests' / 'test_supervisor.py').read_text(encoding='utf-8')

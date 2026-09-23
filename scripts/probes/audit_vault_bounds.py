@@ -51,7 +51,7 @@ bound GREEN merely because its test lives next door.
 
 Run from the repository root::
 
-    python scripts/audit_vault_bounds.py
+    python scripts/probes/audit_vault_bounds.py
 """
 import os
 import sys

@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'api-python'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'api-python'))
 
 from platform_runtime.agent_loop import AgentLoop
 from platform_runtime.engine import Engine, Forbidden

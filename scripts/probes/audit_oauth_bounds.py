@@ -15,7 +15,7 @@ Enumerated bounds, and whether anything is checking them:
 
 Run from the repository root::
 
-    python scripts/audit_oauth_bounds.py
+    python scripts/probes/audit_oauth_bounds.py
 """
 import os
 import sys

@@ -12,7 +12,7 @@ run::
 
     PY="$HOME/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
     PYTHONPATH=".;$(python -c 'import site;print(site.getsitepackages()[0])')" \\
-      "$PY" scripts/probe_oauth_boundaries.py
+      "$PY" scripts/probes/probe_oauth_boundaries.py
 """
 import os
 import sys
@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, 'api-python'))
 sys.path.insert(0, os.path.join(ROOT, 'api-python', 'runtime_tests'))
 

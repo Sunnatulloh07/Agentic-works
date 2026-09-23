@@ -20,3 +20,4 @@ config/integrations.json
 apps/runner/allow.json
 apps/runner/journal/
 *.local.txt
+.workbuddy-ai/

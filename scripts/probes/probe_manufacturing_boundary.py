@@ -30,7 +30,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'api-python'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'api-python'))
 
 from platform_runtime.engine import Engine, Forbidden  # noqa: E402
 from platform_runtime.manufacturing import (  # noqa: E402

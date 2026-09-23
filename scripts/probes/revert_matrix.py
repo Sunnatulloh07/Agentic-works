@@ -35,7 +35,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 API = os.path.join(ROOT, 'api-python')
 MANAGED = os.path.join(os.path.expanduser('~'), '.workbuddy-ai', 'binaries',
                        'python', 'envs', 'default', 'Scripts', 'python.exe')

@@ -15,7 +15,7 @@ boundary in one line:
 
 There is no function here that moves money, initiates a transfer, contacts a bank
 or a payment provider, or marks an invoice paid. A structural test scans the
-module's own surface for any such name, and `scripts/probe_document_no_payment.py`
+module's own surface for any such name, and `scripts/probes/probe_document_no_payment.py`
 proves the tool surface cannot express one. The furthest the module goes is to
 prepare an **ERP posting plan** — a proposal — which is a ``write`` and therefore
 requires a human approval like every other write in this platform.

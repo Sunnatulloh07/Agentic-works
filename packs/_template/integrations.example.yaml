@@ -1,0 +1,49 @@
+# Mijozning O'Z integratsiya konfigi. Nusxalang -> packs/<tenant>/integrations.yaml
+# (".example" qo'shimchasi olib tashlanadi, aks holda runtime uni o'qimaydi).
+#
+# Nega bu fayl bor: ilgari har bir runtime moduli tenant konfigini operator
+# tomonidagi bitta JSON'dan (PLATFORM_INTEGRATIONS_FILE) o'qirdi. Ya'ni
+# "yangi mijoz = yangi YAML" faqat retail demo uchun rost edi: chakana bo'lmagan
+# vertikalda tenant konfigining ~88% pack katalogidan TASHQARIDA yotardi.
+#
+# Ustunlik tartibi (platform_runtime/tools.py -> config(tenant)):
+#   1. <PACKS_DIR>/<tenant>/integrations.yaml  -- shu fayl, agar mavjud bo'lsa;
+#   2. PLATFORM_INTEGRATIONS_FILE JSON'idagi data[tenant] -- ko'chmagan tenantlar uchun.
+# Fayl mavjud bo'lsa-yu o'qilmasa (sintaksis xatosi, mapping emas, PyYAML yo'q) --
+# runtime XATO beradi, jimgina JSON'ga qaytmaydi: aks holda bitta typo sezilmay
+# qolardi va tenant eski operator konfigida ishlayverardi.
+#
+# SIR SAQLASH QOIDASI (buzilmaydi): bu yerda faqat env o'zgaruvchi NOMI yoziladi,
+# hech qachon qiymati. `token_env: DEMO_TELEGRAM_TOKEN` -- to'g'ri;
+# `token: 123456:AA...` -- noto'g'ri. Qiymatlar env/vault'da qoladi, bu fayl esa
+# git'ga tushadi. Nom [A-Z][A-Z0-9_]* shaklida bo'lishi shart.
+#
+# ESLATMA (ma'lum cheklov): Instagram'dan KIRUVCHI xabar account_id bo'yicha
+# tenant'ni topadi (tenant_for_instagram_account), va u hali faqat operator
+# JSON'ini skanerlaydi. Shuning uchun inbound kerak bo'lsa, instagram.account_id
+# JSON'da ham ro'yxatda turishi shart.
+
+telegram:
+  token_env: DEMO_TELEGRAM_TOKEN
+
+instagram:
+  account_id: "17841400000000000"
+  graph_version: v21.0
+  token_env: DEMO_INSTAGRAM_TOKEN
+
+sheets:
+  spreadsheet_id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
+  range: Sheet1!A:D
+  token_env: DEMO_SHEETS_TOKEN
+
+mcp:
+  url: https://mcp.example.com/rpc
+  token_env: DEMO_MCP_TOKEN
+  allowed_tools: [crm.lookup]
+  tool_schemas:
+    crm.lookup:
+      type: object
+      additionalProperties: false
+      required: [phone]
+      properties:
+        phone: { type: string, minLength: 1, maxLength: 32 }

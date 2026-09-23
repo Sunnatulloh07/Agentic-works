@@ -47,10 +47,25 @@ import re
 from .engine import Conflict, Forbidden, NotFound
 
 # Ledger states. Only 'queued' is repeatable: everything else is a delivered
-# result the recipient already saw, or a state a human must look at.
+# result the recipient already saw, a send the engine still owns, or a state a
+# human must look at.
+#
+# 'submitted' is the handover: the digest became an ordinary engine task and the
+# ledger row carries its id. The engine decides whether a human approves it and
+# whether it went out; a later tick reads that verdict back into the ledger.
+# 'uncertain' is terminal for the day: the provider may have delivered, and a
+# second send would be a duplicate the recipient cannot un-read.
 LEDGER_QUEUED = 'queued'
+LEDGER_SUBMITTED = 'submitted'
 LEDGER_SENT = 'sent'
 LEDGER_FAILED = 'failed'
+LEDGER_UNCERTAIN = 'uncertain'
+# How the engine's task status settles a submitted ledger row.
+_TASK_TO_LEDGER = {'succeeded': LEDGER_SENT, 'failed': LEDGER_FAILED,
+                   'cancelled': LEDGER_FAILED, 'uncertain': LEDGER_UNCERTAIN}
+# Task channel and key prefix. 'cron' means the engine re-checks the owner's
+# membership at submit and at dispatch, as it does for every scheduled task.
+DELIVERY_CHANNEL = 'cron'
 
 POLICY_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_.-]{0,63}$')
 DELIVERY_TOOLS = frozenset({'telegram.send'})
@@ -150,6 +165,14 @@ class Briefing:
         policy = self.engine.policy(tenant, agent)
         if policy.get('ladder') not in {'human_led', 'human_assisted', 'autonomous'}:
             raise Forbidden('Agent policy unavailable for briefing')
+        # The digest is delivered as an engine task, so the engine's own rules
+        # apply: the agent must hold the notifier and the recipient must be
+        # pack-allowlisted. Refusing here turns a first-cycle Forbidden into a
+        # configure-time error the owner can read.
+        if 'telegram.send' not in (policy.get('tools') or []):
+            raise Forbidden('Briefing agent must hold telegram.send to deliver a digest')
+        if recipient not in (policy.get('allowed_recipients') or []):
+            raise Forbidden('Briefing recipient must be pack-allowlisted for the agent')
         e = self.engine
         with e.tx() as c:
             e.require_active(c, tenant)
@@ -395,13 +418,54 @@ class Briefing:
                             (now, now, tenant, schedule['id'], day, row['attempt']))
         return row['attempt'] + 1 if updated.rowcount == 1 else None
 
-    def _deliver(self, tenant, schedule, text):
-        """Send the digest through the ordinary write tool, so approval rules apply."""
-        tool = self.engine.registry.get('telegram.send')
+    def _deliver(self, tenant, schedule, text, day):
+        """Hand the digest to the engine as an ordinary task; return its id.
+
+        This loop never calls a provider. The engine decides whether a human must
+        approve the send: an autonomous agent whose recipient is pack-allowlisted
+        goes out unattended, anything else waits in the approval queue. Either way
+        the send has a step, an audit row, a lease and the uncertain discipline
+        every other external write has. The key is one per schedule-day, so a
+        crash between submit and mark cannot create a second task.
+        """
         args = {'conversation_id': schedule['recipient'], 'text': text}
-        tool.validate(args)
-        return tool.handler(self.engine, tenant, schedule['agent'], args,
-                            'briefing:' + schedule['id'])
+        key = f"briefing:{schedule['id']}:{day}"
+        try:
+            return self.engine.submit(tenant, DELIVERY_CHANNEL, key, schedule['agent'],
+                                      [{'tool': 'telegram.send', 'args': args}],
+                                      schedule['actor'])
+        except Conflict:
+            # Same key, different text: the digest was already submitted and the
+            # clock moved before the ledger was marked. Reuse that task.
+            with self.engine.read() as c:
+                row = c.execute('SELECT id FROM p_tasks WHERE tenant=? AND channel=? AND event_key=?',
+                                (tenant, DELIVERY_CHANNEL, key)).fetchone()
+            if not row:
+                raise
+            return row['id']
+
+    def _settle(self, tenant):
+        """Read the engine's verdict on every submitted digest back into the ledger.
+
+        Bookkeeping only: it never sends, never advances a schedule, and does not
+        count as work for the caller's return value.
+        """
+        e = self.engine
+        with e.read() as c:
+            pending = [dict(r) for r in c.execute('''SELECT l.schedule,l.day,l.run_id,t.status task_status
+              FROM p_briefing_ledger l JOIN p_tasks t ON t.id=l.run_id AND t.tenant=l.tenant
+              WHERE l.tenant=? AND l.status=?''', (tenant, LEDGER_SUBMITTED))]
+        for row in pending:
+            verdict = _TASK_TO_LEDGER.get(row['task_status'])
+            if not verdict:
+                continue
+            with e.tx() as c:
+                c.execute('''UPDATE p_briefing_ledger SET status=?,updated=?
+                  WHERE tenant=? AND schedule=? AND day=? AND status=?''',
+                          (verdict, e.clock(), tenant, row['schedule'], row['day'], LEDGER_SUBMITTED))
+            e.audit_write(tenant, 'briefing.' + ('delivered' if verdict == LEDGER_SENT else verdict),
+                          'briefing-loop', {'schedule': row['schedule'], 'day': row['day'],
+                                            'task': row['run_id']})
 
     def _mark(self, tenant, schedule, day, status, **fields):
         e = self.engine
@@ -415,8 +479,13 @@ class Briefing:
                        fields.get('error', '')[:200], now, tenant, schedule['id'], day))
 
     def tick(self, tenant):
-        """Advance at most one due schedule. One delivery, no blind retries."""
+        """Advance at most one due schedule. One submission, no blind retries.
+
+        Returns True when a due schedule was advanced. Settling earlier
+        submissions is bookkeeping and never counts.
+        """
         e = self.engine
+        self._settle(tenant)
         with e.read() as c:
             frozen = c.execute('SELECT stopped FROM p_freeze WHERE tenant=?', (tenant,)).fetchone()
             if frozen and frozen['stopped']:
@@ -471,25 +540,30 @@ class Briefing:
             return True
 
         try:
-            result = self._deliver(tenant, schedule, text)
+            task = self._deliver(tenant, schedule, text, day)
+        except Forbidden as error:
+            # The engine refused the send: the agent lost the notifier or the
+            # recipient left the pack allowlist since configure. A schedule that
+            # can no longer be authorised is disabled with a reason, not retried.
+            self._mark(tenant, schedule, day, LEDGER_FAILED, sections=stats['sections'],
+                       rows=stats['rows'], digest=text, error=type(error).__name__)
+            self._disable(tenant, schedule, 'delivery_denied:' + type(error).__name__)
+            return True
         except Exception as error:
-            # No delivery happened. The row stays failed, and the next day is a new
-            # key, so a stuck send never produces a duplicate digest.
+            # No task exists. The row stays failed, and the next day is a new key,
+            # so a stuck submission never produces a duplicate digest.
             self._mark(tenant, schedule, day, LEDGER_FAILED, sections=stats['sections'],
                        rows=stats['rows'], digest=text, error=type(error).__name__)
             self._advance(tenant, schedule, now)
             return True
-        run_id = ''
-        if isinstance(result, dict):
-            # telegram.send returns {'provider', 'external_id'}; keep the provider's
-            # own message id so a delivered digest is traceable to the chat.
-            run_id = str(result.get('external_id') or result.get('id') or '')[:64]
-        self._mark(tenant, schedule, day, LEDGER_SENT, run_id=run_id,
+        # The engine owns the send from here. Whether it went out, waited for an
+        # approval, or came back uncertain is read into the ledger by _settle.
+        self._mark(tenant, schedule, day, LEDGER_SUBMITTED, run_id=task,
                    sections=stats['sections'], rows=stats['rows'], digest=text)
-        e.audit_write(tenant, 'briefing.delivered', 'briefing-loop',
-                      {'schedule': schedule['id'], 'day': day, 'recipient': schedule['recipient'],
-                       'sections': stats['sections'], 'rows': stats['rows'],
-                       'complete': stats['complete']})
+        e.audit_write(tenant, 'briefing.submitted', 'briefing-loop',
+                      {'schedule': schedule['id'], 'day': day, 'task': task,
+                       'recipient': schedule['recipient'], 'sections': stats['sections'],
+                       'rows': stats['rows'], 'complete': stats['complete']})
         self._advance(tenant, schedule, now)
         return True
 

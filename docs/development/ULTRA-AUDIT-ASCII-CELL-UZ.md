@@ -5267,8 +5267,8 @@ sonli chegara bor — hammasi **inline literal**.
 
 ### §148.2. O'lchov — revert matritsasi, **9/9 yashil**
 
-Yangi asbob: `scripts/revert_matrix.py` (qayta ishlatiladigan; faza skripti
-`scripts/audit_oauth_bounds.py`). Nazorat yashil, keyin **to'qqizta mutatsiya
+Yangi asbob: `scripts/probes/revert_matrix.py` (qayta ishlatiladigan; faza skripti
+`scripts/probes/audit_oauth_bounds.py`). Nazorat yashil, keyin **to'qqizta mutatsiya
 hammasi yashil**:
 
 ```
@@ -5350,7 +5350,7 @@ restore verified: YES
   bilan: `b'maximum=256'` ni `maximum=2560` ham qanoatlantiradi) **va** chegarani
   **ikki tomondan** yuradi. Sinf **`OAuthTests` dan meros olmaydi** — pastga
   qarang.
-- `scripts/probe_oauth_boundaries.py` — **48 xossa, 48 pass**, 4 bo'lim: darvozalar,
+- `scripts/probes/probe_oauth_boundaries.py` — **48 xossa, 48 pass**, 4 bo'lim: darvozalar,
   provayder javobi chegaralari, **har rad etish o'z sababini aytadi**, va rad
   etilgan exchange baribir **fence qilinadi**.
 
@@ -5552,7 +5552,7 @@ risk refusal not named RED  22.5s  FAILED (failures=1)
 restore verified: YES
 ```
 
-**Asbob yaxshilandi:** `scripts/revert_matrix.py` endi **bir nechta** test
+**Asbob yaxshilandi:** `scripts/probes/revert_matrix.py` endi **bir nechta** test
 faylini bitta yurishda o'lchaydi (dotted spec), chunki bu chegaralar bir necha
 faylda qadalgan. Bitta fayl bilan chegaralansak, **qo'shni fayldagi** sinov
 qadaydigan chegara **yolg'on YASHIL** chiqardi — bu asbobning xatosi bo'lardi,
@@ -5564,7 +5564,7 @@ kodning emas. Eski `*.py` rejimi o'zgarmadi.
   Har biri **literalni** qadaydi (konstantani moduldan **qayta o'qimaydi** — §142.5
   da oltita chegara aynan shu sababdan yashil chiqqan edi) **va** chegarani
   **ikki tomondan** yuradi.
-- `scripts/probe_tools_boundaries.py` — **66 xossa, 66 pass**, 6 bo'lim:
+- `scripts/probes/probe_tools_boundaries.py` — **66 xossa, 66 pass**, 6 bo'lim:
   literallar, sxema qabuli, **tuzatilgan ikki nuqson**, transport, o'qish
   shiftlari, credential nom shakli.
 
@@ -5805,7 +5805,7 @@ Naqsh xatosini **ikki marta** to'lashga to'g'ri keldi. Endi `revert_matrix.py` d
 `verify()` bor va fazza skriptlari `--check` ni qabul qiladi:
 
 ```
-$ python scripts/audit_vault_bounds.py --check
+$ python scripts/probes/audit_vault_bounds.py --check
 target: api-python\platform_runtime\secret_vault.py  (6194 bytes)
   OK         key ring floor 1
   ...
@@ -5819,7 +5819,7 @@ kutishdan **oldin** topiladi.
 
 - `test_secret_vault.py`: yangi `DeclaredBoundTests` — **11 sinov**, 11 → **22**.
   Har biri chegarani **ikki tomondan** yuradi va **literalni** qadaydi.
-- `scripts/probe_vault_boundaries.py` — **99 xossa, 99 pass**, 9 bo'lim.
+- `scripts/probes/probe_vault_boundaries.py` — **99 xossa, 99 pass**, 9 bo'lim.
 - Modul: 99 → **147 satr**; nomlangan konstanta **0 → 12**.
 
 ### §150.10. O'zim qilgan xatolar (yashirilmadi)
@@ -6730,3 +6730,360 @@ Aynan shu xato qilinishiga sabab bo'lgan narsa ham bor edi: oldingi sessiyadan
 `local-20260922T025813390316Z` degan **haqiqiy** bo'sh qoldiq qolgan edi. Endi
 qo'riqchi `mkdir` dan **oldin** ishlagani uchun rad etish umuman papka
 yaratmaydi, va bu noaniqlik yo'q.
+
+## §157. Fazza ellik ikkinchi — Customer 360: **bir son ikki joyda, va qaysi biri tor bo'lsa jimgina o'sha yutadi**
+
+### §157.1. Nega aynan `customer360.py`, va §156 ning cheklovi qanday o'lchandi
+
+§155 `app/` qatlamini ochdi va bitta gapni qoldirdi: *o'qilmaydigan to'plamdagi qadam —
+qadam emas*. §156 o'sha gapning manzilini topdi va eng og'ir holatini — gatesiz to'plamda
+qadalgan ikki store'ni — yopdi. Lekin §156 **halol cheklov** bilan tugadi:
+
+> `LadderStore` va `FileApprovalStore` ni gate ichida hech kim ishlatmaydi... **mustaqil
+> chaqiruvchi** kengaytirilgan chegarani sezmaydi. Bu §155 dan **kuchsizroq**.
+
+Bu fazada o'sha cheklov **o'lchanadigan** qilindi. `app/` qatlamida qolgan modullar ichida
+eng ko'p chegarali fayl — `customer360.py`, va u §156 dan tub farq qiladi: uning **uchta
+mustaqil iste'molchisi** bor.
+
+| Iste'molchi | Nimani qadaydi |
+|---|---|
+| `runtime_tests/test_customer360.py` | tenant chegarasi, kanal identifikatorining boshqa customer'ga o'tmasligi, buyurtma idempotentligi, query SQL emasligi |
+| `runtime_tests/test_identity_hardening.py` | buyurtma customer'lar orasida ko'chmasligi, muzlatilgan workspace yozuvni rad etishi |
+| `runtime_tests/test_control_plane_authority.py` | tushirib qoldirilgan `actor` — imtiyozli xizmat identifikatori emas; bekor qilingan a'zo yoza olmasligi |
+
+Ya'ni bu fazada "qadalgan" degan gap **"mustaqil chaqiruvchi sezadi"** degan ma'noni beradi.
+Buning uchun matritsa **ikki marta** yurgiziladi (§157.10) — bir marta o'z modulim bilan, bir
+marta faqat iste'molchilar bilan.
+
+### §157.2. Sanab chiqilgan chegaralar
+
+| Chegara | Qiymat | Oldin |
+|---|---|---|
+| `_text` poli / shifti | 1 / 256 | default argumentlar |
+| identifikator shifti | 128 | **kelishishi kerak bo'lgan ikki literal** |
+| tenant shifti | 64 | default argument |
+| kontakt qiymati shifti | 512 | default argument |
+| telefon raqami poli | 7 | **nomsiz literal** |
+| `external_ref` shifti | 256 | **nomsiz literal** |
+| sahifa `limit` poli / shifti | 1 / 100 | **nomsiz literal**, va xabarda ham |
+| sahifa `offset` shifti | 100_000 | **nomsiz literal** |
+| `query` shifti | 256 | **nomsiz literal** |
+| ichki to'plam shifti | 100 | **to'rt alohida literal** |
+| oldindan filtr shiftlari | 32 / 32 / 32 / 8 | **to'rt nomsiz literal** |
+| buyurtma jamlanmasi shifti | 10**15 | **nomsiz literal** |
+| buyurtma holati lug'ati | 6 so'z | **qo'riqchi ichida inline** |
+| valyuta shakli | 3 harf | nomsiz regex |
+| yozuv rollari | 4 dan 2 tasi | **qo'riqchi ichida inline** |
+| `status!='deleted'` | 4 joy | **nomsiz, va API orqali yetib bo'lmaydi** |
+
+### §157.3. Bir son, ikki joy — va qaysi biri tor bo'lsa jimgina o'sha yutadi
+
+`_id` ikki qadamdan o'tadi:
+
+```python
+def _id(value: str, name: str = "id") -> str:
+    value = _text(value, name, maximum=MAX_ID_CHARS)
+    if not _ID_RE.fullmatch(value):
+        raise CustomerError(f"{name} noto'g'ri")
+    return value
+```
+
+va regex o'sha sonni **ikkinchi marta** yozgan edi:
+
+```python
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+```
+
+Ikki literal **mos kelishi shart**, lekin ularni mos qiladigan hech narsa yo'q edi. Va bu
+yerda xato ko'rinmaydi: `{1,128}` ni `{1,12}` qilish **hech qanday xatolik ko'tarmaydi** —
+identifikatorlar shunchaki qisqaradi, xato xabari esa `128` ni **bir marta ham** eslatmaydi.
+Ya'ni tor tomon jimgina yutadi, ikkinchisi esa o'z sonini himoya qilib turadi.
+
+Tuzatish — qadam qo'yish emas, **savolni yo'q qilish**:
+
+```python
+_ID_RE = re.compile(rf"^[A-Za-z0-9_-]{{1,{MAX_ID_CHARS}}}$")
+```
+
+Endi kelishib olishi kerak bo'lgan ikkinchi literal **yo'q**. Bu §156 dagi
+`max(MIN_WINDOW, min_tasks)` bilan **aynan bir harakat**: ikki sonning mos kelishini test bilan
+qadash o'rniga, ikkinchi sonni umuman yozmaslik.
+
+### §157.4. Dominat qilingan shiftlar — to'plam emas, **sabab** qadaladi
+
+`kind`, `channel`, `status` va `currency` uzunlikka tekshiriladi, **keyin darhol** kichik
+lug'at yoki regex bo'yicha tekshiriladi:
+
+```python
+kind = _text(kind, "type", maximum=MAX_KIND_CHARS).casefold()
+if kind not in _ALLOWED_CONTACT_TYPES:
+    raise CustomerError("contact type noto'g'ri")
+```
+
+Ya'ni bu shiftlar **qabul qilinadigan to'plamni belgilamaydi** — ular faqat lug'atga qadar
+bajariladigan ish hajmini chegaralaydi. `MAX_KIND_CHARS` ni 32 dan 16 ga tushirish ham, 64 ga
+ko'tarish ham to'plamni o'zgartirmaydi; faqat **ish hajmi** o'zgaradi.
+
+Shuning uchun ularni to'plam bilan qadab bo'lmaydi. Ular **sabab** bilan qadalanadi:
+
+| Kirish | Rad etish sababi | Xabar |
+|---|---|---|
+| 33 belgili `kind` | **uzunlik** | `type uzunligi noto'g'ri` |
+| 10 belgili `kind` | **lug'at** | `contact type noto'g'ri` |
+
+Ikki xil sabab, ikki xil yo'l, bir xil istisno **turi**. Faqat `CustomerError` ni tekshirgan
+test **ikkisini ham qadalamaydi** — u shunchaki "nimadir rad etildi" der. Bu §155.6 dagi
+qoidaning uzunlik tekshiruviga qo'llangan shakli: *shart bajarilgani — sabab ekanining isboti
+emas*.
+
+### §157.5. Bitta shift, to'rt joy — va to'rttasi bir xil kuchda qadalmagan
+
+`get_customer` to'rt to'plam qaytaradi va har biri `LIMIT 100` bilan chegaralangan edi —
+**to'rt alohida literal**. Bittasini o'zgartirish qolgan uchtasini jimgina ortda qoldirardi.
+Endi to'rttasi ham bitta konstantadan:
+
+```python
+f"... ORDER BY created LIMIT {MAX_EMBEDDED_ROWS}"
+```
+
+Lekin halollik shuni talab qiladi: **to'rttasi bir xil kuchda qadalmagan.** `contacts` va
+`orders` to'plamlarini arzon to'ldirish mumkin (101 ta yozuv), shuning uchun ular
+**xatti-harakat** bilan qadalgan — funksiya 100 ta qaytaradi. `channel_identities` va
+`conversations` uchun bunday test yozilmagan; ular **manba sanovi** bilan qadalgan:
+
+```python
+self.assertEqual(4, text.count('LIMIT {MAX_EMBEDDED_ROWS}'))
+```
+
+Bu ham qadaladi — to'rt joydan birortasini literalga aylantirish sanovni 3 ga tushiradi — lekin
+**boshqa turdagi** qadam: qaytarilgan ro'yxat emas, matn tekshiriladi. Farq yozib qo'yildi,
+yashirilmadi.
+
+### §157.6. Hech bir test yeta olmaydigan qo'riqchi: `status!='deleted'`
+
+To'rt predikat `status!='deleted'` ni tekshiradi:
+
+| Joy | Nima uchun |
+|---|---|
+| `get_customer` | qabr toshi o'qilmasin |
+| `list_customers` | ro'yxatda ko'rinmasin |
+| `_ensure_customer` | yangi bola qabul qilmasin |
+| `create_customer` | `deleted` **o'rnatilmasin** |
+
+Oxirgisi qolgan uchtasini **o'lchab bo'lmaydigan** qiladi: API orqali `status='deleted'` bilan
+qator yaratib bo'lmaydi, ya'ni modul ichidan yurgan **hech bir test** o'sha qatorni yarata
+olmaydi. To'rt qo'riqchi, **nol qoplama** — va to'rttasini o'chirish to'plamni yashil qoldirdi.
+
+Bu "qo'riqchi faqat uni qaytarish testni qizartirsa qadalgan" qoidasining **teskarisi**: ba'zi
+qo'riqchilarga API qabul qiladigan **hech bir kirish** yetib bormaydi, chunki boshqa qo'riqchi
+birinchi bo'lib o'z ishini qilyapti.
+
+Yechim — qatorni API **ostidan** ekish:
+
+```python
+row = create_customer(tenant, 'Gone', actor=self.actor)
+db().execute("UPDATE p_customers SET status='deleted' WHERE id=?", (row['id'],))
+db().commit()
+```
+
+va qo'riqchini o'qiladigan **uch joyning hammasida** o'lchash. API yarata olmaydigan qator —
+bu baribir sxema, migratsiya yoki import yaratadigan qator.
+
+### §157.7. `_writable` va e'lon qilinmagan subset
+
+`identity_store.ROLES` to'rt rolni e'lon qiladi:
+
+```python
+ROLES = {'owner', 'operator', 'integrator', 'viewer'}
+```
+
+`_writable` esa yozish huquqini qo'riqchi **ichida** sanab o'tgan edi:
+
+```python
+if not m or m['role'] not in {'owner','operator'}: raise AuthenticationError('Write permission revoked')
+```
+
+Ikki literal, va **ikkisi ham** ikkinchisidan bexabar. Lug'atga rol qo'shilsa yoki qo'riqchi
+xato bilan kengaytirilsa — **customer ma'lumotini kim yozishi** jimgina o'zgaradi. Hech bir
+to'plamda **owner ham, operator ham bo'lmagan** a'zo yaratilmagan edi.
+
+Muhim nuqta: bu **subset** munosabati, va uni inline literal ifodalay olmaydi. Endi nomlangan:
+
+```python
+WRITE_ROLES = frozenset({"owner", "operator"})
+```
+
+va munosabat **o'zi** tekshiriladi, ikki qiymat emas:
+
+```python
+self.assertLessEqual(set(customer360.WRITE_ROLES), set(identity.ROLES))
+```
+
+So'ng xatti-harakat **ikki tomonga** o'lchanadi — subset **tor** bo'lib ham buzilishi mumkin:
+har bir e'lon qilingan rol uchun a'zo yaratiladi va o'qish-uchun rollar (`viewer`,
+`integrator`) rad etilishi, yozuv rollari (`owner`, `operator`) esa o'tishi tekshiriladi.
+A'zolik qatori SQL bilan ekiladi, chunki API faqat taklifnoma aylanishini taklif qiladi — va
+o'lchanayotgan narsa rol, taklifnoma emas.
+
+### §157.8. Chegaraning **uchinchi** joyi: chaqiruvchi o'qiydigan xabar
+
+Sahifalash oynasi kodda **uch marta** yozilgan edi:
+
+```python
+MIN_PAGE_LIMIT = 1
+MAX_PAGE_LIMIT = 100
+...
+if not isinstance(limit, int) or isinstance(limit, bool) or not MIN_PAGE_LIMIT <= limit <= MAX_PAGE_LIMIT:
+    raise CustomerError("limit 1..100 bo'lishi kerak")      # <-- uchinchi joy
+```
+
+Xabarni **hech kim import qilmaydi**, shuning uchun uni **hech narsa** tutmaydi.
+`MAX_PAGE_LIMIT` ni 200 ga ko'tarsangiz, qo'riqchi 200 ni qabul qiladi, chaqiruvchiga esa
+"chegara 100" deb aytiladi — **to'liq ishonch bilan aytilgan noto'g'ri javob**.
+
+Endi uchinchi joy ham konstantadan quriladi:
+
+```python
+raise CustomerError(f"limit {MIN_PAGE_LIMIT}..{MAX_PAGE_LIMIT} bo'lishi kerak")
+```
+
+va **ikki marta** qadalanadi: bir marta manbada, bir marta **istisnoda** — chunki chaqiruvchi
+aslida ko'radigan narsa xabar:
+
+```python
+with self.assertRaises(CustomerError) as caught:
+    list_customers('tt', limit=customer360.MAX_PAGE_LIMIT + 1)
+self.assertIn(f'{customer360.MIN_PAGE_LIMIT}..{customer360.MAX_PAGE_LIMIT}',
+              str(caught.exception))
+```
+
+Umumiy qoida: modulda sonning **har bir literal shaklini** qidiring — yalang'och raqam, `a..b`
+oralig'i, odam tilidagi gap — faqat taqqoslashlarni emas.
+
+### §157.9. Test bor, lekin u boshqa narsani o'lchaydi: `test_query_is_not_sql`
+
+`test_customer360.py` da `query` bo'yicha test **bor**:
+
+```python
+def test_query_is_not_sql(self):
+    create_customer('tt', 'Ali', actor=self.owner['id'])
+    create_customer('tt', 'Vali', actor=self.owner['id'])
+    result = list_customers('tt', query="' OR 1=1 --")
+    self.assertEqual([], result)
+```
+
+Uning nomi "query — SQL emas", va bu **to'g'ri** — lekin u `escaped = query.replace(...)`
+qatorining **birorta** almashtirishini o'lchamaydi, chunki qiymat allaqachon `?` bilan
+**bog'langan**. `' OR 1=1 --` da `%`, `_` ham, `\` ham yo'q.
+
+Ya'ni bu test uchta almashtirishning **uchtasini ham** qoldirib, yashil qolaveradi. Ular
+boshqa narsaga qarshi: `LIKE` naqshining **joker belgilariga**. Uchala almashtirishning o'z
+testi shu fazada yozildi:
+
+| Almashtirish | Nima uchun | Usiz nima bo'lardi |
+|---|---|---|
+| `.replace("%", "\\%")` | `%` — naqshda "hamma narsa" | `%` qidiruvi **butun ro'yxatni** qaytarardi |
+| `.replace("_", "\\_")` | `_` — naqshda "bitta belgi" | `a_b` qidiruvi `axb` ni ham topardi |
+| `.replace("\\", "\\\\")` | `ESCAPE '\'` dan keyin teskari chiziq **ma'noga ega** | `a\b` qidiruvi `ab` ni topardi |
+
+Uchinchisi eng oson ko'rilmaydigani: u **hech qayerda** yozilmagan, va usiz `a\b` naqshi
+`a` + "b harfining o'zi" bo'lib qoladi — ya'ni qidiruv **so'ralmagan narsani** topadi.
+
+Bu §157.9 ning umumiy darsi: **testning nomi uning o'lchovini aytmaydi.** `test_query_is_not_sql`
+SQL in'ektsiyasini o'lchaydi — va SQL in'ektsiyasi bu yerda `?` tufayli **umuman mumkin emas** —
+escapingni esa o'lchamaydi.
+
+### §157.10. Birinchi yurish: 60 ta mutatsiyadan **4 tasi yashil** — va ularning uchtasi bir oila
+
+Matritsa ikki yurishda yurgizildi (§157.1): **pass A** — faqat `test_customer360_bounds`
+(51 mutatsiya), **pass B** — faqat uchta mustaqil iste'molchi (9 mutatsiya). Birinchi yurish:
+
+| Yurish | Mutatsiya | RED | GREEN | O'lchanmagan |
+|---|---|---|---|---|
+| A (`test_customer360_bounds`) | 51 | 49 | **2** | 0 |
+| B (iste'molchilar) | 9 | 7 | **2** | 0 |
+
+Har ikkala yurishda `CONTROL GREEN`, `restore verified: YES`, sidecar qolmadi. To'rt GREEN:
+
+**1. `channel identity needs a real true`** (`if verified is not True:` → `if False:`) —
+**noto'g'ri yurishga yozilgan mutatsiya**, kod nuqsoni emas. Uni `test_customer360.py` dagi
+`test_channel_identity_requires_explicit_verification` qadaydi — pass B dagi test. Men uni
+pass A ga yozgan edim; pass A esa uni o'lchamaydi. Yechim: mutatsiyani pass B ga ko'chirish.
+Bu §157.10 ning eng arzimagan topilmasi — lekin u ikki yurishli dizayn **o'zini tekshiradi**
+degan isboti.
+
+**2. `a tombstone takes no new children`** (`_ensure_customer` predikati) — **haqiqiy nuqson,
+va sababi §155.6 ning o'zi.** Testim faqat `CustomerNotFound` turini tekshirardi. Lekin har bir
+mutator oxirida `get_customer` ni qaytaradi — va U qabr toshida ham ko'taradi, **bola
+yozilib bo'lingandan keyin**. Predikatni o'chirish INSERT'ga yo'l ochadi, keyin o'qib
+qaytarish xatolik beradi — va testim **xuddi shu istisnoni** ko'rib, yashil qolardi. Yechim:
+qadamni istisno **turi** bilan emas, **natija** bilan qadash — rad etilgan chaqiruvdan keyin
+**qator yozilmaganini** tekshirish (`count == 0`).
+
+**3. `the write path needs an actor`** (`if False:raise`) — **2-bandning akasi.** Bo'sh
+`actor` hali ham rad etiladi — chunki keyingi qator (`_membership`) `None` qaytaradi va
+"Write permission revoked" ko'taradi. Ya'ni qo'riqchi o'sha vazifani keyingi qator bilan
+bo'lajadi — lekin **xabar o'zgaradi**: "Write actor required" → "Write permission revoked".
+Bu ikki xil audit izi: bo'sh actor — kod nuqsoni, noto'g'ri actor — ruxsat masalasi. Yechim:
+**xabar bilan** qadash.
+
+**4. `the write path requires the customer to exist`** (`_ensure_customer` o'chirilishi) —
+**2-band bilan bir xil maskirovka.** `get_customer` o'qib qaytarishda ko'taradi, lekin
+**jetim qator** allaqachon yozilgan — boshqa customer'ga emas, umuman **yo'q** customerga
+ishora qiluvchi kontakt qatori. Yechim: yo'q bo'lgan customer'ga kontakt qo'shilgach **qator
+yozilmaganini** tekshirish.
+
+To'rtdan uchtasi (2, 3, 4) — bitta oilaning bolalari, va u bu fazaning eng qimmatli darsi:
+
+> **Istisno turi — rad etishning isboti emas.** Har bir mutator oxirida `get_customer` ni
+> qaytaradi, shuning uchun qo'riqchi o'chirilganda ham chaqiruv "rad etiladi" — faqat **bir
+> qator keyinroq**, va yozuv allaqachon bo'lib bo'lgan. `assertRaises(X)` bu ikkisini
+> ajratmaydi. Yozuv qo'riqchisini faqat **yozilmagan qator** bilan qadash mumkin.
+
+### §157.11. Ikkinchi yurish: **60/60 RED**
+
+To'rt GREEN uchun to'rt tuzatishdan keyin matritsa qayta yurgizildi:
+
+| Yurish | Mutatsiya | RED | GREEN | O'lchanmagan |
+|---|---|---|---|---|
+| A (`test_customer360_bounds`) | 52 | **52** | 0 | 0 |
+| B (iste'molchilar) | 8 | **8** | 0 | 0 |
+| **Jami** | **60** | **60** | **0** | **0** |
+
+Har ikkala yurishda `CONTROL GREEN`, `restore verified: YES`, sidecar qolmadi. Yangi
+to'plam — `runtime_tests/test_customer360_bounds.py` — **72 sinov** (77 subtest), yashil.
+
+### §157.12. §156 dan farqi: endi mustaqil chaqiruvchi **bor**
+
+§156 o'zining eng zaif gapini shunday yozgan edi: qadamlar xatti-harakat bilan o'lchangan,
+lekin **mustaqil chaqiruvchi** kengaytirilgan chegarani sezmaydi.
+
+Bu fazada o'sha bo'shliq **yozilmagan, o'lchangan**: matritsaning **ikkinchi yurishi** —
+faqat uchta iste'molchi, o'z modulim **chiqarib tashlangan** holda. Uning 8 mutatsiyasining
+har biri RED:
+
+| Mutatsiya | Uni qadagan test |
+|---|---|
+| ro'yxat tenant'ga bog'langan | `test_customer_360_is_tenant_scoped` |
+| detalni o'qish tenant'ga bog'langan | `test_customer_360_is_tenant_scoped` |
+| kanal identifikatori boshqa customer'ga o'tmaydi | `test_channel_identity_never_cross_customer_merges` |
+| buyurtma customer'lar orasida ko'chmaydi | `test_customer_order_cannot_move_between_customers` |
+| kanal identifikatori haqiqiy `true` talab qiladi | `test_channel_identity_requires_explicit_verification` |
+| yozuv uchun jonli rol kerak | `test_revoked_actor_cannot_write_customer` |
+| muzlatilgan workspace yozuvni rad etadi | `test_freeze_rejects_customer_mutations` |
+| takrorlangan buyurtma **yangilaydi** | `test_duplicate_external_order_is_idempotent_update` |
+
+Ya'ni bu chegaralarni **kodni ishlatadigan boshqa odam** sezadi — §156 ning gapidan
+kuchliroq, va bu marta yolg'iz modulning o'z-o'zini himoyasi emas.
+
+### §157.13. Halol cheklovlar
+
+- **To'plam to'liq yashil emas** — Windows'da 13 ta test **platforma** sababidan bloklangan
+  (`privateFile` POSIX semantikasi; §154). Bu kod nuqsoni emas, va bu faza ularni
+  ko'paytirmadi ham, kamaytirmadi.
+- **`channel_identities` va `conversations`** to'plamlari faqat **manba sanovi** bilan
+  qadalgan (§157.5) — qaytarilgan ro'yxat bilan emas. To'rt joyning to'rttasi ham RED,
+  lekin ikkitasi matn tekshiruvi orqali.
+- **Matritsa sekin** — 60 mutatsiya × ~30–70 soniya. Ikki yurishga bo'lish uni to'lanadigan
+  qildi, lekin bu baribir o'nlab daqiqa.

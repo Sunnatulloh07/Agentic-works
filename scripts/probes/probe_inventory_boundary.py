@@ -1,7 +1,7 @@
 """Measure the boundaries that make an inventory read safe, and the two silent
 drops this block was opened to find.
 
-Run:  python scripts/probe_inventory_boundary.py
+Run:  python scripts/probes/probe_inventory_boundary.py
 Exit: 0 when every measured property holds, 1 when any does not.
 
 A probe is not a test. A test asserts that a path returns what it should; a probe
@@ -22,7 +22,7 @@ import os
 import sys
 import tempfile
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'api-python'))
 
 from platform_runtime import business_graph            # noqa: E402

@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, 'api-python'))
 
 from platform_runtime import vision as vision_module

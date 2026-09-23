@@ -55,8 +55,8 @@ than nine characters in the clear, and a body longer than sixteen keeps its tail
 
 Run from the repository root::
 
-    python scripts/audit_approval_ladder_bounds.py --check
-    python scripts/audit_approval_ladder_bounds.py
+    python scripts/probes/audit_approval_ladder_bounds.py --check
+    python scripts/probes/audit_approval_ladder_bounds.py
 """
 import os
 import sys
