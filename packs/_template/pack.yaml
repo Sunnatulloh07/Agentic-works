@@ -8,6 +8,14 @@
 #  - har write tool (telegram.send, records.create, sheets.append, ...) tasdiq talab qiladi.
 #  - deterministik /report, /memory, /record buyruqlari agent NOMI bo'yicha emas,
 #    QOBILIYAT bo'yicha yo'naltiriladi: shu tool'ga ruxsati bor birinchi agent tanlanadi.
+#  - suhbat (conversation): kiruvchi xabarga natija asosida javob. Faqat
+#    conversation.enabled: true va triggers'da {type: message, source: <kanal>}
+#    bo'lgan birinchi agent tanlanadi. Javobdagi 4+ xonali son (narx, telefon,
+#    buyurtma raqami) lookup natijasida, shu suhbatning oldingi xabarlarida,
+#    persona yoki fallback_text'da bo'lmasa, fallback_text yuboriladi va
+#    operatorga uzatiladi (yillar va "1.5 mln"/"150 ming" kabi shakllar tushuniladi).
+#    Chegaralar: max_steps 1..12, max_seconds 60..86400, history_turns 0..20,
+#    fallback_text <= 1000 belgi (bo'sh bo'lsa core'ning standart matni).
 name: template
 language: uz
 agents:
@@ -18,6 +26,16 @@ agents:
     tools: [telegram.send]
     ladder: human_led
     approval: { required_for: [telegram.send], approver_role: operator }
+    triggers:
+      - type: message
+        source: telegram
+    # Yoqish uchun enabled: true (va LLM agent_loop_enabled: true integrations'da).
+    conversation:
+      enabled: false
+      max_steps: 3
+      max_seconds: 120
+      history_turns: 6
+      fallback_text: ""
   - id: ops.assistant
     name: "Operatsion yordamchi (namuna)"
     department: operations

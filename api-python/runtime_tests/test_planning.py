@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.planning import planner, route
+from app.planning import conversation_agent, planner, route
 
 
 # A retail pack that happens to contain ops.assistant.
@@ -117,6 +117,65 @@ class CommandTests(unittest.TestCase):
             model.return_value.return_value = {'agent': 'sales.responder', 'steps': []}
             result = planner(object(), listing())('demo-retail', 'telegram', message('salom'))
         self.assertEqual({'agent': 'sales.responder', 'steps': []}, result)
+
+
+CHATTY = [
+    {'id': 'ops.first', 'tools': ['reports.summary'],
+     'triggers': [{'type': 'message', 'source': 'telegram'}],
+     'conversation': {'enabled': False}},
+    {'id': 'sales.web', 'tools': ['telegram.send'],
+     'triggers': [{'type': 'message', 'source': 'instagram'}],
+     'conversation': {'enabled': True}},
+    {'id': 'sales.cron', 'tools': ['telegram.send'],
+     'triggers': [{'type': 'cron', 'source': 'telegram'}],
+     'conversation': {'enabled': True}},
+    {'id': 'sales.chat', 'tools': ['telegram.send', 'reports.summary'],
+     'triggers': [{'type': 'message', 'source': 'telegram'}],
+     'conversation': {'enabled': True, 'max_steps': 3}},
+    {'id': 'sales.second', 'tools': ['telegram.send'],
+     'triggers': [{'type': 'message', 'source': 'telegram'}],
+     'conversation': {'enabled': True}},
+]
+
+
+class ConversationRoutingTests(unittest.TestCase):
+    def test_first_enabled_agent_triggered_by_the_channel_wins(self):
+        self.assertEqual({'agent': 'sales.chat', 'conversation': {'enabled': True, 'max_steps': 3}},
+                         conversation_agent(listing({'t': CHATTY}), 't', 'telegram'))
+
+    def test_channel_selects_its_own_agent(self):
+        self.assertEqual('sales.web', conversation_agent(listing({'t': CHATTY}), 't', 'instagram')['agent'])
+
+    def test_no_enabled_agent_returns_none(self):
+        self.assertIsNone(conversation_agent(listing(), 'demo-retail', 'telegram'))
+        self.assertIsNone(conversation_agent(listing({'t': CHATTY}), 't', 'web'))
+
+    def test_free_text_opens_a_conversation_turn_instead_of_one_shot_planning(self):
+        with patch('app.planning.Planner') as model:
+            result = planner(object(), listing({'t': CHATTY}))('t', 'telegram', message('salom'))
+        model.return_value.assert_not_called()
+        self.assertEqual('sales.chat', result['agent'])
+        self.assertNotIn('steps', result)
+
+    def test_customer_channel_owned_by_a_conversation_never_runs_operator_commands(self):
+        # A Telegram sender is an unauthenticated customer: '/record a|b|c' from them
+        # must not create a record task (and leave them without a reply).
+        for text in ('/report', '/memory narx', '/record order|x|y', '/record malformed'):
+            with self.subTest(text=text), patch('app.planning.Planner') as model:
+                result = planner(object(), listing({'t': CHATTY}))('t', 'telegram', message(text))
+                model.return_value.assert_not_called()
+                self.assertEqual('sales.chat', result['agent'])
+                self.assertNotIn('steps', result)
+
+    def test_slash_commands_still_work_where_no_conversation_owns_the_channel(self):
+        result = planner(object(), listing({'t': CHATTY}))('t', 'web', message('/report'))
+        self.assertEqual({'agent': 'ops.first', 'steps': [{'tool': 'reports.summary', 'args': {}}]}, result)
+
+    def test_disabled_conversation_falls_through_to_the_model_planner(self):
+        with patch('app.planning.Planner') as model:
+            model.return_value.return_value = {'agent': 'x', 'steps': []}
+            planner(object(), listing({'t': CHATTY[:1]}))('t', 'telegram', message('salom'))
+        model.return_value.assert_called_once()
 
 
 class SourceRuleTests(unittest.TestCase):

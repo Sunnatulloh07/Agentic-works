@@ -27,7 +27,9 @@ class KnownNameTests(unittest.TestCase):
         self.assertIn('products.search', known_tool_names())
 
     def test_covers_every_name_a_catalog_enabled_registry_registers(self):
-        registry = build_registry(lambda tenant, query: [])
+        # Fully injected: the catalogue reader and the shop reader (shop.info,
+        # orders.draft) are both conditional, and a pack may name all of them.
+        registry = build_registry(lambda tenant, query: [], lambda tenant: {})
         self.assertEqual(set(registry.items), set(known_tool_names()))
 
     def test_result_is_a_stable_immutable_set(self):

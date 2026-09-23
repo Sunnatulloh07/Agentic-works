@@ -6,7 +6,9 @@ import OAuthConnections from '../../components/OAuthConnections';
 import GoogleData from '../../components/GoogleData';
 import {BudgetPanel,KnowledgePanel} from '../../components/DevelopmentData';
 import {BriefingPanel,CustomerResourcesPanel,EscalationPanel,MetricsPanel,ReconcileControl,ReengagementPanel,SchedulesPanel,SupervisorPanel} from '../../components/OperationsPanels';
-import AdminPanel,{BootstrapPanel} from '../../components/AdminPanel';
+import AdminPanel from '../../components/AdminPanel';
+import {ApprovalsPanel,CatalogPanel,ChannelsPanel,InboxPanel,OrdersPanel} from '../../components/ShopPanels';
+import {draftSummary} from '../../lib/shop-client.mjs';
 import {type SessionClient,type Workspace} from '../../lib/session-client.mjs';
 type Tool={name:string;risk:string;schema:unknown;runner:boolean};
 type Agent={id:string;name:string;department:string;tools:string[];ladder:string};
@@ -15,7 +17,6 @@ type Step={id:string;tool:string;args:unknown;result:unknown;status:string;error
 type Detail=Task & {steps:Step[]};
 type Audit={id:number;action:string;actor:string;created:number;task:string};
 type Device={id:string;revoked:number;seen:number;generation:number};
-type Inbox={channel:string;event_key:string;status:string;error:string;result:string};
 type Customer={id:string;external_ref:string|null;display_name:string;status:string;created:number;updated:number;contacts?:unknown[];channel_identities?:unknown[];orders?:unknown[]};
 const colors:Record<string,string>={succeeded:'#86efac',failed:'#fca5a5',uncertain:'#fdba74',waiting_approval:'#fde68a',running:'#93c5fd',queued:'#cbd5e1',cancelled:'#a1a1aa'};
 const example=JSON.stringify([{tool:'reports.summary',args:{}}],null,2);
@@ -31,7 +32,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
   const [role,setRole]=useState('');const [frozen,setFrozen]=useState(false);
   const [connected,setConnected]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   const [agents,setAgents]=useState<Agent[]>([]);const [tools,setTools]=useState<Tool[]>([]);const [tasks,setTasks]=useState<Task[]>([]);
-  const [audit,setAudit]=useState<Audit[]>([]);const [devices,setDevices]=useState<Device[]>([]);const [inbox,setInbox]=useState<Inbox[]>([]);
+  const [audit,setAudit]=useState<Audit[]>([]);const [devices,setDevices]=useState<Device[]>([]);
   const [selected,setSelected]=useState<Detail|null>(null);const [customers,setCustomers]=useState<Customer[]>([]);const [selectedCustomer,setSelectedCustomer]=useState<Customer|null>(null);const [customerName,setCustomerName]=useState('');const [agent,setAgent]=useState('ops.assistant');
   const [steps,setSteps]=useState(example);const [text,setText]=useState('/report');const [tab,setTab]=useState('tasks');
   const [deviceId,setDeviceId]=useState('office-1');const [deviceToken,setDeviceToken]=useState('');
@@ -65,12 +66,11 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
     {busy && <p role="status">Yuklanmoqda...</p>}
     {connected && <>
       <p>Rol: <strong>{role}</strong> · {frozen?'Ijro to‘xtatilgan':'Faol'}</p>
-      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync'],['reengagement','Qayta aloqa'],['briefing','Brifing'],['escalation','Eskalatsiya'],['supervisor','Supervisor'],['schedules','Jadval'],['metrics','Holat'],['admin','Hisob']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role)) && (!['reengagement','briefing','escalation','supervisor','schedules'].includes(id) || ['owner','operator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
+      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['approvals','Tasdiqlar'],['orders','Buyurtmalar'],['catalog','Katalog'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync'],['reengagement','Qayta aloqa'],['briefing','Brifing'],['escalation','Eskalatsiya'],['supervisor','Supervisor'],['schedules','Jadval'],['metrics','Holat'],['admin','Hisob']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox','approvals'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role)) && (!['reengagement','briefing','escalation','supervisor','schedules'].includes(id) || ['owner','operator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
         setTab(id);if(id==='audit')setAudit((await req<{events:Audit[]}>('/audit')).events);
         if(id==='customers')setCustomers((await req<{customers:Customer[]}>('/customers')).customers);
         if(id==='connections')setConnections((await req<{connections:typeof connections}>('/connections')).connections);
         if(id==='devices')setDevices((await req<{devices:Device[]}>('/devices')).devices);
-        if(id==='inbox')setInbox((await req<{events:Inbox[]}>('/inbox')).events);
       })}>{label}</button>)}</nav>
       {tab==='google-data' && isOwner && <GoogleData client={client} tenant={tenant} agents={agents} frozen={frozen}/>}
       {tab==='oauth' && isOwner && <OAuthConnections client={client} tenant={tenant} frozen={frozen}/>}
@@ -80,7 +80,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
       {tab==='supervisor' && <SupervisorPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
       {tab==='schedules' && <SchedulesPanel client={client} tenant={tenant} role={role} frozen={frozen} agents={agents}/>}
       {tab==='metrics' && <MetricsPanel client={client} tenant={tenant} role={role}/>}
-      {tab==='admin' && <><AdminPanel client={client} workspace={workspace} exit={exit}/>{isOwner && <BootstrapPanel client={client}/>}</>}
+      {tab==='admin' && <><AdminPanel client={client} workspace={workspace} exit={exit}/></>}
       {tab==='budget' && <BudgetPanel client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}/>}
       {tab==='knowledge' && <KnowledgePanel client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}/>}
       {tab==='agent-runs' && <AgentRuns client={client} tenant={tenant} agents={agents} role={role} frozen={frozen}
@@ -105,7 +105,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
           <details><summary>Ruxsat etilgan tool sxemalari</summary><pre style={pre}>{JSON.stringify(tools.filter(t=>agents.find(a=>a.id===agent)?.tools.includes(t.name)),null,2)}</pre></details>
           <h3>Matnli topshiriq</h3><p style={{fontSize:13}}>Erkin matn uchun LLM kaliti kerak. <code>/report</code> deterministik demo.</p>
           <textarea aria-label="Matnli topshiriq" value={text} onChange={e=>setText(e.target.value)} style={{...input,width:'100%',boxSizing:'border-box'}}/>
-          <button style={button} disabled={busy || !canWrite} onClick={()=>run(async()=>{await req('/events',{key:key(),text});setTab('inbox');setInbox((await req<{events:Inbox[]}>('/inbox')).events);})}>Inboxga yuborish</button>
+          <button style={button} disabled={busy || !canWrite} onClick={()=>run(async()=>{await req('/events',{key:key(),text});setTab('inbox');})}>Inboxga yuborish</button>
         </section>
         <section style={panel}><h2>Vazifalar · {tasks.length}</h2>{tasks.length===0 && <p>Hali vazifa yo‘q.</p>}
           {tasks.map(t=><button key={t.id} style={{...button,display:'block',width:'100%',textAlign:'left',marginBottom:8}} onClick={()=>run(()=>open(t.id))}>
@@ -117,6 +117,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
           <button disabled={busy || !['owner','operator'].includes(role)} style={button} onClick={()=>run(async()=>{await req(`/tasks/${selected.id}/cancel`,{});await open(selected.id);await refresh();})}>Bekor qilish</button>
           {selected.steps.map((s,i)=><article key={s.id} style={{borderTop:'1px solid #334155',marginTop:14,paddingTop:10}}>
             <h3>{i+1}. {s.tool}</h3><p style={{color:colors[s.status]}}>{s.status} {s.error && `(${s.error})`}</p>
+            {(()=>{const d=draftSummary(s.tool,s.args);return d.kind==='message'?<p>Qabul qiluvchi: <strong>{d.recipient||'—'}</strong><br/><span style={{whiteSpace:'pre-wrap'}}>{d.text}</span></p>:null;})()}
             <details open><summary>Argumentlar</summary><pre style={pre}>{JSON.stringify(s.args,null,2)}</pre></details>
             {s.approval_status==='pending' && ['queued','waiting_approval'].includes(s.status) && <><p>Ushbu aniq argumentlarni tasdiqlaysizmi?</p><button disabled={busy || !canWrite} style={button} onClick={()=>run(()=>approve(s,'approved'))}>Tasdiqlash</button><button disabled={busy || !canWrite} style={button} onClick={()=>run(()=>approve(s,'rejected'))}>Rad etish</button></>}
             {s.approver && <p>Tasdiqlovchi: {s.approver}</p>}
@@ -130,8 +131,12 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
         </section>}
       </div>}
       {tab==='agents' && <section style={panel}><h2>Pack agentlari</h2>{agents.map(a=><article key={a.id} style={{borderBottom:'1px solid #334155',padding:12}}><h3>{a.name}</h3><p>{a.department} · {a.ladder}</p><p>{a.tools.join(', ')}</p>{a.tools.some(n=>!tools.find(t=>t.name===n)) && <p style={{color:'#fca5a5'}}>Pack ichidagi ayrim tool uchun runtime adapter mavjud emas.</p>}</article>)}</section>}
-      {tab==='inbox' && <section style={panel}><h2>Durable inbox</h2>{inbox.map(e=><article key={e.channel+e.event_key} style={{borderBottom:'1px solid #334155',padding:12}}><strong>{e.channel} · {e.status}</strong><p>{e.event_key} {e.error}</p><pre style={pre}>{e.result}</pre>{e.status==='failed' && <button style={button} disabled={busy || !canWrite} onClick={()=>run(async()=>{await req('/inbox/retry',{channel:e.channel,key:e.event_key});setInbox((await req<{events:Inbox[]}>('/inbox')).events);})}>Konfiguratsiya tuzatilgach qayta urinish</button>}</article>)}</section>}
+      {tab==='inbox' && <InboxPanel client={client} tenant={tenant} canWrite={canWrite}/>}
+      {tab==='approvals' && <ApprovalsPanel client={client} tenant={tenant} canDecide={canWrite} onOpenTask={id=>void run(async()=>{await open(id);setTab('tasks');})}/>}
+      {tab==='orders' && <OrdersPanel client={client} tenant={tenant}/>}
+      {tab==='catalog' && <CatalogPanel client={client} tenant={tenant}/>}
       {tab==='audit' && <section style={panel}><h2>Audit</h2>{audit.map(a=><p key={a.id}><time>{new Date(a.created*1000).toLocaleString()}</time> · <strong>{a.action}</strong> · {a.actor} · <code>{a.task.slice(0,10)}</code></p>)}</section>}
+      {tab==='connections' && <ChannelsPanel client={client} tenant={tenant}/>}
       {tab==='connections' && <section style={panel}><h2>Mijoz bazasi connectorlari</h2>
         <p>SQLite lokal o‘qish testlangan. PostgreSQL adapteri contract-test bosqichida, live tekshiruv talab qilinadi. Boshqa CRM/ERP driverlari adapter_required sifatida ko‘rsatiladi.</p>
         <p>Ulanishlar operatorning server konfiguratsiyasidan olinadi. Secret va baza manzili brauzerga yuborilmaydi.</p>

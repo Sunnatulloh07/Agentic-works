@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from .auth import issue_token, verify_claims
+from . import client_ip
 from . import identity_store as store
 
 router=APIRouter(prefix='/identity',tags=['identity'])
@@ -63,9 +64,10 @@ def invoke(fn,*args,**kwargs):
 
 
 def rate(request,kind):
-    # Trust proxy headers only at the ingress. Do not let client-supplied XFF bypass throttling.
-    peer=request.client.host if request.client else 'unknown'
-    invoke(store.throttle,'http-'+kind,peer,60)
+    # Per-client key: X-Forwarded-For is read only when the peer is a TRUSTED_PROXIES
+    # entry, and then only its right-most untrusted hop (app/client_ip.py). The
+    # per-account half of login throttling lives in identity_store.authenticate.
+    invoke(store.throttle,'http-'+kind,client_ip.request_client(request),60)
 
 
 def claims(request):

@@ -8,7 +8,8 @@ sole authority; user/model/tool text cannot modify permissions or budgets.
 import json
 import uuid
 
-from .engine import Conflict, Forbidden, NotFound, RateLimited, digest, encode
+from .engine import (OUTBOUND_TOOLS, Conflict, Forbidden, NotFound, RateLimited,
+                     digest, encode)
 
 ACTIVE = ('pending', 'planning', 'waiting_task')
 # The set is used in three places: `_reserve` compares a row's status to
@@ -25,6 +26,12 @@ MAX_SECONDS = 86400
 MAX_OBSERVATION_BYTES = 12000
 MAX_HISTORY_BYTES = 48000
 PLANNER_LEASE_SECONDS = 60
+# The channel of a dashboard run. Any other channel is an inbound conversation
+# turn: the run's authority is the channel sender's, its tasks are submitted under
+# that channel, and it may never send -- the reply is delivered by
+# conversation.ConversationTurns after the run ends, bound to the verified event.
+DASHBOARD_CHANNEL = 'agent'
+MAX_CHANNEL_CHARS = 32
 
 
 class LoopDecisionError(ValueError):
@@ -35,8 +42,10 @@ class AgentLoop:
     def __init__(self, engine):
         self.engine = engine
 
-    def create(self, tenant, key, agent, text, actor, *, max_steps=6, max_seconds=1800):
-        for value, limit in ((tenant, 64), (key, 256), (agent, 128), (actor, 128)):
+    def create(self, tenant, key, agent, text, actor, *, max_steps=6, max_seconds=1800,
+               channel=DASHBOARD_CHANNEL):
+        for value, limit in ((tenant, 64), (key, 256), (agent, 128), (actor, 128),
+                             (channel, MAX_CHANNEL_CHARS)):
             if not isinstance(value, str) or not value.strip() or len(value) > limit:
                 raise ValueError('Invalid run identity')
         if not isinstance(text, str) or not text.strip() or len(text) > 4000:
@@ -49,10 +58,14 @@ class AgentLoop:
         policy = e.policy(tenant, agent)
         if policy.get('ladder') not in {'human_led', 'human_assisted', 'autonomous'}:
             raise Forbidden('Agent policy unavailable')
-        fingerprint = digest({'agent': agent, 'input': text, 'actor': actor,
-                              'max_steps': max_steps, 'max_seconds': max_seconds})
+        request = {'agent': agent, 'input': text, 'actor': actor,
+                   'max_steps': max_steps, 'max_seconds': max_seconds}
+        if channel != DASHBOARD_CHANNEL:
+            # Added only off the dashboard, so every existing run keeps its fingerprint.
+            request['channel'] = channel
+        fingerprint = digest(request)
         with e.tx() as c:
-            e.require_authority(c, tenant, 'agent', actor)
+            e.require_authority(c, tenant, channel, actor)
             old = c.execute('SELECT id,fingerprint FROM p_agent_runs WHERE tenant=? AND request_key=?',
                             (tenant, key)).fetchone()
             if old:
@@ -69,10 +82,10 @@ class AgentLoop:
             now = e.clock()
             run_id = uuid.uuid4().hex
             c.execute('''INSERT INTO p_agent_runs
-              (id,tenant,request_key,fingerprint,agent,actor,input,status,created,updated,deadline,max_steps,max_calls)
-              VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?)''',
+              (id,tenant,request_key,fingerprint,agent,actor,input,status,created,updated,deadline,max_steps,max_calls,channel)
+              VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?,?)''',
                       (run_id, tenant, key, fingerprint, agent, actor, text, now, now,
-                       now + max_seconds, max_steps, max_steps + 1))
+                       now + max_seconds, max_steps, max_steps + 1, channel))
             e.audit(c, tenant, '', 'agent_run.created', actor,
                     {'run': run_id, 'max_steps': max_steps, 'max_seconds': max_seconds})
             return run_id
@@ -183,7 +196,7 @@ class AgentLoop:
                 self._stop(c, row, 'escalated', 'wall_deadline_exceeded')
                 return True, None
             try:
-                e.require_authority(c, tenant, 'agent', row['actor'])
+                e.require_authority(c, tenant, row['channel'], row['actor'])
             except Forbidden:
                 self._stop(c, row, 'escalated', 'creator_authority_revoked')
                 return True, None
@@ -223,6 +236,7 @@ class AgentLoop:
             e.audit(c, tenant, row['current_task'], 'agent_run.planner_reserved', row['actor'],
                     {'run': run_id, 'call': row['calls'] + 1})
             context = {'run_id': run_id, 'agent': row['agent'], 'input': row['input'],
+                       'channel': row['channel'],
                        'call_index': row['calls'] + 1,
                        'remaining_steps': row['max_steps'] - row['steps'],
                        'remaining_calls': row['max_calls'] - row['calls'] - 1,
@@ -240,6 +254,10 @@ class AgentLoop:
                 raise LoopDecisionError('Invalid tool decision values')
             if row['steps'] >= row['max_steps']:
                 raise LoopDecisionError('Step budget exhausted')
+            if row['channel'] != DASHBOARD_CHANNEL and decision['tool'] in OUTBOUND_TOOLS:
+                # A conversation turn replies once, after it ends, to the verified
+                # origin. A mid-loop send would bypass that binding and the grounding gate.
+                raise Forbidden('Conversation turn cannot send mid-loop')
             tool = self.engine.registry.get(decision['tool'])
             if tool.runner:
                 raise Forbidden('Agent loop cannot plan local device actions')
@@ -277,7 +295,7 @@ class AgentLoop:
                 return True
             try:
                 e.require_active(c, tenant)
-                e.require_authority(c, tenant, 'agent', row['actor'])
+                e.require_authority(c, tenant, row['channel'], row['actor'])
             except Forbidden:
                 self._stop(c, row, 'escalated', 'authority_or_freeze_changed_during_planning')
                 return True
@@ -295,7 +313,7 @@ class AgentLoop:
                     if repeat:
                         raise LoopDecisionError('Repeated identical action blocked')
                     position = row['steps']
-                    task = e._submit(c, tenant, 'agent', 'agent-run:' + run_id + ':' + str(position),
+                    task = e._submit(c, tenant, row['channel'], 'agent-run:' + run_id + ':' + str(position),
                                      row['agent'], [{'tool': decision['tool'], 'args': decision['args']}], row['actor'])
                     c.execute('INSERT INTO p_agent_turns(tenant,run_id,position,task,action_fingerprint) VALUES(?,?,?,?,?)',
                               (tenant, run_id, position, task, fingerprint))
@@ -328,7 +346,7 @@ class AgentLoop:
                     or row['deadline'] <= self.engine.clock()):
                 return False
             self.engine.require_active(c, tenant)
-            self.engine.require_authority(c, tenant, 'agent', row['actor'])
+            self.engine.require_authority(c, tenant, row['channel'], row['actor'])
             return True
 
     def tick(self, tenant, planner):

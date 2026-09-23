@@ -104,7 +104,13 @@ class CsvOrderStore:
 
 
 def products_search(pack: Pack, query: str, limit: int = 5) -> list:
-    """Top-N (docs §11.5): butun katalog prompt'ga kirmaydi."""
+    """Top-N (docs §11.5): butun katalog prompt'ga kirmaydi.
+
+    Nom, kategoriya, jins va ranglar asosiy maydon (+2); yosh va tavsif so'zlari
+    ikkinchi darajali (+1). So'rovdagi token mahsulot o'lchamiga teng bo'lsa
+    ("92 razmer bormi?") o'sha mahsulot +1 oladi, shuning uchun o'lcham yolg'iz
+    so'ralganda ham shu o'lchamdagi mahsulotlar topiladi.
+    """
     import re as _re
 
     from .lang import fold_ids, normalize
@@ -115,9 +121,11 @@ def products_search(pack: Pack, query: str, limit: int = 5) -> list:
     tokens = _re.findall(r"[a-z0-9']+", q)  # tinish belgisiz (responder bilan bir xil)
     scored = []
     for p in pack.products:
-        hay = normalize(f"{p.id} {p.name}")
+        hay = normalize(" ".join([p.id, p.name, p.category, p.gender, *p.colors]))
         fid = fold_ids(p.id)
         words = fold_ids(hay).split()
+        extra = set(_re.findall(r"[a-z0-9']+", fold_ids(normalize(f"{p.age} {p.description}"))))
+        sizes = {normalize(str(size)) for size in p.sizes}
         score = 0
         for tok in tokens:
             ftok = fold_ids(tok)
@@ -127,7 +135,40 @@ def products_search(pack: Pack, query: str, limit: int = 5) -> list:
                 score += 2  # butun so'z / turlangan shakl (kurtkasi)
             elif len(tok) > 2 and tok in hay:
                 score += 1  # qisman
+            elif len(ftok) > 2 and ftok in extra:
+                score += 1  # tavsif / yosh so'zi
+            if tok in sizes:
+                score += 1  # so'ralgan o'lcham shu mahsulotda bor
         if score:
             scored.append((score, p))
     scored.sort(key=lambda t: -t[0])
     return [p for _, p in scored[:limit]]
+
+
+# The model reads a search hit, and a hit is one observation of a bounded size
+# (agent_loop.MAX_OBSERVATION_BYTES): five full descriptions would not fit.
+MAX_VIEW_DESCRIPTION_CHARS = 300
+
+
+def product_view(p) -> dict:
+    """A catalogue row as the model reads it: what "92 razmer bormi?" needs.
+
+    ``stock_tracked`` tells the model whether a quantity can be stated at all;
+    ``available_sizes`` are the sizes with stock above zero.
+    """
+    view = {"id": p.id, "name": p.name, "price_uzs": p.price_uzs,
+            "sizes": [str(size) for size in p.sizes], "stock_tracked": bool(p.stock)}
+    for key in ("category", "gender", "age"):
+        if getattr(p, key):
+            view[key] = getattr(p, key)
+    if p.colors:
+        view["colors"] = list(p.colors)
+    if p.description:
+        view["description"] = p.description[:MAX_VIEW_DESCRIPTION_CHARS]
+    if p.photo_url:
+        view["photo_url"] = p.photo_url
+    if p.stock:
+        view["stock"] = dict(p.stock)
+        view["available_sizes"] = [s for s in view["sizes"] if p.stock.get(s, 0) > 0]
+        view["in_stock"] = bool(view["available_sizes"])
+    return view

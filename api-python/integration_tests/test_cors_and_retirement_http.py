@@ -47,3 +47,15 @@ def test_only_device_bound_runner_is_registered():
     paths = _registered_paths(app.routes)
     assert '/runner/ws' not in paths
     assert '/platform/runner/ws' in paths
+
+
+def test_supervisor_route_preflight_allows_idempotency_key():
+    # POST /platform/{tenant}/supervisor/route refuses a request without an
+    # Idempotency-Key, so a browser preflight that names it must pass CORS.
+    with TestClient(app) as client:
+        r = client.options('/platform/demo-retail/supervisor/route', headers={
+            'Origin': 'http://localhost:3000', 'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'authorization,content-type,idempotency-key'})
+        assert r.status_code == 200
+        assert r.headers['access-control-allow-origin'] == 'http://localhost:3000'
+        assert 'idempotency-key' in r.headers['access-control-allow-headers'].lower()

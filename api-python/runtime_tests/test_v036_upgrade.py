@@ -21,7 +21,7 @@ class UpgradeIntegrationTests(unittest.TestCase):
         self.e.tick('a')
         for _ in range(3):Engine(self.path,build_registry(),self.policy)
         self.assertEqual('succeeded',self.e.get('a',task)['status'])
-        with self.e.read() as db:self.assertEqual([1,2,3,4,5,6,7,8],[r[0] for r in db.execute('SELECT version FROM p_migrations ORDER BY version')])
+        with self.e.read() as db:self.assertEqual([1,2,3,4,5,6,7,8,9],[r[0] for r in db.execute('SELECT version FROM p_migrations ORDER BY version')])
     def test_result_planner_local_mode_without_secret_with_meter(self):
         budget=UsageBudget(self.e);budget.configure('a','owner','USD',10000)
         cfg={'llm':{'provider_mode':'local_loopback','base_url':'http://127.0.0.1:11434/v1','model':'unit-model',

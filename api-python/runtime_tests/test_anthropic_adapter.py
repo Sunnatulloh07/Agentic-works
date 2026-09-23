@@ -25,7 +25,8 @@ from platform_runtime.model_response import (ANTHROPIC_STOP_ACCEPTED,
                                              MAX_CONTENT_BLOCKS,
                                              parse_anthropic_decision)
 from platform_runtime.model_transport import (ANTHROPIC_BASE_URL,
-                                              ANTHROPIC_VERSION,
+                                              ANTHROPIC_MIN_MAX_TOKENS,
+                                              ANTHROPIC_VERSION, EFFORT_LEVELS,
                                               completion_body, completion_url,
                                               headers, provider)
 from platform_runtime.tools import build_registry
@@ -93,10 +94,38 @@ class RequestShapeTests(unittest.TestCase):
         self.assertNotIn('response_format', body)
         self.assertEqual({'model', 'max_tokens', 'system', 'messages'}, set(body))
 
-    def test_model_and_max_tokens_are_forwarded(self):
+    def test_model_is_forwarded_and_max_tokens_has_a_thinking_floor(self):
+        # Current Claude models think by default and thinking tokens count toward
+        # max_tokens: a 1600-token ceiling can end the turn at max_tokens before
+        # any text block, which the parser (rightly) refuses. The floor is the
+        # skill's non-streaming default; a larger request is kept.
         body = completion_body({'provider': 'anthropic'}, 'claude-model', 'S', 'C', 777)
         self.assertEqual('claude-model', body['model'])
-        self.assertEqual(777, body['max_tokens'])
+        self.assertEqual(ANTHROPIC_MIN_MAX_TOKENS, body['max_tokens'])
+        self.assertEqual(16000, ANTHROPIC_MIN_MAX_TOKENS)
+        big = completion_body({'provider': 'anthropic'}, 'm', 'S', 'C', ANTHROPIC_MIN_MAX_TOKENS + 1)
+        self.assertEqual(ANTHROPIC_MIN_MAX_TOKENS + 1, big['max_tokens'])
+
+    def test_configured_effort_is_sent_as_output_config(self):
+        for level in EFFORT_LEVELS:
+            with self.subTest(level=level):
+                body = completion_body({'provider': 'anthropic', 'effort': level}, 'm', 'S', 'C', 100)
+                self.assertEqual({'effort': level}, body['output_config'])
+        self.assertEqual(('low', 'medium', 'high', 'xhigh', 'max'), EFFORT_LEVELS)
+
+    def test_effort_is_omitted_unless_configured(self):
+        # Haiku 4.5 rejects effort, so it is never sent by default.
+        self.assertNotIn('output_config', completion_body({'provider': 'anthropic'}, 'm', 'S', 'C', 100))
+
+    def test_invalid_effort_is_refused_before_any_request(self):
+        for bad in ('LOW', 'extreme', '', 3, None, ['low']):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                completion_body({'provider': 'anthropic', 'effort': bad}, 'm', 'S', 'C', 100)
+
+    def test_openai_ignores_nothing_silently_about_effort(self):
+        # effort is an Anthropic field; on the OpenAI dialect it is a config mistake.
+        with self.assertRaises(ValueError):
+            completion_body({'effort': 'low'}, 'gpt-model', 'S', 'C', 100)
 
     def test_openai_body_is_byte_identical_to_the_previous_literal(self):
         body = completion_body({}, 'gpt-model', 'SYSTEM', 'CONTEXT', 2000)
@@ -261,7 +290,7 @@ class ResultPlannerAnthropicTests(unittest.TestCase):
         self.assertNotIn('temperature', body)
         self.assertNotIn('response_format', body)
         self.assertEqual(['user'], [message['role'] for message in body['messages']])
-        self.assertEqual(1600, body['max_tokens'])
+        self.assertEqual(ANTHROPIC_MIN_MAX_TOKENS, body['max_tokens'])
         self.assertEqual('unit-configured-model', body['model'])
 
     def test_system_rules_and_untrusted_context_stay_separated(self):

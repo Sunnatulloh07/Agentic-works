@@ -7,9 +7,11 @@ import os
 import re
 from pathlib import Path
 from collections.abc import Mapping
+from typing import Annotated
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 PACKS_DIR = Path(os.getenv("PACKS_DIR", Path(__file__).resolve().parents[2] / "packs"))
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -86,6 +88,42 @@ class LanguagePolicy(Strict):
     tone: str = "standard"
 
 
+# Conversation-turn bounds. A turn answers a customer, so its step and time budget
+# is deliberately far below a dashboard run's; the upper bounds equal the agent
+# loop's own (agent_loop.MAX_STEPS / MAX_SECONDS) so a pack cannot ask for more.
+CONVERSATION_MAX_STEPS = 12
+CONVERSATION_MIN_SECONDS = 60
+CONVERSATION_MAX_SECONDS = 86400
+CONVERSATION_MAX_HISTORY_TURNS = 20
+CONVERSATION_MAX_FALLBACK_CHARS = 1000
+CONVERSATION_MAX_ID_CHARS = 128
+CONVERSATION_MAX_KIND_CHARS = 64
+
+
+class ConversationPolicy(Strict):
+    """Inbound message -> bounded result-fed turn -> reply to the same conversation.
+
+    Off by default: a pack opts an agent in explicitly, and the agent is selected
+    by its ``triggers`` ({type: message, source: <channel>}), never by its id.
+    Strict types: ``enabled: "yes"`` or ``max_steps: "3"`` is a YAML mistake.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    enabled: bool = False
+    max_steps: int = Field(default=3, ge=1, le=CONVERSATION_MAX_STEPS)
+    max_seconds: int = Field(default=120, ge=CONVERSATION_MIN_SECONDS, le=CONVERSATION_MAX_SECONDS)
+    history_turns: int = Field(default=6, ge=0, le=CONVERSATION_MAX_HISTORY_TURNS)
+    fallback_text: str = Field(default="", max_length=CONVERSATION_MAX_FALLBACK_CHARS)
+    # A valid orders.draft in a turn becomes ONE records.create task for this
+    # agent (its ladder decides approval). Empty: no order is captured.
+    order_agent: str = Field(default="", max_length=CONVERSATION_MAX_ID_CHARS)
+    order_kind: str = Field(default="order", min_length=1, max_length=CONVERSATION_MAX_KIND_CHARS)
+    # Operator chat told about every handoff and captured order. It must also be
+    # in this agent's allowed_recipients: the engine's allowlist rule still decides.
+    notify_recipient: str = Field(default="", max_length=CONVERSATION_MAX_ID_CHARS)
+
+
 class AgentRef(Strict):
     id: str
     name: str
@@ -101,6 +139,7 @@ class AgentRef(Strict):
     memory: MemoryPolicy = Field(default_factory=MemoryPolicy)
     triggers: list[Trigger] = Field(default_factory=list)
     language: LanguagePolicy = Field(default_factory=LanguagePolicy)
+    conversation: ConversationPolicy = Field(default_factory=ConversationPolicy)
 
 
 class Branch(Strict):
@@ -111,11 +150,60 @@ class Branch(Strict):
     hours: str = ""
 
 
+# Catalogue bounds. A product row is tenant data a model reads and a customer
+# hears, so every free-text field has a ceiling and every number a floor.
+MAX_PRODUCT_DESCRIPTION_CHARS = 1000
+MAX_PRODUCT_LABEL_CHARS = 64
+MAX_PRODUCT_COLORS = 20
+MAX_PHOTO_URL_CHARS = 2000
+
+
 class Product(Strict):
+    """One catalogue row. Everything after ``sizes`` is optional.
+
+    ``stock`` maps a size to the quantity on hand. Keys are compared as strings
+    (YAML ``{92: 3}`` and ``{"92": 3}`` are the same size) and must be sizes the
+    product declares, so a typo cannot invent a size the shop does not sell. When
+    ``stock`` is declared a size missing from it counts as zero; when it is empty
+    the shop does not track stock for the product.
+    """
+
     id: str
     name: str
     price_uzs: int
     sizes: list = Field(default_factory=list)
+    description: str = Field(default="", max_length=MAX_PRODUCT_DESCRIPTION_CHARS)
+    category: str = Field(default="", max_length=MAX_PRODUCT_LABEL_CHARS)
+    gender: str = Field(default="", max_length=MAX_PRODUCT_LABEL_CHARS)
+    age: str = Field(default="", max_length=MAX_PRODUCT_LABEL_CHARS)
+    colors: list[Annotated[str, Field(min_length=1, max_length=MAX_PRODUCT_LABEL_CHARS)]] = Field(
+        default_factory=list, max_length=MAX_PRODUCT_COLORS)
+    stock: dict[str, int] = Field(default_factory=dict)
+    photo_url: str = Field(default="", max_length=MAX_PHOTO_URL_CHARS)
+
+    @field_validator("stock", mode="before")
+    @classmethod
+    def _stock_keys_as_text(cls, value):
+        if isinstance(value, Mapping):
+            return {str(k) if isinstance(k, (int, str)) and not isinstance(k, bool) else k: v
+                    for k, v in value.items()}
+        return value
+
+    @model_validator(mode="after")
+    def _stock_and_photo(self):
+        sizes = {str(size) for size in self.sizes}
+        negative = sorted(k for k, qty in self.stock.items() if qty < 0)
+        if negative:
+            raise ValueError(f"stock manfiy bo'lishi mumkin emas: {', '.join(negative)}")
+        unknown = sorted(set(self.stock) - sizes)
+        if unknown:
+            raise ValueError(f"stock sizes ro'yxatida yo'q o'lcham: {', '.join(unknown)}")
+        if self.photo_url:
+            parts = urlsplit(self.photo_url)
+            if (parts.scheme != "https" or not parts.hostname or parts.username or parts.password
+                    or any(ch.isspace() for ch in self.photo_url)):
+                raise ValueError("photo_url faqat https:// manzil bo'lishi kerak")
+        return self
 
 
 class Pack(Strict):
@@ -198,4 +286,35 @@ def load_pack(name: str) -> Pack:
                 + ", ".join(missing)
             )
         agent.prompt = read_persona(pack_file.parent, agent.persona, agent.id, name)
+    for agent in pack.agents:
+        check_conversation_routes(agent, pack.agents, name)
     return pack
+
+
+# The tool an order agent writes with, and the tool a notification is sent with.
+# Runtime tool names, not pack content: conversation.py submits exactly these.
+ORDER_WRITE_TOOL = "records.create"
+NOTIFY_TOOL = "telegram.send"
+
+
+def check_conversation_routes(agent: AgentRef, agents: list, pack: str) -> None:
+    """order_agent and notify_recipient must be usable, or the pack does not load.
+
+    Otherwise an order would be refused at the moment a customer placed it, and a
+    notification would wait silently for an approval nobody expects.
+    """
+    policy = agent.conversation
+    if policy.order_agent:
+        target = next((a for a in agents if a.id == policy.order_agent), None)
+        if target is None:
+            raise PackError(f"agent {agent.id!r} order_agent {policy.order_agent!r} pack'da yo'q ({pack})")
+        if ORDER_WRITE_TOOL not in target.tools:
+            raise PackError(f"agent {agent.id!r} order_agent {policy.order_agent!r} uchun "
+                            f"tools'da {ORDER_WRITE_TOOL} bo'lishi shart ({pack})")
+    if policy.notify_recipient:
+        if NOTIFY_TOOL not in agent.tools:
+            raise PackError(f"agent {agent.id!r} notify_recipient uchun tools'da {NOTIFY_TOOL} "
+                            f"bo'lishi shart ({pack})")
+        if policy.notify_recipient not in agent.allowed_recipients:
+            raise PackError(f"agent {agent.id!r} notify_recipient {policy.notify_recipient!r} shu agentning "
+                            f"allowed_recipients ro'yxatida ham bo'lishi shart ({pack})")

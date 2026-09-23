@@ -1,6 +1,7 @@
 'use client';
 import {useState, type ReactNode, type FormEvent} from 'react';
 import {SessionClient,type Workspace} from '../lib/session-client.mjs';
+import {BootstrapPanel} from './AdminPanel';
 const API=process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function SessionGate({children}:{children:(client:SessionClient,workspace:Workspace,exit:()=>void)=>ReactNode}){
@@ -9,7 +10,7 @@ export default function SessionGate({children}:{children:(client:SessionClient,w
   const [selected,setSelected]=useState<Workspace|null>(null);
   const [email,setEmail]=useState('');const [password,setPassword]=useState('');
   const [name,setName]=useState('');const [invite,setInvite]=useState('');
-  const [register,setRegister]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  const [register,setRegister]=useState(false);const [bootstrap,setBootstrap]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   async function authenticate(event:FormEvent){
     event.preventDefault();if(busy)return;setBusy(true);setError('');
     try{
@@ -45,6 +46,8 @@ export default function SessionGate({children}:{children:(client:SessionClient,w
       {workspaces.map(w=><button disabled={busy} key={w.id} onClick={()=>{void choose(w);}} style={field}>{w.name} ({w.role})</button>)}
       <button disabled={busy} onClick={()=>{void exit();}}>Chiqish</button>
     </section>}
+    {workspaces===null&&<p><button type="button" onClick={()=>setBootstrap(!bootstrap)}>{bootstrap?'Bootstrap formasini yopish':'Birinchi owner yaratish (bootstrap)'}</button></p>}
+    {workspaces===null&&bootstrap&&<BootstrapPanel client={client}/>}
     <p style={{fontSize:12}}>Tokenlar faqat sahifa xotirasida. Sahifa yopilgach qayta kirish kerak. Production qabul mezonlari hali yopilmagan.</p>
   </main>;
 }

@@ -420,6 +420,13 @@ class ErpTests(unittest.TestCase):
     # ------------------------------------------------------- failure records
 
     def test_a_transport_failure_is_recorded_before_it_propagates(self):
+        """A POST that died in transit has an UNKNOWN outcome, so it is `uncertain`.
+
+        It used to be recorded as `failed` and left retryable -- but a timeout or a
+        reset after the request left this process says nothing about whether the
+        ERP created the document, and a retry in that state is how an invoice is
+        posted twice. The engine treats an external write that raised the same way.
+        """
         def broken(url, body=None, headers=None, method='GET', timeout=15):
             if method == 'GET':
                 return {'result': {}}
@@ -429,7 +436,7 @@ class ErpTests(unittest.TestCase):
         with self.assertRaises(ErpError):
             submit(self.engine, TENANT, AGENT, posting, transport=broken)
         rows = ledger(self.engine, TENANT)
-        self.assertEqual('failed', rows[0]['status'])
+        self.assertEqual('uncertain', rows[0]['status'])
         self.assertEqual(1, len(rows))
 
     def test_a_posting_without_an_identifier_is_unconfirmed_not_settled(self):
@@ -443,11 +450,16 @@ class ErpTests(unittest.TestCase):
         self.assertEqual('', rows[0]['external_id'])
 
     def test_a_failed_posting_can_be_retried(self):
-        """A failure records the attempt but must not block the correction."""
+        """A DEFINITIVE rejection records the attempt but must not block the correction.
+
+        Only a provider answer that says "not created" (a 4xx other than 408/409/
+        425/429) is `failed`; a transport failure is `uncertain` -- see
+        ``test_a_transport_failure_is_recorded_before_it_propagates``.
+        """
         def flaky(url, body=None, headers=None, method='GET', timeout=15):
             if method == 'GET':
                 return {'result': {}}
-            raise ErpError('ERP transport failure')
+            raise ErpError('ERP HTTP status 422', status=422)
 
         posting = self.resolve(account='purchase', counterparty='acme')
         with self.assertRaises(ErpError):
@@ -460,6 +472,248 @@ class ErpTests(unittest.TestCase):
         good = ScriptTransport([{'result': {}}, {'result': {'Ref_Key': 'DOC-9'}}])
         result = submit(self.engine, TENANT, AGENT, posting, transport=good)
         self.assertTrue(result['posted'])
+
+    # ------------------------------------------- reserve-before-POST protocol
+    #
+    # "Post once" used to be a check, not a guarantee: the ledger row was written
+    # AFTER the provider POST, so a process that died between the two left no trace
+    # and the next submit posted the invoice again. The protocol is now: reserve a
+    # claiming `posting` row under a deterministic idempotency key BEFORE the POST,
+    # send that key to the provider, and turn a reservation whose outcome never came
+    # back into `uncertain`, which blocks every retry until the owner reconciles it.
+
+    def test_the_reservation_exists_before_the_post_is_sent(self):
+        seen = {}
+        engine = self.engine
+
+        def spy(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            seen['rows'] = ledger(engine, TENANT)
+            seen['headers'] = dict(headers or {})
+            return {'result': {'Ref_Key': 'DOC-1'}}
+
+        posting = self.resolve()
+        result = submit(self.engine, TENANT, AGENT, posting, transport=spy)
+        self.assertEqual(['posting'], [row['status'] for row in seen['rows']])
+        # The key the provider received is the reservation's own id, so the owner
+        # can look the attempt up in the ERP by the value the ledger shows.
+        self.assertEqual(seen['rows'][0]['id'], seen['headers']['Idempotency-Key'])
+        self.assertEqual(result['posting_id'], seen['rows'][0]['id'])
+        rows = ledger(self.engine, TENANT)
+        self.assertEqual(1, len(rows))
+        self.assertEqual('posted', rows[0]['status'])
+
+    def test_a_crash_between_post_and_ledger_is_never_reposted(self):
+        """The defect itself: the process dies after the POST left, before the answer."""
+
+        class Crash(BaseException):
+            """Stands in for the process being killed: not an ``Exception``."""
+
+        def dies(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            raise Crash()
+
+        posting = self.resolve()
+        with self.assertRaises(Crash):
+            submit(self.engine, TENANT, AGENT, posting, transport=dies)
+        # "Restart": time passes beyond any possible in-flight window.
+        self.engine.clock.now += 3600
+        retry = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'X'}})
+        with self.assertRaises(Conflict) as caught:
+            submit(self.engine, TENANT, AGENT, posting, transport=retry)
+        self.assertIn('reconcile', str(caught.exception))
+        self.assertEqual([], retry.posts)
+        self.assertEqual('uncertain', ledger(self.engine, TENANT)[0]['status'])
+
+    def test_a_fresh_reservation_blocks_a_concurrent_submit(self):
+        """Inside the in-flight window a reservation is not yet `uncertain`, and a
+        second submit is refused without sending anything at all."""
+
+        class Crash(BaseException):
+            pass
+
+        def dies(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            raise Crash()
+
+        posting = self.resolve()
+        with self.assertRaises(Crash):
+            submit(self.engine, TENANT, AGENT, posting, transport=dies)
+        second = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'X'}})
+        with self.assertRaises(Conflict) as caught:
+            submit(self.engine, TENANT, AGENT, posting, transport=second)
+        self.assertIn('in flight', str(caught.exception))
+        self.assertEqual([], second.calls)
+        self.assertEqual('posting', ledger(self.engine, TENANT)[0]['status'])
+
+    def test_the_status_read_surfaces_a_stale_reservation_as_uncertain(self):
+        class Crash(BaseException):
+            pass
+
+        def dies(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            raise Crash()
+
+        with self.assertRaises(Crash):
+            submit(self.engine, TENANT, AGENT, self.resolve(), transport=dies)
+        self.engine.clock.now += 3600
+        result = self.call('erp.posting_status', {})
+        self.assertEqual(['uncertain'], [row['status'] for row in result['postings']])
+
+    def test_a_timeout_on_the_post_blocks_every_retry(self):
+        def times_out(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            raise TimeoutError('read timed out')
+
+        posting = self.resolve()
+        with self.assertRaises(TimeoutError):
+            submit(self.engine, TENANT, AGENT, posting, transport=times_out)
+        self.assertIsNotNone(posted(self.engine, TENANT, posting))
+        retry = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'X'}})
+        with self.assertRaises(Conflict) as caught:
+            submit(self.engine, TENANT, AGENT, posting, transport=retry)
+        self.assertIn('reconcile', str(caught.exception))
+        self.assertEqual([], retry.calls)
+
+    def test_an_unconfirmed_posting_blocks_a_retry(self):
+        """A 2xx without an id means the ERP accepted SOMETHING: a retry may double it."""
+        posting = self.resolve()
+        with self.assertRaises(Conflict):
+            submit(self.engine, TENANT, AGENT, posting,
+                   transport=ScriptTransport([{'result': {}}], post_response={'result': {}}))
+        retry = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'X'}})
+        with self.assertRaises(Conflict):
+            submit(self.engine, TENANT, AGENT, posting, transport=retry)
+        self.assertEqual([], retry.posts)
+
+    def test_the_idempotency_key_is_deterministic_per_identity_and_attempt(self):
+        def key_for(engine, posting):
+            transport = ScriptTransport([{'result': {}}],
+                                        post_response={'result': {'Ref_Key': 'K'}})
+            submit(engine, TENANT, AGENT, posting, transport=transport)
+            return transport.posts[0]['headers']['Idempotency-Key']
+
+        other = Engine(self.root / 'other.db', build_registry(),
+                       lambda t, a: self.policy, clock=Clock())
+        posting = self.resolve()
+        first = key_for(self.engine, posting)
+        self.assertEqual(first, key_for(other, posting))
+        self.assertRegex(first, r'^[0-9a-f]{24}$')
+        different = resolve_posting(TENANT, {**DOCUMENT, 'number': 'INV-2000'},
+                                    account='purchase', counterparty='acme')
+        self.assertNotEqual(first, key_for(self.engine, different))
+
+    def test_a_retry_after_a_definitive_rejection_uses_a_new_key(self):
+        """An idempotency-aware ERP replays the stored answer for a reused key, so a
+        corrected retry under the rejected attempt's key would be rejected forever."""
+        def rejects(url, body=None, headers=None, method='GET', timeout=15):
+            rejects.headers = dict(headers or {})
+            if method == 'GET':
+                return {'result': {}}
+            raise ErpError('ERP HTTP status 400', status=400)
+
+        posting = self.resolve()
+        with self.assertRaises(ErpError):
+            submit(self.engine, TENANT, AGENT, posting, transport=rejects)
+        rejected_key = rejects.headers['Idempotency-Key']
+        good = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'D'}})
+        submit(self.engine, TENANT, AGENT, posting, transport=good)
+        self.assertNotEqual(rejected_key, good.posts[0]['headers']['Idempotency-Key'])
+
+    def test_rate_limit_and_conflict_answers_are_not_definitive(self):
+        """408/409/425/429 and every 5xx do not prove the document was NOT created."""
+        for status in (408, 409, 425, 429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                engine = Engine(self.root / f'e{status}.db', build_registry(),
+                                lambda t, a: self.policy, clock=Clock())
+
+                def answers(url, body=None, headers=None, method='GET', timeout=15):
+                    if method == 'GET':
+                        return {'result': {}}
+                    raise ErpError(f'ERP HTTP status {status}', status=status)
+
+                with self.assertRaises(ErpError):
+                    submit(engine, TENANT, AGENT, self.resolve(), transport=answers)
+                self.assertEqual('uncertain', ledger(engine, TENANT)[0]['status'])
+
+    def test_the_default_transport_carries_the_http_status(self):
+        import urllib.error
+        error = urllib.error.HTTPError('https://erp.example.uz/x', 422, 'no', {}, None)
+        with mock.patch('urllib.request.OpenerDirector.open', side_effect=error):
+            with self.assertRaises(ErpError) as caught:
+                default_erp_transport('https://erp.example.uz/x')
+        self.assertEqual(422, caught.exception.status)
+
+    def test_the_idempotency_header_name_is_configurable_and_validated(self):
+        self.assertEqual('Idempotency-Key',
+                         erp_config(TENANT)['idempotency_header'])
+        self.assertEqual('X-Request-Key', erp_config_with(
+            {**CONFIG, 'idempotency_header': 'X-Request-Key'})['idempotency_header'])
+        for bad in ('Authorization', 'content-type', 'Host', 'bad header', 'x' * 65, 7):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    erp_config_with({**CONFIG, 'idempotency_header': bad})
+        self.write_config({**CONFIG, 'idempotency_header': ''})
+        transport = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'D'}})
+        submit(self.engine, TENANT, AGENT, self.resolve(), transport=transport)
+        self.assertNotIn('Idempotency-Key', transport.posts[0]['headers'])
+
+    # --------------------------------------------------------- owner reconcile
+
+    def uncertain_posting(self):
+        def times_out(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            raise TimeoutError('read timed out')
+
+        posting = self.resolve()
+        with self.assertRaises(TimeoutError):
+            submit(self.engine, TENANT, AGENT, posting, transport=times_out)
+        return posting, ledger(self.engine, TENANT)[0]['id']
+
+    def test_the_owner_reconciles_an_uncertain_posting_as_posted(self):
+        from platform_runtime.erp import reconcile_posting
+        posting, row_id = self.uncertain_posting()
+        row = reconcile_posting(self.engine, TENANT, row_id, 'owner-1', 'owner',
+                                'posted', 'found in 1C by idempotency key',
+                                external_id='DOC-55')
+        self.assertEqual('posted', row['status'])
+        self.assertEqual('DOC-55', ledger(self.engine, TENANT)[0]['external_id'])
+        with self.assertRaises(Conflict):
+            submit(self.engine, TENANT, AGENT, posting, transport=ScriptTransport())
+
+    def test_the_owner_reconciles_an_uncertain_posting_as_failed_and_it_reopens(self):
+        from platform_runtime.erp import reconcile_posting
+        posting, row_id = self.uncertain_posting()
+        reconcile_posting(self.engine, TENANT, row_id, 'owner-1', 'owner', 'failed',
+                          'not present in the ERP')
+        self.assertIsNone(posted(self.engine, TENANT, posting))
+        good = ScriptTransport([{'result': {}}], post_response={'result': {'Ref_Key': 'D'}})
+        self.assertTrue(submit(self.engine, TENANT, AGENT, posting, transport=good)['posted'])
+
+    def test_reconcile_is_owner_only_needs_evidence_and_only_touches_unknowns(self):
+        from platform_runtime.erp import reconcile_posting
+        _, row_id = self.uncertain_posting()
+        with self.assertRaises(Forbidden):
+            reconcile_posting(self.engine, TENANT, row_id, 'op', 'operator', 'failed', 'x')
+        for evidence in ('', '   ', 'e' * 501, None):
+            with self.subTest(evidence=evidence):
+                with self.assertRaises(ValueError):
+                    reconcile_posting(self.engine, TENANT, row_id, 'o', 'owner',
+                                      'failed', evidence)
+        with self.assertRaises(ValueError):
+            reconcile_posting(self.engine, TENANT, row_id, 'o', 'owner', 'posted',
+                              'seen', external_id='')
+        with self.assertRaises(ValueError):
+            reconcile_posting(self.engine, TENANT, row_id, 'o', 'owner', 'maybe', 'seen')
+        reconcile_posting(self.engine, TENANT, row_id, 'o', 'owner', 'failed', 'absent')
+        with self.assertRaises(Conflict):
+            reconcile_posting(self.engine, TENANT, row_id, 'o', 'owner', 'failed', 'again')
 
     def test_the_ledger_never_carries_a_credential(self):
         transport = ScriptTransport([{'result': {}}, {'result': {'Ref_Key': 'DOC-1'}}])

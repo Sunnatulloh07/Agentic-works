@@ -292,7 +292,7 @@ class DailyLimitTests(unittest.TestCase):
 
 
 class PersonaCeilingTests(unittest.TestCase):
-    """The same ceiling ``integration_integration_tests/test_pack_persona.py`` pins -- in a suite that runs.
+    """The same ceiling ``integration_tests/test_pack_persona.py`` pins -- in a suite that runs.
 
     ``tests/`` is not wired into any gate, so a persona bound asserted only there
     is a bound nobody enforces on a machine that only runs the offline suite.

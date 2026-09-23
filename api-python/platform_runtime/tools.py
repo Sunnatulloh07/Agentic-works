@@ -186,6 +186,14 @@ def read_pack_integrations(path):
     return data
 
 
+class IntegrationNotConfigured(RuntimeError):
+    """No integration block exists for the tenant yet: a status, not a fault.
+
+    A named class so callers (a channel status page) can tell "not configured"
+    from an unreadable or malformed file without matching message text.
+    """
+
+
 def config(tenant):
     # Credentials are configured per tenant, never sent in pack or API output.
     # The tenant's own pack directory comes FIRST (tamoyil 1: yangi mijoz =
@@ -197,10 +205,12 @@ def config(tenant):
     local=pack_integrations_path(tenant)
     if local.is_file():return read_pack_integrations(local)
     path=os.environ.get('PLATFORM_INTEGRATIONS_FILE','')
-    if not path:raise RuntimeError('Integration configuration missing')
+    if not path:raise IntegrationNotConfigured('Integration configuration missing: set '
+        'PLATFORM_INTEGRATIONS_FILE or add packs/<tenant>/'+PACK_INTEGRATIONS_FILE)
     with open(path,encoding='utf-8') as f:data=json.load(f)
     value=data.get(tenant)
-    if not isinstance(value,dict):raise RuntimeError('Tenant integration not configured')
+    if not isinstance(value,dict):raise IntegrationNotConfigured('Tenant integration not configured: '
+        'add it to PLATFORM_INTEGRATIONS_FILE or packs/<tenant>/'+PACK_INTEGRATIONS_FILE)
     return value
 
 
@@ -250,10 +260,64 @@ def reports(e,t,a,p,key):
     return {'tasks':{r['status']:r['count'] for r in rows},'records':records}
 
 
+TELEGRAM_API = 'https://api.telegram.org'
+
+
+def telegram_base_url(cfg):
+    """The tenant's Bot API base: `telegram.base_url`, default Telegram's own.
+
+    The rule is the model endpoint's, reused rather than restated
+    (model_transport.validate_url): plain HTTPS, or numeric-loopback HTTP on an
+    unprivileged port ONLY under the explicit `provider_mode: local_loopback`.
+    It runs before the token is read, and the refusal names no URL, because the
+    token becomes part of the path.
+    """
+    from .model_transport import validate_url
+    base=cfg.get('base_url',TELEGRAM_API)
+    if not isinstance(base,str):raise RuntimeError('Invalid Telegram base_url')
+    base=base.rstrip('/')
+    try:validate_url(cfg,base)
+    except ValueError:
+        raise RuntimeError('Telegram base_url must be plain HTTPS, or numeric loopback HTTP '
+                           'with provider_mode: local_loopback') from None
+    return base
+
+
+def deliver_json(url,body,headers=None):
+    """post_json for a customer-facing send, with the verdict the engine needs.
+
+    A 4xx means the provider answered and did nothing -- blocked bot, unknown
+    chat, bad token, a refused request under rate limit -- so it is raised as
+    DeliveryRejected carrying only the status, which the engine records as
+    ``failed``. A 5xx, a timeout or a reset says nothing about what the upstream
+    did and stays a plain RuntimeError, which the engine records as ``uncertain``.
+    Nothing raised here carries the URL: the Telegram URL carries the token.
+    """
+    from .engine import DeliveryRejected
+    try:return post_json(url,body,headers)
+    except urllib.error.HTTPError as error:
+        if 400<=error.code<500:raise DeliveryRejected('http_%d'%error.code) from None
+        raise RuntimeError('Provider request failed') from None
+
+
 def telegram(e,t,a,p,key):
-    cfg=config(t)['telegram'];token=secret(cfg,'token_env')
+    from .engine import DeliveryRejected
+    from .model_transport import LocalRequestRejected,local_mode,transport_for
+    cfg=config(t)['telegram'];base=telegram_base_url(cfg);token=secret(cfg,'token_env')
     if not re.fullmatch(r'[0-9]+:[A-Za-z0-9_-]+',token):raise RuntimeError('Invalid token configuration')
-    body=post_json('https://api.telegram.org/bot'+token+'/sendMessage',{'chat_id':p['conversation_id'],'text':p['text']})
+    url=base+'/bot'+token+'/sendMessage';message={'chat_id':p['conversation_id'],'text':p['text']}
+    if local_mode(cfg):
+        # The model's loopback transport: no proxy, no redirect, bounded bytes.
+        # Its 4xx is the same definite rejection as the cloud path's.
+        try:body=transport_for(cfg)(url,message,{})
+        except LocalRequestRejected as error:
+            if 400<=error.code<500:raise DeliveryRejected('http_%d'%error.code) from None
+            raise RuntimeError('Local Telegram request failed') from None
+        except (RuntimeError,ValueError):raise RuntimeError('Local Telegram request failed') from None
+    else:body=deliver_json(url,message)
+    # `ok: false` is the Bot API saying no (a gateway may return it with a 200).
+    # Any other shape is not the Bot API's answer and stays uncertain.
+    if body.get('ok') is False:raise DeliveryRejected('provider_ok_false')
     if body.get('ok') is not True:raise RuntimeError('Provider rejected delivery')
     return {'provider':'telegram','external_id':str(body['result']['message_id'])}
 
@@ -262,7 +326,8 @@ def instagram(e,t,a,p,key):
     cfg=config(t)['instagram'];version=cfg.get('graph_version','');account=cfg.get('account_id','')
     if not re.fullmatch(r'v[0-9]+\.[0-9]+',version) or not str(account).isascii() or not str(account).isdigit():raise RuntimeError('Meta version/account must be configured')
     # Instagram Login API adapter; Facebook Login accounts need their own endpoint strategy.
-    body=post_json(f'https://graph.instagram.com/{version}/{account}/messages',{'recipient':{'id':p['conversation_id']},'message':{'text':p['text']}},{'Authorization':'Bearer '+secret(cfg,'token_env')})
+    # One POST, one answer: a Graph API 4xx is a rejected request, mapped like Telegram's.
+    body=deliver_json(f'https://graph.instagram.com/{version}/{account}/messages',{'recipient':{'id':p['conversation_id']},'message':{'text':p['text']}},{'Authorization':'Bearer '+secret(cfg,'token_env')})
     return {'provider':'instagram','external_id':str(body['message_id'])}
 
 
@@ -289,7 +354,7 @@ def mcp_call(e,t,a,p,key):
     return MCPClient(cfg['url'],secret(cfg,'token_env')).call(p['name'],arguments)
 
 
-def build_registry(catalog=None):
+def build_registry(catalog=None, shop=None):
     r=Registry()
     from .google_adapters import register_tools
     register_tools(r)
@@ -361,6 +426,10 @@ def build_registry(catalog=None):
     if catalog:
         def products(e,t,a,p,key):return {'products':catalog(t,p['query'])}
         r.add(Tool('products.search','read',obj({'query':string(500)}),products))
+    if shop:
+        # shop.info / orders.draft read the tenant's shop through the injected reader.
+        from .shop_tools import register_shop_tools
+        register_shop_tools(r,shop)
     # Only implemented, non-simulated runner operations are enabled.
     r.add(Tool('fs.list','read',obj({'dir':string(1000)}),runner=True))
     r.add(Tool('fs.read_text','read',obj({'file':string(1000)}),runner=True))
@@ -374,7 +443,7 @@ def known_tool_names():
     The pack contract is checked against this, not against one live registry, so
     a tenant without a catalog may still declare products.search in its YAML.
     """
-    return frozenset(build_registry(lambda tenant, query: []).items)
+    return frozenset(build_registry(lambda tenant, query: [], lambda tenant: {}).items)
 
 
 def unknown_tools(names):

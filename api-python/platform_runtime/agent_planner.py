@@ -1,7 +1,7 @@
 """Explicit opt-in result-fed model adapter. No provider fallback or retry."""
 import json
 
-from .engine import Forbidden, encode
+from .engine import OUTBOUND_TOOLS, Forbidden, encode
 from .tools import config, post_json, secret
 from .usage_budget import metered_completion
 from .model_response import parse_anthropic_decision, parse_decision
@@ -29,8 +29,12 @@ class ResultPlanner:
             raise RuntimeError('Explicit model configuration required')
         agent = context['agent']
         policy = self.engine.policy(tenant, agent)
+        # A conversation turn (any channel but the dashboard's) replies once, after
+        # the run, through ConversationTurns; the model is never offered a send.
+        channel = context.get('channel', 'agent')
+        conversation = channel != 'agent'
         tools = [item for item in self.engine.registry.describe(set(policy.get('tools', [])))
-                 if not item['runner']]
+                 if not item['runner'] and not (conversation and item['name'] in OUTBOUND_TOOLS)]
         # Agent identity and budgets come from persisted state, never model output.
         user_context = {**context, 'tools': tools}
         serialized = encode(user_context)
@@ -58,7 +62,9 @@ class ResultPlanner:
             'capability in a question. Never ask for passwords, API keys or other secrets. '
             'Do not send the final answer through a messaging tool unless the user '
             'explicitly requested that action and its destination is authorized. '
-            'Final answers are shown only in the authenticated dashboard.'
+            + (f'Your final answer or ask question is delivered verbatim to the customer on {channel}; '
+               'if no lookup is needed use ask.' if conversation else
+               'Final answers are shown only in the authenticated dashboard.')
         )
         # The persona is tenant-authored configuration. It follows the rules so it
         # cannot displace them, and is fenced and labelled so the model treats it

@@ -31,7 +31,8 @@ from pathlib import Path
 from unittest import mock
 
 from platform_runtime import tools
-from platform_runtime.tools import config, secret, tenant_for_instagram_account
+from platform_runtime.tools import (PACK_INTEGRATIONS_FILE, IntegrationNotConfigured, config,
+                                    secret, tenant_for_instagram_account)
 
 HAS_YAML = importlib.util.find_spec('yaml') is not None
 NEEDS_YAML = unittest.skipUnless(HAS_YAML, 'PyYAML is not installed')
@@ -97,13 +98,28 @@ class ConfigSourceTests(PackConfigCase):
         with self.env(PACKS_DIR=str(self.packs), PLATFORM_INTEGRATIONS_FILE=str(path)):
             with self.assertRaises(RuntimeError) as caught:
                 config(TENANT)
-        self.assertEqual(str(caught.exception), 'Tenant integration not configured')
+        self.assertIsInstance(caught.exception, IntegrationNotConfigured)
+        self.assertTrue(str(caught.exception).startswith('Tenant integration not configured'))
+        self.assertIn(PACK_INTEGRATIONS_FILE, str(caught.exception))
 
     def test_no_json_env_and_no_pack_file_keeps_its_message(self):
         with self.env(PACKS_DIR=str(self.packs)):
             with self.assertRaises(RuntimeError) as caught:
                 config(TENANT)
-        self.assertEqual(str(caught.exception), 'Integration configuration missing')
+        self.assertIsInstance(caught.exception, IntegrationNotConfigured)
+        self.assertTrue(str(caught.exception).startswith('Integration configuration missing'))
+        # Both places a tenant can be configured are named, never a value.
+        self.assertIn('PLATFORM_INTEGRATIONS_FILE', str(caught.exception))
+        self.assertIn(PACK_INTEGRATIONS_FILE, str(caught.exception))
+
+    def test_unreadable_configuration_is_not_reported_as_unconfigured(self):
+        # A status page may show "not configured"; a broken file must stay an error.
+        path = self.packs / 'broken.json'
+        path.write_text('{', encoding='utf-8')
+        with self.env(PACKS_DIR=str(self.packs), PLATFORM_INTEGRATIONS_FILE=str(path)):
+            with self.assertRaises(ValueError) as caught:
+                config(TENANT)
+        self.assertNotIsInstance(caught.exception, IntegrationNotConfigured)
 
     @NEEDS_YAML
     def test_pack_file_alone_is_enough(self):

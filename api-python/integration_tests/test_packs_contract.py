@@ -232,3 +232,96 @@ def test_every_shipped_pack_loads(monkeypatch):
     assert shipped, "no packs found"
     for folder in shipped:
         load_pack("template" if folder == "_template" else folder)
+
+
+# --- Conversation turns -------------------------------------------------------
+
+def test_demo_retail_answers_telegram_through_a_conversation_turn():
+    from app.planning import conversation_agent
+    from app.platform_api import agents, policy
+
+    turn = conversation_agent(agents, "demo-retail", "telegram")
+    assert turn["agent"] == "sales.responder"
+    assert turn["conversation"]["enabled"] is True
+    # A reply to the verified chat goes out unattended; the engine decides that
+    # from the ladder, and conversation settings never enter the approval hash.
+    assert policy("demo-retail", "sales.responder")["ladder"] == "autonomous"
+    assert "products.search" in policy("demo-retail", "sales.responder")["tools"]
+    assert conversation_agent(agents, "demo-retail", "instagram") is None
+
+
+def test_template_documents_the_conversation_block_disabled():
+    agent = load_pack("template").agents[0]
+    assert agent.conversation.enabled is False
+    assert agent.triggers[0].type == "message"
+
+
+# --- Conversation order capture and operator notification ---------------------
+
+def order_pack(conversation, order_tools="[records.create]", recipients="[]",
+               sales_tools="[telegram.send, orders.draft]"):
+    return ("name: probe\nagents:\n"
+            f"  - id: s.bot\n    name: Bot\n    tools: {sales_tools}\n    ladder: autonomous\n"
+            f"    allowed_recipients: {recipients}\n"
+            "    triggers: [{type: message, source: telegram}]\n"
+            f"    conversation: {conversation}\n"
+            f"  - id: s.orders\n    name: Orders\n    tools: {order_tools}\n    ladder: human_assisted\n"
+            "branches: []\n")
+
+
+def test_order_and_notify_settings_default_to_off(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack("{enabled: true}"))
+    policy = load_pack("probe").agents[0].conversation
+    assert (policy.order_agent, policy.order_kind, policy.notify_recipient) == ("", "order", "")
+
+
+def test_a_declared_order_agent_and_notify_recipient_load(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack(
+        "{enabled: true, order_agent: s.orders, order_kind: buyurtma, notify_recipient: '-100777'}",
+        recipients="['-100777']"))
+    policy = load_pack("probe").agents[0].conversation
+    assert (policy.order_agent, policy.order_kind, policy.notify_recipient) == ("s.orders", "buyurtma", "-100777")
+
+
+def test_policy_hands_the_order_and_notify_settings_to_the_runtime(tmp_path, monkeypatch):
+    from app.platform_api import policy
+    write(tmp_path, monkeypatch, "probe", order_pack(
+        "{enabled: true, order_agent: s.orders, notify_recipient: '42'}", recipients="['42']"))
+    conversation = policy("probe", "s.bot")["conversation"]
+    assert (conversation["order_agent"], conversation["order_kind"], conversation["notify_recipient"]) == (
+        "s.orders", "order", "42")
+
+
+def test_an_order_agent_missing_from_the_pack_is_refused(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack("{enabled: true, order_agent: s.nobody}"))
+    with pytest.raises(PackError, match="s.nobody"):
+        load_pack("probe")
+
+
+def test_an_order_agent_without_records_create_is_refused(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack("{enabled: true, order_agent: s.orders}",
+                                                     order_tools="[reports.summary]"))
+    with pytest.raises(PackError, match="records.create"):
+        load_pack("probe")
+
+
+def test_a_notify_recipient_outside_allowed_recipients_is_refused(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack("{enabled: true, notify_recipient: '-100777'}",
+                                                     recipients="['42']"))
+    with pytest.raises(PackError, match="allowed_recipients"):
+        load_pack("probe")
+
+
+def test_a_notify_recipient_needs_telegram_send(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack("{enabled: true, notify_recipient: '42'}",
+                                                     recipients="['42']", sales_tools="[orders.draft]"))
+    with pytest.raises(PackError, match="telegram.send"):
+        load_pack("probe")
+
+
+@pytest.mark.parametrize("block", ["{order_kind: ''}", "{order_kind: '" + "k" * 65 + "'}",
+                                   "{order_agent: 5}", "{notify_recipient: 42}"])
+def test_order_and_notify_values_are_typed_and_bounded(tmp_path, monkeypatch, block):
+    write(tmp_path, monkeypatch, "probe", order_pack(block))
+    with pytest.raises(PackError):
+        load_pack("probe")

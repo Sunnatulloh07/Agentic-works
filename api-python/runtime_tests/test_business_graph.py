@@ -382,9 +382,70 @@ class GraphTests(unittest.TestCase):
         result = self.call('graph.entity', {'entity': 'product', 'id': 'SKU-1042'},
                            RecordingTransport({'values': [['SKU', 'Narx'],
                                                           ['SKU-1042', 450000]]}))
-        self.assertEqual([{'source': 'erp', 'rows': 3, 'matched': 1, 'read': True},
-                          {'source': 'finance', 'rows': 1, 'matched': 1, 'read': True}],
+        self.assertEqual([{'source': 'erp', 'rows': 3, 'matched': 1, 'read': True,
+                           'truncated': False},
+                          {'source': 'finance', 'rows': 1, 'matched': 1, 'read': True,
+                           'truncated': False}],
                          result['sources'])
+        self.assertFalse(result['truncated'])
+        self.assertEqual([], result['sources_truncated'])
+
+    # ------------------------------------------------------ source row ceiling
+
+    def _seed_padding(self, count, late=''):
+        """Fill the ERP table past connectors.read's default 50-row ceiling."""
+        db = sqlite3.connect(self.erp)
+        try:
+            db.executemany('INSERT INTO products VALUES(?,?,?)',
+                           [(f'PAD-{i:03d}', 1, 1) for i in range(count)])
+            if late:
+                db.execute('INSERT INTO products VALUES(?,?,?)', (late, 777, 7))
+            db.commit()
+        finally:
+            db.close()
+
+    def test_an_id_past_a_sources_row_ceiling_is_reported_truncated(self):
+        """The graph reads each source without a where-filter, so connectors.read
+        stops at its 50-row default. An id past it used to come back with no
+        observations and `complete: true` -- indistinguishable from "no such id"."""
+        self._seed_padding(60, late='SKU-LATE')
+        result = self.call('graph.entity', {'entity': 'product', 'id': 'SKU-LATE'})
+        self.assertEqual({}, result['attributes'])
+        self.assertTrue(result['truncated'])
+        self.assertEqual(['erp'], result['sources_truncated'])
+        self.assertEqual({'source': 'erp', 'rows': 50, 'matched': 0, 'read': True,
+                          'truncated': True}, result['sources'][0])
+
+    def test_a_sheet_that_says_it_was_cut_is_reported_truncated(self):
+        values = [['SKU', 'Narx']] + [[f'S-{i}', i] for i in range(51)]
+        result = self.call('graph.entity', {'entity': 'product', 'id': 'SKU-1042'},
+                           RecordingTransport({'values': values}))
+        self.assertEqual(['finance'], result['sources_truncated'])
+        self.assertTrue(result['truncated'])
+
+    def test_list_answers_name_a_source_that_stopped_at_its_ceiling(self):
+        self._seed_padding(60)
+        for name, args in (('graph.search', {'entity': 'product', 'attribute': 'stock',
+                                             'equals': 0}),
+                           ('graph.conflicts', {'entity': 'product'}),
+                           ('graph.timeline', {'entity': 'product', 'id': 'SKU-77'})):
+            with self.subTest(tool=name):
+                result = self.call(name, args, RecordingTransport(self.MIXED))
+                self.assertEqual(['erp'], result['sources_truncated'])
+                # The list may be missing rows the source never returned, so the
+                # answer is not "everything" even though no limit refused an item.
+                self.assertTrue(result['truncated'])
+
+    def test_a_declared_database_read_limit_is_the_ceiling(self):
+        from platform_runtime.business_graph import _source_truncated
+        source = {'tool': 'database.read', 'args': {'request_json': json.dumps(
+            {'operation': 'read', 'resource': 't', 'fields': ['a'], 'limit': 5})}}
+        self.assertTrue(_source_truncated(source, {'rows': [{}] * 5}, [{}] * 5))
+        self.assertFalse(_source_truncated(source, {'rows': [{}] * 4}, [{}] * 4))
+        default = {'tool': 'database.read', 'args': {'request_json': json.dumps(
+            {'operation': 'read', 'resource': 't', 'fields': ['a']})}}
+        self.assertTrue(_source_truncated(default, {'rows': [{}] * 50}, [{}] * 50))
+        self.assertFalse(_source_truncated(default, {'rows': [{}] * 49}, [{}] * 49))
 
     # ----------------------------------------------------------- failure honesty
 
@@ -404,8 +465,10 @@ class GraphTests(unittest.TestCase):
         self.assertEqual([{'source': 'finance', 'error': 'OSError'}], result['source_errors'])
         # The ERP value is still reported, and the caller can see which source is missing.
         self.assertEqual(450000, result['attributes']['price']['selected']['value'])
-        self.assertEqual([{'source': 'erp', 'rows': 3, 'matched': 1, 'read': True},
-                          {'source': 'finance', 'rows': 0, 'matched': 0, 'read': False}],
+        self.assertEqual([{'source': 'erp', 'rows': 3, 'matched': 1, 'read': True,
+                           'truncated': False},
+                          {'source': 'finance', 'rows': 0, 'matched': 0, 'read': False,
+                           'truncated': False}],
                          result['sources'])
 
     def test_a_transport_error_is_recorded_and_not_swallowed_into_a_value(self):

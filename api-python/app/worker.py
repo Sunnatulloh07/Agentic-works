@@ -23,6 +23,7 @@ import time
 from platform_runtime.agent_loop import AgentLoop
 from platform_runtime.agent_planner import ResultPlanner
 from platform_runtime.briefing import Briefing
+from platform_runtime.conversation import ConversationTurns
 from platform_runtime.reengagement import ReengagementLoop
 from platform_runtime.escalation import EscalationLoop
 
@@ -54,6 +55,7 @@ def main():
     from .planning import planner as make_planner
     e=engine();planner=make_planner(e)
     agent_loop=AgentLoop(e);result_planner=ResultPlanner(e)
+    conversation=ConversationTurns(e,agent_loop)
     reengagement=ReengagementLoop(e,agent_loop)
     briefing=Briefing(e)
     escalation=EscalationLoop(e)
@@ -74,6 +76,8 @@ def main():
                 ('process_event',lambda t=tenant:e.process_event(t,planner)),
                 ('engine',lambda t=tenant:e.tick(t,'cloud:'+str(os.getpid()))),
                 ('agent_loop',lambda t=tenant:agent_loop.tick(t,result_planner)),
+                # After the loop so a run that just ended is settled in the same pass.
+                ('conversation',lambda t=tenant:conversation.tick(t)),
             ]) or active
         time.sleep(0.1 if active else 1)
 

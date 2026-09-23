@@ -3,10 +3,43 @@
 Optional PyMySQL dependency. Contract testing is not live server acceptance.
 """
 import importlib
+import os
+import ssl
 from ..engine import Conflict, Forbidden
-from .transports import _credential, _receipt, _rows, validate_endpoint
+from .transports import _ca_path, _credential, _receipt, _rows, validate_endpoint
 from .sql import compile_sql
 from .contract import name
+
+
+def _ca_file(raw):
+    """The CA bundle to verify against, or ``None`` for the system trust store."""
+    if 'ssl_ca_env' in raw:
+        path = os.environ.get(raw['ssl_ca_env'], '')
+        if not path:
+            raise RuntimeError(f"MySQL CA path unavailable in environment variable {raw['ssl_ca_env']}")
+    elif 'ssl_ca' in raw:
+        path = raw['ssl_ca']
+    else:
+        return None
+    path = _ca_path(path)
+    if not os.path.isfile(path):
+        raise ValueError('MySQL CA file not found')
+    return path
+
+
+def tls_context(raw):
+    """One explicit, fully verifying TLS context.
+
+    Passed as ``ssl=`` INSTEAD of PyMySQL's ``ssl_verify_cert``/``ssl_verify_identity``
+    flags: from those flags PyMySQL builds its own context and, when no CA is given,
+    sets ``check_hostname`` to False -- so the "verify identity" request was silently
+    dropped for every connection that relied on the system trust store.
+    """
+    context = ssl.create_default_context(cafile=_ca_file(raw))
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
 
 
 def mysql_execute(raw, tenant, request, internal_path=None):
@@ -14,9 +47,10 @@ def mysql_execute(raw, tenant, request, internal_path=None):
     pymysql = importlib.import_module('pymysql')
     sql, params = compile_sql(raw, tenant, request)
     write = request['operation'] != 'read'
+    context = tls_context(raw)
     conn = pymysql.connect(host=raw['host'], port=raw['port'], user=raw['user'],
                            password=_credential(raw), database=raw['database'],
-                           ssl_verify_cert=True, ssl_verify_identity=True,
+                           ssl=context,
                            connect_timeout=5, read_timeout=3, write_timeout=3,
                            autocommit=False, charset='utf8mb4', cursorclass=pymysql.cursors.SSCursor)
     try:

@@ -37,6 +37,16 @@ A failure of the ERP search is not treated as "not found". An unreachable ERP
 means the platform cannot know whether the invoice is already posted, and sending
 in that state is exactly how a double payment happens. The precondition fails
 closed.
+
+**Four: the ledger row exists before the POST does.** A row written *after* the
+POST cannot survive a process that dies between the two, and the next submit would
+post the invoice again. So a claiming ``posting`` row is reserved first, under a
+deterministic idempotency key that is also sent to the ERP as a header. A POST
+whose outcome never came back -- a timeout, a reset, a 5xx, a crash -- leaves that
+row ``uncertain``, and an ``uncertain`` row blocks every retry until the owner
+reconciles it (``reconcile_posting``), exactly as the engine treats an external
+write that raised. Only a definitive provider refusal (a 4xx other than
+408/409/425/429) releases the identity for a retry.
 """
 from __future__ import annotations
 
@@ -111,14 +121,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS p_erp_postings_claim
 CREATE INDEX IF NOT EXISTS p_erp_postings_document ON p_erp_postings(tenant,document);
 '''
 
-# Only these outcomes assert "the ERP holds this document", so only these may
-# occupy the unique claim index. A `failed` row must stay retryable and an
-# `unconfirmed` row must remain reconcilable, so neither may claim the identity.
-CLAIMING_STATUSES = frozenset({'posted', 'skipped_existing'})
+# Every outcome except a definitive `failed` occupies the unique claim index.
+# `posted`/`skipped_existing` assert the ERP holds the document; `posting` is a
+# reservation whose POST is in flight; `uncertain` and `unconfirmed` are POSTs whose
+# result is unknown. The last three must block a retry until the owner reconciles,
+# because a second POST may create a second document. Only `failed` -- the ERP said
+# "not created" -- stays retryable.
+CLAIMING_STATUSES = frozenset({'posted', 'skipped_existing', 'posting', 'uncertain',
+                               'unconfirmed'})
+UNKNOWN_STATUSES = frozenset({'uncertain', 'unconfirmed'})
+
+# A reservation older than this has outlived any POST it could be waiting for
+# (timeout_seconds is capped at 60), so its process is gone and the outcome is
+# unknown: it becomes `uncertain`, never re-sent.
+RESERVATION_STALE_SECONDS = 180
+
+# 4xx answers that do NOT prove the document was not created: a timeout, a
+# conflict (possibly "this key is in progress"), too-early and rate limiting.
+NOT_DEFINITIVE_4XX = frozenset({408, 409, 425, 429})
+
+HEADER_NAME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9-]{0,63}$')
+RESERVED_HEADERS = frozenset({'authorization', 'content-type', 'content-length',
+                              'host', 'cookie', 'transfer-encoding', 'connection'})
 
 
 class ErpError(RuntimeError):
-    """A deterministic refusal about a posting, not a transport failure."""
+    """A deterministic refusal about a posting, not a transport failure.
+
+    ``status`` carries the provider's HTTP status when there was one, so the POST
+    path can tell a definitive refusal from an answer that proves nothing.
+    """
+
+    def __init__(self, message='', *, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 # ------------------------------------------------------------------- transport
@@ -157,7 +193,7 @@ def default_erp_transport(url: str, body: Optional[Any] = None,
     except urllib.error.HTTPError as error:
         # The provider body is never echoed: an ERP error page routinely contains a
         # stack trace, an internal hostname or a credential fragment.
-        raise ErpError(f'ERP HTTP status {error.code}') from None
+        raise ErpError(f'ERP HTTP status {error.code}', status=error.code) from None
     except ErpError:
         raise
     except Exception:
@@ -192,7 +228,7 @@ def erp_config(tenant) -> dict:
     unknown = set(raw) - {'driver', 'enabled', 'host', 'base_path', 'timeout_seconds',
                           'auth', 'credential_env', 'token_env', 'basic_auth_env',
                           'post_path', 'search_path', 'response_map', 'accounts',
-                          'counterparties', 'allow_auto_submit'}
+                          'counterparties', 'allow_auto_submit', 'idempotency_header'}
     if unknown:
         raise ValueError(f'erp_posting has unsupported keys: {sorted(unknown)}')
     driver = raw.get('driver')
@@ -239,12 +275,22 @@ def erp_config(tenant) -> dict:
     allow_auto = raw.get('allow_auto_submit', False)
     if not isinstance(allow_auto, bool):
         raise ValueError('erp_posting.allow_auto_submit must be a boolean')
+    # The header that carries the reservation's idempotency key. Sent by default
+    # under the IETF name; an ERP that expects another name declares it, and ''
+    # turns it off for a gateway that refuses unknown headers.
+    idempotency_header = raw.get('idempotency_header', 'Idempotency-Key')
+    if idempotency_header != '' and (
+            not isinstance(idempotency_header, str)
+            or not HEADER_NAME_RE.match(idempotency_header)
+            or idempotency_header.lower() in RESERVED_HEADERS):
+        raise ValueError('erp_posting.idempotency_header must be a plain header name '
+                         'other than Authorization/Content-Type/Host, or empty')
     return {'driver': driver, 'enabled': enabled, 'host': host,
             'base_path': base_path.rstrip('/') or '/', 'timeout_seconds': timeout,
             'auth': auth, 'credential_env': reference, 'post_path': raw.get('post_path', ''),
             'search_path': raw.get('search_path', ''), 'response_map': response_map,
             'accounts': accounts, 'counterparties': counterparties,
-            'allow_auto_submit': allow_auto}
+            'allow_auto_submit': allow_auto, 'idempotency_header': idempotency_header}
 
 
 def _mapping(value, name):
@@ -464,11 +510,11 @@ def identity(posting):
 def posted(engine, tenant, posting):
     """The ledger row that *claims* this document, or ``None``.
 
-    Only a row whose outcome asserts "the ERP holds this document" counts. A
-    ``failed`` row is an audit record of an attempt that did not land, and an
-    ``unconfirmed`` row is one where we do not know -- neither may make the document
-    permanently unpostable, so neither is returned here. The row is still stored and
-    still visible through ``ledger``; it simply does not answer this question.
+    Every status in ``CLAIMING_STATUSES`` counts: a posted document, an in-flight
+    reservation, and a POST whose outcome is unknown. Only a ``failed`` row -- the
+    ERP refused the document -- is left out, so a refusal stays retryable while an
+    unknown outcome waits for the owner (``reconcile_posting``). The failed row is
+    still stored and still visible through ``ledger``.
     """
     driver, kind, supplier, number = identity(posting)
     with engine.read() as cursor:
@@ -573,6 +619,148 @@ def _record(engine, tenant, posting, document_id, plan, status, external_id,
                     f'{driver}; refusing a second posting') from None
             raise
     return row_id
+
+
+def _claim_key(posting):
+    driver, kind, supplier, number = identity(posting)
+    return f'{driver}|{kind}|{supplier}|{number}'
+
+
+def idempotency_key(tenant, posting, attempt):
+    """The deterministic key of one posting attempt: the reservation's row id.
+
+    Derived from the tenant, the document identity and the attempt number, so the
+    same attempt always carries the same key -- to the ERP, in the ledger and to an
+    owner reconciling by hand -- and needs no new column. The attempt number moves
+    only after a DEFINITIVE refusal, because an idempotency-aware ERP replays its
+    stored answer for a reused key and would refuse a corrected retry forever.
+    """
+    import hashlib
+    driver, kind, supplier, number = identity(posting)
+    material = '\x1f'.join((tenant, driver, kind, supplier, number, str(attempt)))
+    return hashlib.sha256(material.encode('utf-8')).hexdigest()[:24]
+
+
+def recover_postings(engine, tenant):
+    """Turn every reservation that outlived its POST into ``uncertain``.
+
+    A ``posting`` row older than ``RESERVATION_STALE_SECONDS`` belongs to a process
+    that died between the POST and the ledger update. Its outcome is unknown, so it
+    is never re-sent: it becomes ``uncertain`` and keeps the claim until the owner
+    reconciles it. Run lazily by every path that reads or writes the ledger, which
+    is the only way a retry could reach the ERP. Returns the number of rows moved.
+    """
+    with engine.tx() as cursor:
+        moved = cursor.execute(
+            '''UPDATE p_erp_postings SET status='uncertain', response=?
+               WHERE tenant=? AND status='posting' AND created<=?''',
+            (encode({'error': 'reservation_expired'}), tenant,
+             engine.clock() - RESERVATION_STALE_SECONDS)).rowcount
+    return moved
+
+
+def _reserve(engine, tenant, posting, document_id, plan, request_body):
+    """Write the claiming ``posting`` row BEFORE any byte leaves for the ERP.
+
+    The unique claim index and the primary key both collide for a concurrent
+    reservation of the same document, so two submits cannot both reach the POST.
+    """
+    driver, kind, supplier, number = identity(posting)
+    with engine.tx() as cursor:
+        engine.require_active(cursor, tenant)
+        attempt = cursor.execute(
+            '''SELECT count(*) n FROM p_erp_postings
+               WHERE tenant=? AND driver=? AND kind=? AND supplier=? AND number=?''',
+            (tenant, driver, kind, supplier, number)).fetchone()['n']
+        row_id = idempotency_key(tenant, posting, attempt)
+        try:
+            cursor.execute(
+                '''INSERT INTO p_erp_postings
+                   (tenant,id,document,driver,kind,supplier,number,currency,
+                    total_minor,external_id,status,request,response,plan,created,settled,
+                    claim_key)
+                   VALUES(?,?,?,?,?,?,?,?,?,'','posting',?,'',?,?,NULL,?)''',
+                (tenant, row_id, document_id, driver, kind, supplier, number,
+                 posting['currency'], posting['total_minor'], encode(request_body),
+                 encode(plan), engine.clock(), _claim_key(posting)))
+        except Exception as error:
+            if 'UNIQUE' in str(error).upper():
+                raise Conflict(
+                    f'document {supplier}/{number} is already being posted to '
+                    f'{driver}; refusing a concurrent posting') from None
+            raise
+    return row_id
+
+
+def _finish(engine, tenant, row_id, status, external_id, response):
+    """Record the POST's outcome on its reservation.
+
+    Deliberately not gated on the tenant being active: the POST already happened,
+    and losing its answer is worse than recording it during a freeze. A late answer
+    may also land on a reservation that recovery already made ``uncertain`` -- the
+    provider's own answer is better evidence than "unknown". A ``failed`` outcome
+    releases the claim so the document can be retried.
+    """
+    with engine.tx() as cursor:
+        cursor.execute(
+            '''UPDATE p_erp_postings SET status=?, external_id=?, response=?, settled=?,
+                      claim_key=CASE WHEN ?='failed' THEN NULL ELSE claim_key END
+               WHERE tenant=? AND id=? AND status IN ('posting','uncertain')''',
+            (status, external_id, encode(response), engine.clock(), status,
+             tenant, row_id))
+
+
+def _definitive_refusal(error):
+    """True only when the ERP answered and the answer proves nothing was created."""
+    status = getattr(error, 'status', None)
+    return (isinstance(error, ErpError) and type(status) is int
+            and 400 <= status < 500 and status not in NOT_DEFINITIVE_4XX)
+
+
+def reconcile_posting(engine, tenant, posting_id, actor, role, outcome, evidence, *,
+                      external_id=''):
+    """The owner's verdict on a posting whose outcome is unknown.
+
+    Mirrors ``Engine.reconcile``: owner only, evidence required, and only a row in
+    an unknown state (``uncertain`` or ``unconfirmed``) can be decided. ``posted``
+    records the ERP's document id and keeps the claim; ``failed`` says the ERP does
+    not hold the document and releases the claim so it can be posted again.
+    """
+    if role not in {'owner', 'super-admin'}:
+        raise Forbidden('Owner required')
+    if outcome not in {'posted', 'failed'}:
+        raise ValueError('outcome must be posted or failed')
+    if not isinstance(evidence, str) or not evidence.strip() or len(evidence) > 500:
+        raise ValueError('Evidence required, maximum 500 characters')
+    if outcome == 'posted' and (not isinstance(external_id, str)
+                                or not external_id.strip() or len(external_id) > 128):
+        raise ValueError('a posted verdict needs the ERP document id (max 128 characters)')
+    recover_postings(engine, tenant)
+    with engine.tx() as cursor:
+        engine.require_authority(cursor, tenant, 'web', actor, ('owner',))
+        row = cursor.execute(
+            '''SELECT id,driver,kind,supplier,number,status FROM p_erp_postings
+               WHERE tenant=? AND id=? AND status IN ('uncertain','unconfirmed')''',
+            (tenant, posting_id)).fetchone()
+        if row is None:
+            raise Conflict('Posting is not in an unknown state')
+        claim = f'{row["driver"]}|{row["kind"]}|{row["supplier"]}|{row["number"]}'
+        try:
+            cursor.execute(
+                '''UPDATE p_erp_postings SET status=?, external_id=?, settled=?, claim_key=?
+                   WHERE tenant=? AND id=?''',
+                (outcome, external_id.strip() if outcome == 'posted' else '',
+                 engine.clock(), claim if outcome == 'posted' else None,
+                 tenant, posting_id))
+        except Exception as error:
+            if 'UNIQUE' in str(error).upper():
+                raise Conflict('another row already claims this document') from None
+            raise
+        engine.audit(cursor, tenant, '', 'erp.posting_reconciled', actor,
+                     {'posting': posting_id, 'from': row['status'], 'outcome': outcome,
+                      'evidence': evidence[:500]})
+    return {'id': posting_id, 'status': outcome,
+            'external_id': external_id.strip() if outcome == 'posted' else ''}
 
 
 # ------------------------------------------------------------------- adapters
@@ -687,13 +875,17 @@ def submit(engine, tenant, agent, posting, *, document_id='', plan=None, note=''
     Order matters and is the whole design:
 
     1. resolve — a field the document does not carry ends it here, before any I/O;
-    2. ledger — our own record of the identity; a hit ends it here;
+    2. ledger — our own record of the identity; a hit ends it here, and so does an
+       in-flight reservation or an unknown outcome awaiting the owner;
     3. ERP search — the provider's own answer; a hit ends it here;
-    4. only then POST, and record the result.
+    4. reserve — a claiming ``posting`` row under a deterministic idempotency key;
+    5. only then POST (carrying that key), and record the result on the reservation.
 
     Steps 2 and 3 are both present on purpose. The ledger cannot see a posting made
     by another system, and the ERP search cannot be trusted to be atomic with the
-    POST. Each covers what the other misses.
+    POST. Each covers what the other misses. Step 4 is what makes "once" survive a
+    crash: the row exists before the POST, so a POST whose answer is lost leaves an
+    ``uncertain`` claim behind instead of nothing.
     """
     settings = erp_config(tenant)
     if not settings['driver']:
@@ -701,10 +893,22 @@ def submit(engine, tenant, agent, posting, *, document_id='', plan=None, note=''
     if not settings['enabled']:
         raise Forbidden('ERP posting is disabled for this tenant')
 
+    recover_postings(engine, tenant)
     existing = posted(engine, tenant, posting)
     if existing is not None:
+        who = f'document {posting["supplier"]}/{posting["number"]}'
+        if existing['status'] == 'posting':
+            raise Conflict(
+                f'{who} is in flight: posting {existing["id"]} was reserved and its ERP '
+                f'answer has not arrived; refusing a concurrent posting')
+        if existing['status'] in UNKNOWN_STATUSES:
+            raise Conflict(
+                f'{who} has a posting whose outcome is unknown (status '
+                f'{existing["status"]!r}, idempotency key {existing["id"]}). The owner '
+                f'must reconcile it against the ERP before any retry, because a second '
+                f'POST may post the invoice twice')
         raise Conflict(
-            f'document {posting["supplier"]}/{posting["number"]} was already posted '
+            f'{who} was already posted '
             f'by this platform (status {existing["status"]!r}); refusing a second posting')
 
     transport = transport or default_erp_transport
@@ -722,15 +926,24 @@ def submit(engine, tenant, agent, posting, *, document_id='', plan=None, note=''
     if not path:
         raise Forbidden('erp_posting.post_path is not declared')
     url = f'https://{settings["host"]}{settings["base_path"]}{path}'
+    # Everything that can fail without I/O fails here, before the reservation, so a
+    # missing credential never leaves a claim behind.
+    headers = _auth_headers(settings)
+    row_id = _reserve(engine, tenant, posting, document_id, plan or {}, body)
+    if settings['idempotency_header']:
+        headers[settings['idempotency_header']] = row_id
     try:
-        response = transport(url, body=body, headers=_auth_headers(settings),
+        response = transport(url, body=body, headers=headers,
                              method='POST', timeout=settings['timeout_seconds'])
     except Exception as error:
-        # The attempt is recorded BEFORE the exception propagates, so an operator
-        # can see that a POST was issued and its outcome is unknown. A failed
-        # posting that leaves no trace is what produces a manual double payment.
-        _record(engine, tenant, posting, document_id, plan or {}, 'failed', '',
-                body, {'error': type(error).__name__})
+        # The outcome is recorded BEFORE the exception propagates. Only a definitive
+        # refusal is `failed` (and retryable); anything else -- a timeout, a reset,
+        # a 5xx, an unreadable body -- may have created the document, so it is
+        # `uncertain` and blocks a retry until the owner reconciles it.
+        definitive = _definitive_refusal(error)
+        _finish(engine, tenant, row_id, 'failed' if definitive else 'uncertain', '',
+                {'error': type(error).__name__,
+                 'status': getattr(error, 'status', None)})
         raise
 
     pointer = settings['response_map'].get('created_id', '')
@@ -743,16 +956,14 @@ def submit(engine, tenant, agent, posting, *, document_id='', plan=None, note=''
     if not external:
         # A 2xx without an identifier cannot prove what was created, and an
         # unverifiable financial write must not be reported as settled. The row is
-        # recorded as unconfirmed so the operator reconciles it by hand.
-        _record(engine, tenant, posting, document_id, plan or {}, 'unconfirmed', '',
-                body, response)
+        # recorded as unconfirmed -- still claiming -- so the owner reconciles it.
+        _finish(engine, tenant, row_id, 'unconfirmed', '', response)
         raise Conflict(
             'ERP accepted the posting but returned no document identifier. The attempt '
             'was recorded as unconfirmed: reconcile it in the ERP by hand rather than '
             'retrying, because a second attempt may post the invoice twice')
 
-    row_id = _record(engine, tenant, posting, document_id, plan or {}, 'posted',
-                     str(external), body, response)
+    _finish(engine, tenant, row_id, 'posted', str(external), response)
     return {'posted': True, 'duplicate': False, 'external_id': str(external),
             'posting_id': row_id, 'document': {'supplier': posting['supplier'],
                                                'number': posting['number'],
@@ -781,10 +992,17 @@ def _prepare_tool(engine, tenant, agent, args, step):
     except ErpError as error:
         return {'ready': False, 'reason': str(error), 'driver': '',
                 'would_send': None, 'ledger': None, 'in_erp': None}
+    recover_postings(engine, tenant)
     existing = posted(engine, tenant, posting)
     settings = erp_config(tenant)
-    return {'ready': existing is None, 'reason': '' if existing is None
-            else 'already posted by this platform',
+    if existing is None:
+        reason = ''
+    elif existing['status'] in ('posted', 'skipped_existing'):
+        reason = 'already posted by this platform'
+    else:
+        reason = (f'a posting of this document is {existing["status"]}; nothing may be '
+                  f'sent until it is answered or the owner reconciles it')
+    return {'ready': existing is None, 'reason': reason,
             'driver': settings['driver'],
             'would_send': posting_body(settings, posting, args.get('note', '')),
             'ledger': existing,
@@ -823,6 +1041,7 @@ def _status_tool(engine, tenant, agent, args, step):
         raise ValueError('limit must be an integer')
     limit = min(max(1, limit), 200)
     settings = erp_config(tenant)
+    recover_postings(engine, tenant)
     rows, total, truncated = ledger_page(engine, tenant, limit,
                                          str(args.get('document_id', '')))
     return {'driver': settings['driver'], 'enabled': settings['enabled'],

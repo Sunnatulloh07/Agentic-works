@@ -383,7 +383,14 @@ def preflight(engine, tenant, agent, entry):
 
 
 def _rows(engine, tenant, agent, source, step):
-    """Invoke the ordinary read handler. No new transport, no new authority."""
+    """Invoke the ordinary read handler. No new transport, no new authority.
+
+    Returns ``(rows, truncated)``. The graph reads a source with the operator's
+    declared arguments and no per-id filter, so a source answers with at most its
+    own row ceiling (``connectors.read`` and ``database.read`` default to 50). Rows
+    past it are never seen, and ``truncated`` is how that stays visible instead of
+    turning into "this id has no value".
+    """
     payload = engine.registry.get(source['tool']).handler(
         engine, tenant, agent, source['args'], step)
     if not isinstance(payload, dict):
@@ -391,7 +398,49 @@ def _rows(engine, tenant, agent, source, step):
     rows = payload.get('rows')
     if not isinstance(rows, list):
         raise BusinessGraphError('Source payload carried no row list')
-    return rows
+    return rows, _source_truncated(source, payload, rows)
+
+
+# The row ceiling a SQL-shaped read tool applies when its request names none.
+DEFAULT_SOURCE_LIMIT = 50
+
+
+def _source_truncated(source, payload, rows):
+    """True when the source may hold rows this read did not see.
+
+    Three pieces of evidence, in order: the source said so itself (``sheets.rows``
+    reports ``truncated``); the graph's own ``MAX_SCAN`` cut it; or the source
+    returned as many rows as its row ceiling allows. The last one cannot tell a
+    table of exactly ``limit`` rows from a longer one without reading one more row,
+    so a table that exactly fills its ceiling is reported too -- the cost of that
+    is "look again", the cost of the opposite is a silently missing record.
+    """
+    if payload.get('truncated') is True or len(rows) > MAX_SCAN:
+        return True
+    ceiling = payload.get('limit')
+    if type(ceiling) is not int:
+        ceiling = None
+        if source.get('tool') == 'database.read':
+            try:
+                request = json.loads(source['args'].get('request_json', ''))
+            except (TypeError, ValueError):
+                request = None
+            if isinstance(request, dict):
+                ceiling = request.get('limit', DEFAULT_SOURCE_LIMIT)
+        elif source.get('tool') == 'connectors.read':
+            ceiling = source['args'].get('limit', DEFAULT_SOURCE_LIMIT)
+    return type(ceiling) is int and ceiling > 0 and len(rows) >= ceiling
+
+
+def _truncated_names(status, *, unmatched_only=False):
+    """The sources that stopped at their ceiling, in the order they were read.
+
+    ``unmatched_only`` is the single-entity question: a source that DID return the
+    id has already given the graph everything it keeps (the first row per id), so
+    only a cut source in which the id was not found leaves the answer unproven.
+    """
+    return [item['source'] for item in status
+            if item.get('truncated') and not (unmatched_only and item.get('matched'))]
 def _collect_all(engine, tenant, agent, entry, step):
     """Read every source exactly once and bucket observations by entity id.
 
@@ -409,12 +458,13 @@ def _collect_all(engine, tenant, agent, entry, step):
     for name in entry['order']:
         source = entry['sources'][name]
         try:
-            rows = _rows(engine, tenant, agent, source, step)
+            rows, cut = _rows(engine, tenant, agent, source, step)
         except Forbidden:
             raise
         except Exception as error:
             errors.append({'source': name, 'error': type(error).__name__})
-            status.append({'source': name, 'rows': 0, 'matched': 0, 'read': False})
+            status.append({'source': name, 'rows': 0, 'matched': 0, 'read': False,
+                           'truncated': False})
             continue
         key_field = source['key']
         seen, matched = set(), 0
@@ -436,7 +486,8 @@ def _collect_all(engine, tenant, agent, entry, step):
                     continue
                 bucket.setdefault(attribute, []).append(
                     {'source': name, 'value': _cell(value), 'observed': now})
-        status.append({'source': name, 'rows': len(rows), 'matched': matched, 'read': True})
+        status.append({'source': name, 'rows': len(rows), 'matched': matched, 'read': True,
+                       'truncated': cut})
     return by_id, status, errors, now
 
 
@@ -454,13 +505,14 @@ def _collect(engine, tenant, agent, entry, step, entity_id=None):
     for name in entry['order']:
         source = entry['sources'][name]
         try:
-            rows = _rows(engine, tenant, agent, source, step)
+            rows, cut = _rows(engine, tenant, agent, source, step)
         except Forbidden:
             raise
         except Exception as error:
             # A provider failure is named, never silently rendered as "no value".
             errors.append({'source': name, 'error': type(error).__name__})
-            status.append({'source': name, 'rows': 0, 'matched': 0, 'read': False})
+            status.append({'source': name, 'rows': 0, 'matched': 0, 'read': False,
+                           'truncated': False})
             continue
         key_field = source['key']
         matched, seen = 0, set()
@@ -483,7 +535,8 @@ def _collect(engine, tenant, agent, entry, step, entity_id=None):
                     continue
                 observations.setdefault(attribute, []).append(
                     {'source': name, 'value': _cell(value), 'observed': now})
-        status.append({'source': name, 'rows': len(rows), 'matched': matched, 'read': True})
+        status.append({'source': name, 'rows': len(rows), 'matched': matched, 'read': True,
+                       'truncated': cut})
     return observations, status, errors, now
 
 
@@ -511,10 +564,14 @@ def _view(entry, entity_id, observations, conflicts, status, errors, now, confli
                               'resolution': conflict_policy,
                               'selected_source': chosen['source'] if chosen else None})
         attributes[attribute] = entry_out
+    # A source that stopped at its row ceiling WITHOUT returning this id may hold it
+    # past the ceiling: the view is then not proof that the id has no value there.
+    cut = _truncated_names(status, unmatched_only=True)
     return {'entity': entry.get('name', ''), 'identity': entry['identity'], 'id': entity_id,
             'attributes': attributes, 'conflicts': conflicts,
             'conflict_policy': conflict_policy, 'sources': status,
-            'source_errors': errors, 'complete': not errors, 'observed': now,
+            'source_errors': errors, 'complete': not errors,
+            'truncated': bool(cut), 'sources_truncated': cut, 'observed': now,
             'authority': {'agent': agent, 'ladder': policy.get('ladder', '')}}
 
 
@@ -578,7 +635,7 @@ def identifiers(engine, tenant, agent, entity, step, limit=MAX_MATCHES, collecte
     for name in entry['order']:
         source = entry['sources'][name]
         try:
-            rows = _rows(engine, tenant, agent, source, step)
+            rows, _ = _rows(engine, tenant, agent, source, step)
         except Forbidden:
             raise
         except Exception as error:
@@ -638,10 +695,12 @@ def search(engine, tenant, agent, entity, attribute, equals, step, limit=MAX_MAT
         matches.append({'id': entity_id, 'attribute': attribute,
                         'value': chosen['value'], 'source': chosen['source'],
                         'conflict': attribute_view['conflict']})
-    # A search that could not read a source is not a search that found nothing.
+    # A search that could not read a source is not a search that found nothing, and
+    # one whose source stopped at its row ceiling is not a search that saw every row.
+    ceiling = _truncated_names(status)
     return {'entity': entity, 'attribute': attribute, 'matches': matches,
-            'truncated': cut, 'complete': not errors,
-            'source_errors': errors}
+            'truncated': cut or bool(ceiling), 'sources_truncated': ceiling,
+            'complete': not errors, 'source_errors': errors}
 
 
 def conflicts(engine, tenant, agent, entity, step, limit=20):
@@ -669,9 +728,10 @@ def conflicts(engine, tenant, agent, entity, step, limit=20):
             found.append({'id': entity_id, **conflict})
         if cut:
             break
+    ceiling = _truncated_names(status)
     return {'entity': entity, 'conflicts': found, 'scanned': len(ids),
-            'truncated': cut, 'complete': not errors,
-            'source_errors': errors}
+            'truncated': cut or bool(ceiling), 'sources_truncated': ceiling,
+            'complete': not errors, 'source_errors': errors}
 
 
 def explain(engine, tenant, agent, entity, entity_id, attribute, step):
@@ -699,7 +759,8 @@ def explain(engine, tenant, agent, entity, entity_id, attribute, step):
             'priority_source': ('attribute' if attribute in entry['source_priority']
                                 else 'entity'),
             'resolution': view['conflict_policy'],
-            'complete': view['complete'], 'source_errors': view['source_errors']}
+            'complete': view['complete'], 'source_errors': view['source_errors'],
+            'truncated': view['truncated'], 'sources_truncated': view['sources_truncated']}
 
 
 def bounded(value, name, low, high):
@@ -717,17 +778,21 @@ def timeline(engine, tenant, agent, entity, entity_id, step, limit=50):
     entry = declaration(tenant, entity)
     policy = preflight(engine, tenant, agent, entry)
     limit = bounded(limit, 'limit', 1, MAX_SCAN)
-    events, errors = [], []
+    events, errors, ceiling = [], [], []
     cut = False
     for name in entry['order']:
         source = entry['sources'][name]
         try:
-            rows = _rows(engine, tenant, agent, source, step)
+            rows, source_cut = _rows(engine, tenant, agent, source, step)
         except Forbidden:
             raise
         except Exception as error:
             errors.append({'source': name, 'error': type(error).__name__})
             continue
+        if source_cut:
+            # Every row of this id counts as an event, so a cut source may hide
+            # events whether or not the id appeared in the rows that were read.
+            ceiling.append(name)
         position = 0
         for row in rows[:MAX_SCAN]:
             if not isinstance(row, dict):
@@ -753,7 +818,8 @@ def timeline(engine, tenant, agent, entity, entity_id, step, limit=50):
         if cut:
             break
     return {'entity': entity, 'id': entity_id, 'events': events, 'order': 'provider',
-            'truncated': cut, 'complete': not errors,
+            'truncated': cut or bool(ceiling), 'sources_truncated': ceiling,
+            'complete': not errors,
             'source_errors': errors, 'observed': engine.clock(),
             'authority': {'agent': agent, 'ladder': policy.get('ladder', '')}}
 # --------------------------------------------------------------------- tool layer

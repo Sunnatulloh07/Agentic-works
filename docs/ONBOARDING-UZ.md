@@ -1,10 +1,25 @@
 # Birinchi ishga tushirish (onboarding)
 
-**Holat: bu tartib kod o‘qib tekshirilgan, lekin live run bilan tasdiqlanmagan.**
-API bu repo saqlanayotgan mashinada hech qachon ishga tushirilmagan — `api-python/.env`
-yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori
-bor. Xato bilan uchrashsangiz, bu kutilgan holat; pastdagi **Tez-tez uchraydigan xatolar**
-bo‘limiga qarang.
+**Holat (2026-09-23): 3–6-qadamlar Windows 11 / Python 3.14 da live tasdiqlangan**,
+repo’dan tashqaridagi sandbox katalogda (`--env-file` orqali): `setup_local` →
+`run_local.py --check` → `provision_identity.py --password-stdin` → `run_local.py` →
+`/health` → `/identity/login` → Telegram webhook → tasdiq → `telegram.send` soxta
+Telegram serverga (`telegram.base_url`, proxy’siz) yetib bordi. **Tasdiqlanmagan:** UI
+(`npm run dev`), haqiqiy Telegram’da `setWebhook`, haqiqiy LLM provayder, Docker varianti.
+Xato bilan uchrashsangiz, pastdagi **Tez-tez uchraydigan xatolar** bo‘limiga qarang.
+
+Qisqa yo‘l:
+
+````sh
+python scripts/setup_local.py                      # .env + config/integrations.json
+#   api-python/.env ni oching: DEMO_TELEGRAM_TOKEN, PLATFORM_LLM_KEY ni to'ldiring
+python scripts/provision_identity.py --workspace demo-retail --workspace-name "Demo"
+python scripts/run_local.py --check                # faqat PASS/FAIL, qiymat chop etilmaydi
+python scripts/run_local.py                        # API :8000 + worker
+cd apps/ui && npm ci && npm run dev                # boshqa terminalda
+python scripts/telegram_set_webhook.py --url https://PUBLIC-HOST/webhooks/telegram?tenant=demo-retail \
+    --token-env DEMO_TELEGRAM_TOKEN --secret-env TELEGRAM_WEBHOOK_SECRET
+````
 
 ## 0. Nimaga eski yo‘riqnoma ishlamaydi
 
@@ -63,25 +78,65 @@ cd ..
 python scripts/setup_local.py
 ````
 
-Bu `api-python/.env` (random `JWT_SECRET`, `ADMIN_TOKEN`, webhook secretlar, `0600`
-rejimda) va bo‘sh `config/integrations.json` yaratadi. Hech qanday secret ekranga chop
-etilmaydi. `.env` allaqachon mavjud bo‘lsa skript uni **saqlab qoladi** va to‘xtaydi —
+Bu ikkita fayl yaratadi, hech qanday secret ekranga chop etilmaydi:
+
+- `api-python/.env` (`0600` rejimda): random `JWT_SECRET`, `ADMIN_TOKEN`, webhook
+  secretlar; yo‘l qatorlari `APP_DB=api-python/data/app.db`, `PACKS_DIR=packs`,
+  `PLATFORM_INTEGRATIONS_FILE=config/integrations.json` (nisbiy yo‘l repo ildiziga
+  nisbatan o‘qiladi); va **bo‘sh** `DEMO_TELEGRAM_TOKEN=`, `PLATFORM_LLM_KEY=` qatorlari.
+- `config/integrations.json` — faqat **mavjud bo‘lmasa**: `demo-retail` uchun `telegram`
+  va `llm` bloklari, ichida faqat env **nomlari** (`token_env`, `key_env`), qiymat yo‘q.
+
+`.env` allaqachon mavjud bo‘lsa skript uni **saqlab qoladi** (`Existing .env preserved`) —
 bu ataylab.
 
+### 3a. `.env` ni to‘ldirish
+
+`api-python/.env` ni oching va ikki qatorni to‘ldiring:
+
+- `DEMO_TELEGRAM_TOKEN=` — @BotFather bergan bot token;
+- `PLATFORM_LLM_KEY=` — LLM provayder kaliti.
+
+`config/integrations.json` dagi `llm` bloki sukut bo‘yicha Anthropic Messages API:
+`"provider": "anthropic"`, `"model": "claude-opus-5"`, `"effort": "low"`,
+`"agent_loop_enabled": true`. Demak `PLATFORM_LLM_KEY` — Anthropic API kaliti. Arzonroq
+variant kerak bo‘lsa `model` ni `claude-sonnet-5` yoki `claude-haiku-4-5` ga almashtiring;
+**Haiku 4.5 `effort` ni qabul qilmaydi** — u holda `"effort"` qatorini o‘chiring.
+`agent_loop_enabled: true` bo‘lmasa sotuv agenti har mijozga faqat "operatorga uzatdim"
+matnini yuboradi — `run_local.py --check` buni `FAIL  conversation ...` deb ko‘rsatadi.
+Kalitlarni **faqat** `.env` ga yozing, JSON’ga emas.
+
+Tekshirish (faqat qaysi tekshiruv o‘tgani/yiqilgani chiqadi, qiymatlar hech qachon):
+
+````sh
+python scripts/run_local.py --check
+````
+
+`FAIL  integrations demo-retail: empty or unset: PLATFORM_LLM_KEY` kabi qator qaysi env
+nomi bo‘shligini aytadi.
+
 ## 4. Birinchi owner hisobi
+
+Interaktiv (email, ism va parolni so‘raydi, parol ikki marta):
 
 ````sh
 python scripts/provision_identity.py --workspace demo-retail --workspace-name "Demo"
 ````
 
-Skript email, ism va parolni (kamida 12 belgi) **interaktiv** so‘raydi. Parol buyruq
-qatoriga tushmaydi va hech qanday token chop etilmaydi.
+Pipe/skript uchun — parol stdin’dan **bitta qator** bo‘lib o‘qiladi (Windows’da `getpass`
+pipe’ni emas, konsolni o‘qiydi, shuning uchun interaktiv variant pipe ostida qotib qoladi):
+
+````sh
+echo "$OWNER_PASSWORD" | python scripts/provision_identity.py --workspace demo-retail \
+    --workspace-name "Demo" --email owner@example.com --display-name "Ega" --password-stdin
+````
+
+Parol buyruq qatoriga tushmaydi va hech qanday token chop etilmaydi.
 
 **Uch shart:**
 
-1. `APP_DB` va `PACKS_DIR` API ishlatadigan qiymatlar bilan **aynan bir xil** bo‘lishi
-   kerak. Berilmasa, sukut qiymatlar: `APP_DB=api-python/data/app.db`,
-   `PACKS_DIR=<repo>/packs` — lokal (Docker’siz) variant uchun shu to‘g‘ri keladi.
+1. Skript `api-python/.env` ni `run_local.py` bilan **bir xil** o‘qiydi, shuning uchun
+   `APP_DB` va `PACKS_DIR` API bilan mos keladi. Boshqa `.env` uchun: `--env-file`.
 2. FastAPI, PyYAML va pydantic o‘rnatilgan bo‘lishi kerak: skript `app.packs` va
    `app.identity_store` ni import qiladi (2-qadam buni beradi).
 3. `--workspace` mavjud pack nomi bo‘lishi kerak: `demo-retail` yoki `marketing`.
@@ -89,13 +144,24 @@ qatoriga tushmaydi va hech qanday token chop etilmaydi.
 
 ## 5. Xizmatlarni ko‘tarish
 
-### 5a. Lokal venv varianti (eng qisqa tasdiqlangan yo‘l)
-
-Uchta alohida terminal:
+### 5a. Lokal venv varianti (tasdiqlangan yo‘l)
 
 ````sh
-cd api-python && uvicorn app.main:app --port 8000
-cd api-python && python -m app.worker
+python scripts/run_local.py                 # API http://127.0.0.1:8000 + worker
+````
+
+`run_local.py` `api-python/.env` ni yuklaydi (process env ustun turadi), keyin uvicorn va
+`python -m app.worker` ni `api-python` katalogida bola jarayon sifatida ishga tushiradi.
+Ctrl+C ikkalasini ham to‘xtatadi; bittasi o‘zi yiqilsa, ikkinchisi ham to‘xtatiladi va
+skript nol bo‘lmagan kod bilan chiqadi. Bayroqlar: `--port 8010`, `--no-worker`,
+`--check`, `--env-file`.
+
+`uvicorn app.main:app` ni to‘g‘ridan-to‘g‘ri ishlatmang: `.env` ni hech narsa yuklamaydi va
+API `ConfigError: ENV sozlanmagan` bilan yiqiladi.
+
+UI — boshqa terminalda (**bu mashinada live tekshirilmagan**):
+
+````sh
 cd apps/ui && npm ci && npm run dev
 ````
 
@@ -157,6 +223,40 @@ Claude Haiku 3 / 3.5 **nafaqaga chiqarilgan** — joriy kichik model
 `claude-haiku-4-5`. `docs/agent-platform-PRD-TZ.md` hali «Haiku 3.5» deb yozadi, bu
 eskirgan.
 
+## 9. Telegram webhook
+
+Telegram faqat **ochiq https** manzilga yuboradi, `127.0.0.1:8000` unga ko‘rinmaydi. Lokal
+ishlaganda API’ni tunnel orqali chiqaring (masalan, `cloudflared tunnel --url
+http://127.0.0.1:8000` yoki `ngrok http 8000`) va bergan https manzilni ishlating:
+
+````sh
+python scripts/telegram_set_webhook.py --url https://PUBLIC-HOST/webhooks/telegram?tenant=demo-retail \
+    --token-env DEMO_TELEGRAM_TOKEN --secret-env TELEGRAM_WEBHOOK_SECRET --dry-run
+````
+
+Skript env **nomlarini** oladi, qiymatlar `.env` dan emas, process env’dan o‘qiladi —
+avval ularni shell’ga yuklang. `--dry-run` so‘rovni token yashirilgan holda ko‘rsatadi,
+olib tashlasangiz haqiqiy `setWebhook` chaqiriladi. Ikkala holatda ham ro‘yxatga
+olinadigan **aniq URL** `Webhook URL: ...` qatorida chiqadi.
+
+**`?tenant=<nom>` shart.** Core’da sukut tenant yo‘q: tenant URL’dagi `?tenant=` dan,
+`TELEGRAM_DEFAULT_TENANT` env’dan yoki `TENANT_SECRETS` dagi per-tenant secret’dan
+aniqlanadi. Hech biri bo‘lmasa API `400 tenant kerak` qaytaradi; URL’da `tenant`
+bo‘lmasa skript ogohlantiradi.
+
+Media xabarlarda matn `caption` maydonida keladi va shunday o‘qiladi. Izohsiz rasm, video,
+fayl yoki ovozli xabar `[rasm]`, `[video]`, `[fayl]`, `[ovozli xabar]` kabi belgi bilan
+qabul qilinadi — agent mijozdan matn bilan yozishni so‘rashi yoki operatorga uzatishi
+mumkin; faylning o‘zi yuklab olinmaydi. Stiker va servis xabarlar (masalan,
+`new_chat_members`) `{"ok": true, "ignored": true}` bilan jim o‘tkazib yuboriladi.
+
+Bu qadam haqiqiy Telegram bilan **tekshirilmagan** (faqat `--dry-run` va unit testlar).
+
+Test yoki lokal fake server uchun Bot API manzilini tenant konfigida almashtirish mumkin:
+`telegram.base_url`. Faqat https; `http://127.0.0.1:<port>` (raqamli loopback, port ≥ 1024)
+faqat LLM bilan **aynan bir xil** aniq ruxsat bo‘lganda: `"provider_mode": "local_loopback"`.
+`localhost` nomi rad etiladi.
+
 ## Tez-tez uchraydigan xatolar
 
 | Belgi | Sabab | Yechim |
@@ -164,11 +264,15 @@ eskirgan.
 | `410 Use session-bound identity login` | `owner_login.py` yoki `/auth/token` ishlatildi, `IDENTITY_DIRECTORY=true` | `owner_login.py` ni ishlatmang; `provision_identity.py` + UI login |
 | `403 Bootstrap disabled` | `IDENTITY_BOOTSTRAP_ENABLED=false` (`setup_local.py` shunday yozadi) | `provision_identity.py` ishlating |
 | `Existing .env preserved. Edit it manually.` | `.env` allaqachon bor | Ataylab. Kerak bo‘lsa qo‘lda tahrirlang |
+| `ConfigError: ENV sozlanmagan` | `uvicorn` to‘g‘ridan-to‘g‘ri ishga tushirildi, `.env` yuklanmadi | `python scripts/run_local.py` |
+| `FAIL  integrations: no tenant has integration config` | `config/integrations.json` ham, `packs/<tenant>/integrations.yaml` ham yo‘q | `setup_local.py` ni ishga tushiring yoki fayllardan birini yarating |
+| Webhook `400 tenant kerak` | URL’da `?tenant=` yo‘q | `?tenant=demo-retail` qo‘shing yoki `TELEGRAM_DEFAULT_TENANT` ni bering |
+| `provision_identity.py` pipe ostida qotib qoldi | Windows’da `getpass` konsolni o‘qiydi | `--email`, `--display-name`, `--password-stdin` |
 | `Template cannot be provisioned` | `--workspace template` berildi | `demo-retail` yoki `marketing` |
 | `ModuleNotFoundError: fastapi` / `yaml` / `pydantic` | `requirements.txt` o‘rnatilmagan yoki venv faollashmagan | 2-qadamni qayta bajaring |
 | OAuth/Google yuzalari ishlamaydi, AES-GCM testlari yiqiladi | `cryptography` o‘rnatilmagan | `pip install -r api-python/requirements.txt` |
 | UI’da login qilib bo‘ldi, lekin workspace ro‘yxati bo‘sh | Identity boshqa `APP_DB` ga yozilgan (masalan, host vs compose volume) | `APP_DB` ni moslang va 4-qadamni to‘g‘ri baza bilan takrorlang |
-| Task `queued` da qotib qoldi | Worker ishlamayapti | `python -m app.worker` ni ishga tushiring |
+| Task `queued` da qotib qoldi | Worker ishlamayapti | `run_local.py` ni `--no-worker` siz ishga tushiring |
 | Natija yangilanmayapti | UI avtomatik polling qilmaydi | **Yangilash** tugmasi |
 | `Start directory is not importable: 'runtime_tests'` | `-t` bayrog‘i berilmagan | `python -m unittest discover -s runtime_tests -t runtime_tests` |
 

@@ -1,4 +1,7 @@
 """Fake driver tests for MySQL/MariaDB, not live SQL or TLS proof."""
+import os
+import ssl
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -52,15 +55,75 @@ class DB:
 
 
 class MySQLContracts(unittest.TestCase):
-    def execute(self,db,operation='update',driver='mysql_managed'):
-        raw=config(driver)
-        with patch.dict('sys.modules',{'pymysql':db}),patch.dict('os.environ',{'TEST_DB_PASSWORD':'unit-test-only'}):
+    def execute(self,db,operation='update',driver='mysql_managed',extra=None,env=None):
+        raw={**config(driver),**(extra or {})}
+        with patch.dict('sys.modules',{'pymysql':db}),patch.dict('os.environ',{'TEST_DB_PASSWORD':'unit-test-only',**(env or {})}):
             return mysql_execute(raw,'a',normalize(raw,'a',request(operation)))
+
+    def assertVerifiedContext(self,context):
+        self.assertIsInstance(context,ssl.SSLContext)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(ssl.CERT_REQUIRED,context.verify_mode)
+        self.assertGreaterEqual(context.minimum_version,ssl.TLSVersion.TLSv1_2)
+
+    # ------------------------------------------------------------------ TLS / CA
+    # PyMySQL builds its own context from ssl_verify_cert/ssl_verify_identity, and
+    # when no CA is given it turns hostname checking OFF. The backend therefore
+    # passes one explicit SSLContext and none of those flags.
+
+    def ca_file(self):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        path=os.path.join(tmp.name,'rds-ca.pem')
+        with open(path,'w',encoding='ascii') as handle:handle.write('placeholder')
+        return path
+
+    def recorded_context(self,db,**kwargs):
+        seen=[];real=ssl.create_default_context
+        def record(*args,**kw):seen.append(kw.get('cafile'));return real()
+        with patch('platform_runtime.database.mysql_backend.ssl.create_default_context',record):
+            self.execute(db,'read',**kwargs)
+        return seen
+
+    def test_tls_verifies_hostname_and_chain_without_a_private_ca(self):
+        db=DB();self.execute(db,'read')
+        self.assertVerifiedContext(db.kwargs['ssl'])
+        for flag in ('ssl_verify_cert','ssl_verify_identity','ssl_ca','ssl_disabled'):
+            self.assertNotIn(flag,db.kwargs)
+
+    def test_ca_path_from_an_environment_variable(self):
+        path=self.ca_file();db=DB()
+        seen=self.recorded_context(db,extra={'ssl_ca_env':'TEST_MYSQL_CA_FILE'},env={'TEST_MYSQL_CA_FILE':path})
+        self.assertEqual([path],seen);self.assertVerifiedContext(db.kwargs['ssl'])
+
+    def test_ca_path_from_config(self):
+        path=self.ca_file();db=DB()
+        self.assertEqual([path],self.recorded_context(db,extra={'ssl_ca':path}))
+        self.assertVerifiedContext(db.kwargs['ssl'])
+
+    def test_a_missing_ca_fails_before_any_connection(self):
+        for extra,env,error in (({'ssl_ca_env':'TEST_MYSQL_CA_FILE'},{},RuntimeError),
+                                ({'ssl_ca':os.path.join(tempfile.gettempdir(),'no-such-ca.pem')},{},ValueError)):
+            db=DB()
+            with self.subTest(extra=extra),self.assertRaises(error):
+                self.execute(db,'read',extra=extra,env=env)
+            self.assertFalse(hasattr(db,'kwargs'),'connect must not be reached')
+
+    def test_ca_and_verify_configuration_shape(self):
+        good=[{},{'ssl_ca_env':'CUSTOMER_MYSQL_CA'},{'ssl_ca':os.path.abspath('ca.pem')},{'tls_verify':True}]
+        for extra in good:
+            with self.subTest(extra=extra):validate_endpoint({**config(),**extra})
+        bad=[{'ssl_ca':'-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----'},
+             {'ssl_ca':'relative/ca.pem'},{'ssl_ca':''},{'ssl_ca':7},{'ssl_ca':'/'+'a'*4096},
+             {'ssl_ca_env':'lower'},{'ssl_ca_env':'DSEC_CA'},{'ssl_ca_env':''},
+             {'ssl_ca_env':'CUSTOMER_MYSQL_CA','ssl_ca':os.path.abspath('ca.pem')},
+             {'tls_verify':False},{'tls_verify':'yes'}]
+        for extra in bad:
+            with self.subTest(extra=extra),self.assertRaises(ValueError):validate_endpoint({**config(),**extra})
 
     def test_update_binds_values_scope_version_and_commits(self):
         db=DB();out=self.execute(db)
         self.assertEqual(2,out['version']);self.assertTrue(db.committed);self.assertTrue(db.closed)
-        self.assertTrue(db.kwargs['ssl_verify_cert']);self.assertTrue(db.kwargs['ssl_verify_identity'])
+        self.assertVerifiedContext(db.kwargs['ssl'])
         self.assertFalse(db.kwargs['autocommit'])
         sql,params=next((s,p) for s,p in db.calls if s.startswith('UPDATE '))
         self.assertEqual(['Vali','a','one',1],params);self.assertIn('`tenant_id` = %s',sql)

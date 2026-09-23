@@ -17,10 +17,11 @@ jobs:
       - run: python scripts/demo_runtime.py
       - run: python -m unittest discover -s scripts -p "test_release_tools.py" -v
       - run: python -m unittest discover -s scripts -p "test_manifest.py" -v
+      - run: python -m unittest discover -s scripts -p "test_run_local.py" -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test apps/runner/test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs
+      - run: node --test apps/runner/test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs apps/ui/lib/shop-client.test.mjs
   http:
     runs-on: ubuntu-latest
     steps:

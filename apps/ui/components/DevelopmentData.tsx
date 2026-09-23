@@ -1,6 +1,7 @@
 'use client';
 import {useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
+import {wholeNumber} from '../lib/shop-client.mjs';
 type Props={client:SessionClient;tenant:string;role:string;frozen:boolean;agents:{id:string;name:string;tools:string[]}[]};
 type Budget={currency:string;limit_micro:number;spent_micro:number;reserved_micro:number;available_micro:number;inflight:number;period:string;warning_80_percent:boolean;limit_exceeded:boolean};
 type Pending={id:string;status:string;amount_micro:number;period:string};
@@ -31,12 +32,12 @@ export function BudgetPanel({client,tenant,role}:Props){
       <label>Valyuta<input disabled={busy} style={control} value={currency} maxLength={3} onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
       <label>Oylik limit, microunit<input disabled={busy} style={control} type="number" min="1" step="1" max="1000000000000000" value={limit} onChange={e=>setLimit(e.target.value)}/></label>
       <label>Parallel chaqiruvlar<input disabled={busy} style={control} type="number" min="1" max="100" step="1" value={parallel} onChange={e=>setParallel(e.target.value)}/></label>
-      <button style={button} disabled={busy} onClick={()=>run(async()=>{await client.request(base,{currency,limit_micro:Number(limit),max_inflight:Number(parallel)},'PUT');await refresh();})}>Budjetni saqlash</button>
+      <button style={button} disabled={busy} onClick={()=>run(async()=>{await client.request(base,{currency,limit_micro:wholeNumber(limit,1,1e15),max_inflight:wholeNumber(parallel,1,100)},'PUT');await refresh();})}>Budjetni saqlash</button>
       <h3>Noaniq / ochiq rezervlarni reconcile qilish</h3><p>Faqat haqiqiy foydalanish dalili bilan. Davom etayotgan provider chaqiruvini tekshirmasdan nolga yopmang.</p>
       <label>Rezerv<select disabled={busy} style={control} value={reservation} onChange={e=>setReservation(e.target.value)}><option value="">Tanlang</option>{pending.map(p=><option key={p.id} value={p.id}>{p.id.slice(0,12)} · {p.status} · {p.amount_micro}</option>)}</select></label>
       <label>Haqiqiy sarf, microunit<input disabled={busy} style={control} type="number" min="0" step="1" value={actual} onChange={e=>setActual(e.target.value)}/></label>
       <label>Tashqi dalil<input disabled={busy} style={control} value={evidence} maxLength={500} onChange={e=>setEvidence(e.target.value)} placeholder="Invoice yoki usage receipt reference"/></label>
-      <button style={button} disabled={busy || !reservation || !evidence.trim()} onClick={()=>run(async()=>{await client.request(base+'/'+encodeURIComponent(reservation)+'/reconcile',{actual_micro:Number(actual),evidence});setReservation('');setEvidence('');await refresh();})}>Dalil bilan yakunlash</button>
+      <button style={button} disabled={busy || !reservation || !evidence.trim()} onClick={()=>run(async()=>{await client.request(base+'/'+encodeURIComponent(reservation)+'/reconcile',{actual_micro:wholeNumber(actual,0,1e15),evidence});setReservation('');setEvidence('');await refresh();})}>Dalil bilan yakunlash</button>
     </>}
   </section>;
 }

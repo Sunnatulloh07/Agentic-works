@@ -27,9 +27,12 @@ reproduced by bypassing the ledger read deliberately, which is the only way to s
 that the index -- and not the lookup -- is what makes it a guarantee.
 
 A fourth property is measured because it is easy to get wrong and expensive to get
-wrong: **a failed attempt stays retryable**. A transport blip that permanently
-blocked an invoice would force an operator to edit the database, so the failed row
-must be recorded without claiming the document's identity.
+wrong: **a refused attempt stays retryable, an unknown one never is**. The ledger
+row is reserved BEFORE the POST under a deterministic idempotency key, so a POST
+whose answer is lost (a timeout, a crash) leaves an ``uncertain`` claim that blocks
+every retry until the owner reconciles it. Only a definitive provider refusal (a
+4xx other than 408/409/425/429) releases the identity, so a genuine rejection never
+forces an operator to edit the database.
 
 Run from anywhere. No network, no live credential, no ERP.
 """
@@ -268,21 +271,21 @@ finally:
     harness.close()
 
 print()
-print('4. A failed attempt stays retryable')
+print('4. A refused attempt stays retryable; an unknown one is never re-sent')
 harness = Harness()
 try:
-    def flaky(url, body=None, headers=None, method='GET', timeout=15):
+    def refused(url, body=None, headers=None, method='GET', timeout=15):
         if method == 'GET':
             return {'result': {}}
-        raise TimeoutError('connection timed out')
+        raise erp.ErpError('ERP HTTP status 422', status=422)
 
     posting = harness.resolve()
     try:
-        erp.submit(harness.engine, TENANT, AGENT, posting, transport=flaky)
+        erp.submit(harness.engine, TENANT, AGENT, posting, transport=refused)
     except Exception:
         pass
     rows = erp.ledger(harness.engine, TENANT)
-    check('the failed attempt is recorded', len(rows) == 1 and rows[0]['status'] == 'failed',
+    check('the refused attempt is recorded', len(rows) == 1 and rows[0]['status'] == 'failed',
           rows[0]['status'] if rows else 'nothing recorded')
     check('and it does not claim the document identity',
           erp.posted(harness.engine, TENANT, posting) is None)
@@ -291,6 +294,38 @@ try:
     result = erp.submit(harness.engine, TENANT, AGENT, posting, transport=good)
     check('so the same document can still be posted afterwards',
           result['posted'] is True, f"external_id={result['external_id']}")
+    check('  and the POST carried the reservation id as its idempotency key',
+          good.posts[0]['headers'].get('Idempotency-Key') == result['posting_id'])
+
+    # The defect this protocol closes: the process dies after the POST left and
+    # before its answer was recorded. The reservation survives; a retry does not.
+    harness4 = Harness()
+    try:
+        class Crash(BaseException):
+            pass
+
+        def dies(url, body=None, headers=None, method='GET', timeout=15):
+            if method == 'GET':
+                return {'result': {}}
+            raise Crash()
+
+        crashed = harness4.resolve()
+        try:
+            erp.submit(harness4.engine, TENANT, AGENT, crashed, transport=dies)
+        except Crash:
+            pass
+        harness4.engine.clock.now += 3600
+        retry = Script([{'result': {}}, {'result': {'Ref_Key': 'DOC-X'}}])
+        try:
+            erp.submit(harness4.engine, TENANT, AGENT, crashed, transport=retry)
+            check('a crash between POST and ledger is never re-posted', False)
+        except Conflict as error:
+            check('a crash between POST and ledger is never re-posted',
+                  'reconcile' in str(error) and not retry.posts)
+        check('  and the lost outcome is recorded as uncertain',
+              erp.ledger(harness4.engine, TENANT)[0]['status'] == 'uncertain')
+    finally:
+        harness4.close()
 
     # An unconfirmed posting is reported as unconfirmed, never as settled.
     harness3 = Harness()
@@ -353,7 +388,8 @@ print('        and the two fields it cannot carry -- the ledger account and the'
 print('        counterparty -- come from the operator\'s own register, so a supplier')
 print('        invoice cannot choose where its own debt lands. It is posted at most')
 print('        once, enforced three ways (the ERP search, the local ledger before any')
-print('        I/O, and a UNIQUE index that survives a race). A failed attempt is')
-print('        recorded but left retryable, and an unanswered 2xx is unconfirmed')
+print('        I/O, and a UNIQUE index that survives a race). The ledger row is')
+print('        reserved before the POST, so a lost answer is uncertain, never re-sent;')
+print('        a refused attempt is retryable, and an unanswered 2xx is unconfirmed')
 print('        rather than settled. Money is never moved: a posting records a payable,')
 print('        and paying it stays a human act in the ERP the customer already trusts.')

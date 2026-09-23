@@ -14,6 +14,7 @@ Only numeric loopback HTTP endpoints can omit provider authentication. The
 cloud default remains HTTPS + a configured API secret. No NotebookLM hosting.
 """
 import json
+import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 from .tools import post_json
@@ -36,11 +37,32 @@ OPENAI_PATH = '/chat/completions'
 ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
 ANTHROPIC_VERSION = '2023-06-01'
 ANTHROPIC_PATH = '/v1/messages'
+# Skill, curl/examples.md -> Thinking: current Claude models think by default and
+# thinking tokens count toward max_tokens, so a small planner ceiling can end the
+# turn at `max_tokens` before any text block. 16000 is the skill's non-streaming
+# default. It is a ceiling, not a charge: billing follows tokens actually produced.
+ANTHROPIC_MIN_MAX_TOKENS = 16000
+# Skill, Thinking & Effort: `output_config.effort`, GA, no beta header. Sent only
+# when configured: Haiku 4.5 rejects the field.
+EFFORT_LEVELS = ('low', 'medium', 'high', 'xhigh', 'max')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise RuntimeError('Model redirect denied')
+
+
+class LocalRequestRejected(RuntimeError):
+    """The loopback peer answered with an HTTP error status.
+
+    Still the RuntimeError every caller of ``transport_for`` already catches; the
+    status is carried as a number so an adapter that needs to tell a definite
+    rejection (4xx) from an unknown outcome (5xx) can, without the URL -- which,
+    for the Telegram transport, contains the bot token.
+    """
+    def __init__(self, code):
+        self.code = int(code)
+        super().__init__(f'Local request rejected: http_{self.code}')
 
 
 def local_mode(cfg):
@@ -94,9 +116,15 @@ def completion_body(cfg,model,system,user_text,max_tokens):
       one JSON object, and from `parse_anthropic_decision`, which refuses
       anything else. The engine re-validates the decision afterwards either way.
     """
+    effort=cfg.get('effort')
+    if 'effort' in cfg and (not isinstance(effort,str) or effort not in EFFORT_LEVELS):
+        raise ValueError('Model effort must be one of '+', '.join(EFFORT_LEVELS))
     if provider(cfg)=='anthropic':
-        return {'model':model,'max_tokens':max_tokens,'system':system,
-                'messages':[{'role':'user','content':user_text}]}
+        body={'model':model,'max_tokens':max(max_tokens,ANTHROPIC_MIN_MAX_TOKENS),'system':system,
+              'messages':[{'role':'user','content':user_text}]}
+        if effort is not None:body['output_config']={'effort':effort}
+        return body
+    if effort is not None:raise ValueError('Model effort is an anthropic provider setting')
     return {'model':model,'messages':[{'role':'system','content':system},{'role':'user','content':user_text}],
             'temperature':0,'max_tokens':max_tokens,'response_format':{'type':'json_object'}}
 
@@ -132,6 +160,9 @@ def transport_for(cfg,transport=post_json):
                 if len(raw)>MAX_LOCAL_RESPONSE_BYTES:raise ValueError('Local model response exceeds byte limit')
                 from .model_response import unique_object, reject_constant
                 return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
+        except urllib.error.HTTPError as error:
+            # Status only: the error object carries the URL.
+            raise LocalRequestRejected(error.code) from None
         except Exception:
             raise RuntimeError('Local model request failed') from None
     return send

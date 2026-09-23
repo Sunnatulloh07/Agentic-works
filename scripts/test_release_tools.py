@@ -33,8 +33,6 @@ class ReleaseToolsTests(unittest.TestCase):
         self.assertIn('http_integration',check({'gates':{'http_integration':{'status':'PASS'}}})['blockers'])
 
 
-if __name__=='__main__':unittest.main()
-
 
 class TelegramWebhookTests(unittest.TestCase):
     """The webhook registration must carry the secret the API verifies, and leak nothing."""
@@ -90,3 +88,36 @@ class TelegramWebhookTests(unittest.TestCase):
                 code = self.main(['--url', self.url, '--token-env', 'ABSENT_TOKEN', '--dry-run'])
         self.assertEqual(2, code)
         self.assertIn('not set', err.getvalue())
+
+    def _run(self, url, *extra):
+        import contextlib, io
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {'T_TOKEN': self.token, 'T_SECRET': 'very-secret'}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.main(['--url', url, '--token-env', 'T_TOKEN', '--secret-env', 'T_SECRET', *extra])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_the_exact_registered_url_is_printed(self):
+        code, out, _ = self._run(self.url, '--dry-run')
+        self.assertEqual(0, code)
+        self.assertIn('Webhook URL: ' + self.url, out)
+        self.assertNotIn(self.token, out)
+
+    def test_a_url_without_tenant_gets_guidance(self):
+        code, out, err = self._run('https://shop.example.uz/webhooks/telegram', '--dry-run')
+        self.assertEqual(0, code)
+        self.assertIn('?tenant=', err)
+        self.assertIn('TELEGRAM_DEFAULT_TENANT', err)
+        _, _, err_ok = self._run(self.url, '--dry-run')
+        self.assertEqual('', err_ok)
+
+    def test_live_call_prints_the_url_and_never_the_token(self):
+        with unittest.mock.patch('telegram_set_webhook.call', return_value={'ok': True, 'description': 'Webhook was set'}):
+            code, out, _ = self._run(self.url)
+        self.assertEqual(0, code)
+        self.assertIn('Webhook URL: ' + self.url, out)
+        self.assertNotIn(self.token, out)
+        self.assertNotIn('very-secret', out)
+
+
+if __name__=='__main__':unittest.main()

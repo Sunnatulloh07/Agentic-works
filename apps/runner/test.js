@@ -69,3 +69,46 @@ test('strict task validator accepts only supported envelope',()=>{
   assert.equal(validateTask(good,now),good);
   for(const change of [{lease:null},{lease:NaN},{lease:'1090'},{lease:999},{lease:2000},{claim:''},{tool:'shell.exec'},{params:[]},{params:{file:'/x',extra:1}},{extra:'override'}])assert.throws(()=>validateTask({...good,...change},now));
 });
+// 4403 is overloaded on the server (platform_api.runner: every exception closes with
+// it -- expired JWT, revoked/rotated device, receive timeout, stale claim, DB error),
+// so the runner must not treat one 4403 as "revoked forever".
+const {closeAction,tokenExpiry,MAX_AUTH_REJECTIONS}=require('./runner');
+const jwt=claims=>'h.'+Buffer.from(JSON.stringify(claims)).toString('base64url')+'.s';
+const NOW=1_800_000_000_000;
+test('4403 after an authenticated session is transient: reconnect, counter reset',()=>{
+  const out=closeAction({code:4403,authenticated:true,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:2});
+  assert.equal(out.action,'retry');assert.equal(out.rejections,0);
+});
+test('4403 before any server message with a live token is retried, then exits as revoked',()=>{
+  let state=0,out;
+  for(let i=1;i<MAX_AUTH_REJECTIONS;i++){
+    out=closeAction({code:4403,authenticated:false,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:state});
+    assert.equal(out.action,'retry');state=out.rejections;assert.equal(state,i);
+  }
+  out=closeAction({code:4403,authenticated:false,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:state});
+  assert.equal(out.action,'exit');assert.match(out.message,/revoked or rotated/);assert.match(out.message,/re-enroll/);
+});
+test('an expired token from a file waits for rotation instead of exiting',()=>{
+  const out=closeAction({code:4403,authenticated:false,expiresAt:NOW-1,now:NOW,tokenFromFile:true,rejections:0});
+  assert.equal(out.action,'retry');assert.match(out.message,/expired/);assert.match(out.message,/RUNNER_TOKEN_FILE/);
+  assert.equal(out.rejections,0);
+});
+test('an expired token from the environment exits with a clear message',()=>{
+  const out=closeAction({code:4403,authenticated:false,expiresAt:NOW-1,now:NOW,tokenFromFile:false,rejections:0});
+  assert.equal(out.action,'exit');assert.match(out.message,/expired/);
+});
+test('other close codes keep the ordinary backoff and the rejection count',()=>{
+  const out=closeAction({code:1006,authenticated:false,expiresAt:null,now:NOW,tokenFromFile:false,rejections:1});
+  assert.deepEqual({action:out.action,rejections:out.rejections},{action:'retry',rejections:1});
+});
+test('close messages never carry the token',()=>{
+  const token=jwt({exp:NOW/1000-5,sub:'device-secret-value'});
+  for(const fromFile of [true,false])for(const expiresAt of [tokenExpiry(token),NOW+1]){
+    const out=closeAction({code:4403,authenticated:false,expiresAt,now:NOW,tokenFromFile:fromFile,rejections:MAX_AUTH_REJECTIONS});
+    assert.ok(!String(out.message).includes(token));assert.ok(!String(out.message).includes('device-secret-value'));
+  }
+});
+test('token expiry is read for the reconnect decision only, and fails soft',()=>{
+  assert.equal(tokenExpiry(jwt({exp:1700000000})),1700000000*1000);
+  for(const bad of ['', 'no-dots', 'a.!!!.b', jwt({exp:'soon'}), jwt({}), 'a.'+'x'.repeat(9000)+'.b'])assert.equal(tokenExpiry(bad),null);
+});

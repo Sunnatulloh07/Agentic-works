@@ -42,11 +42,13 @@ from .google_data_api import router as google_data_router
 from .oauth_api import router as oauth_router
 app.include_router(oauth_router)
 app.include_router(google_data_router)
+from .shop_api import router as shop_router
+app.include_router(shop_router)
 
 from fastapi.middleware.cors import CORSMiddleware
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                   allow_headers=["Authorization", "Content-Type", "X-Admin-Token"])
+                   allow_headers=["Authorization", "Content-Type", "X-Admin-Token", "Idempotency-Key"])
 
 class TokenRequest(BaseModel):
     tenant_id: str

@@ -37,6 +37,13 @@ def validate_runtime_config(env: Mapping[str, str] | None = None) -> RuntimeConf
     if environment not in {"dev", "development", "test", "prod", "production"}:
         raise ConfigError("ENV faqat dev, test yoki production bo'lishi kerak")
     production = environment in {"prod", "production"}
+    # Login throttle proxy ro‘yxati: xato yozuv startup’da to‘xtatadi, birinchi
+    # login’dagi 500 emas (app/client_ip.py).
+    from .client_ip import ProxyConfigError, parse_trusted_proxies
+    try:
+        parse_trusted_proxies(values.get("TRUSTED_PROXIES", ""))
+    except ProxyConfigError as exc:
+        raise ConfigError(str(exc)) from None
     if not production and values.get("ALLOW_INSECURE_DEV", "").lower() == "true":
         return RuntimeConfig(
             environment=environment,

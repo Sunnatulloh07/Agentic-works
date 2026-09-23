@@ -34,7 +34,8 @@ class Planner:
                 'Never invent records, prices, credentials or tool results. Do not reference results of '
                 'earlier steps as variables: this version accepts literal arguments only. '
                 'For factual lookup plan the read operation only; never fabricate its answer. '
-                'External sends will require operator approval. If sending, the destination must match '
+                'External sends wait for operator approval unless the agent is autonomous and the '
+                'destination is pre-authorised by the tenant. If sending, the destination must match '
                 'the provided conversation_id. No runner tools may be planned from channel messages. '
                 'If no supported tool can fulfil request, use reports.summary only if genuinely relevant; '
                 'otherwise return an empty steps array, which is safely rejected. JSON schema: '+json.dumps(schema))

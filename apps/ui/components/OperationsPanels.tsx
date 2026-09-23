@@ -1,6 +1,7 @@
 'use client';
 import {useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
+import {canReadInbox} from '../lib/shop-client.mjs';
 
 /**
  * Panels for the tenant routes that existed only in the backend.
@@ -344,7 +345,7 @@ type Health = {status?: string; [k: string]: unknown};
 export function MetricsPanel({client, tenant, role}: {client: SessionClient; tenant: string; role: string}) {
   const ops = useOps();
   const [health, setHealth] = useState<Health | null>(null);
-  const [counts, setCounts] = useState<{tasks: number; failed: number; uncertain: number; waiting: number; inbox: number; runs: number} | null>(null);
+  const [counts, setCounts] = useState<{tasks: number; failed: number; uncertain: number; waiting: number; inbox: number | null; runs: number} | null>(null);
   const base = `/platform/${encodeURIComponent(tenant)}`;
   return <section style={panel}>
     <h2>Holat va metrikalar</h2>
@@ -355,7 +356,9 @@ export function MetricsPanel({client, tenant, role}: {client: SessionClient; ten
     <button style={button} disabled={ops.busy} onClick={() => ops.run(async () => {
       const [t, i, r] = await Promise.all([
         client.request<{tasks: {status: string}[]}>(base + '/tasks'),
-        client.request<{events: {status: string}[]}>(base + '/inbox'),
+        // /inbox is owner/operator only; asking for it as another role would 403
+        // and take the whole panel down with it.
+        canReadInbox(role) ? client.request<{events: {status: string}[]}>(base + '/inbox') : Promise.resolve(null),
         client.request<{runs: unknown[]}>(base + '/agent-runs'),
       ]);
       setCounts({
@@ -363,7 +366,7 @@ export function MetricsPanel({client, tenant, role}: {client: SessionClient; ten
         failed: t.tasks.filter(x => x.status === 'failed').length,
         uncertain: t.tasks.filter(x => x.status === 'uncertain').length,
         waiting: t.tasks.filter(x => x.status === 'waiting_approval').length,
-        inbox: i.events.filter(x => x.status === 'failed').length,
+        inbox: i ? i.events.filter(x => x.status === 'failed').length : null,
         runs: r.runs.length,
       });
     })}>Hisoblarni yig‘ish</button>
@@ -376,7 +379,7 @@ export function MetricsPanel({client, tenant, role}: {client: SessionClient; ten
     {counts && <ul>
       <li>Vazifalar: {counts.tasks} (kutayotgan tasdiq: {counts.waiting})</li>
       <li>Yiqilgan: {counts.failed} · noaniq: {counts.uncertain} — noaniq holat operator qarorini kutadi</li>
-      <li>Kiruvchi hodisalar (yiqilgan): {counts.inbox}</li>
+      <li>Kiruvchi hodisalar (yiqilgan): {counts.inbox ?? 'bu rol uchun ko‘rinmaydi'}</li>
       <li>Agent runlari: {counts.runs}</li>
     </ul>}
     {role !== 'owner' && role !== 'operator' && <p>Hisoblar barcha rollarga ochiq; bu yerda faqat o‘qish bor.</p>}

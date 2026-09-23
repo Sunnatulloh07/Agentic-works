@@ -116,6 +116,19 @@ platforma rejimida mos emas; eski mutation endpointlar default o‘chirilgan. Pr
 Internetga chiqadigan production’dan oldin dependency/security review majburiy — hozir u
 **qizil**.
 
+### 2026-09-23 da yopilgan nuqsonlar (lokal testlar bilan, live emas)
+
+| Nuqson | Endi |
+|---|---|
+| ERP «post once» kafolat emas edi: ledger qatori POST’dan **keyin** yozilardi, POST va ledger orasidagi crash retry’da ikkinchi posting berardi | POST’dan **oldin** claim qiluvchi `posting` qatori deterministik idempotency kaliti bilan yoziladi va ERP’ga `Idempotency-Key` header’ida yuboriladi. Javobi yo‘qolgan POST (timeout, 5xx, crash; 180 s dan eski rezerv) `uncertain` bo‘ladi va owner `erp.reconcile_posting` qilmaguncha qayta yuborilmaydi. Faqat aniq rad javobi (408/409/425/429 dan boshqa 4xx) retry’ga ochiq. `unconfirmed` ham endi retry’ni to‘sadi. HTTP route yo‘q — reconcile hozircha Python funksiyasi |
+| Business Graph / inventory: source 50 qatorli chegarada (where-filtersiz) to‘xtasa natija jim kesilardi | Har source status’ida `truncated`; javoblarda `truncated` va `sources_truncated`. Bitta entity uchun faqat id topilmagan kesilgan source hisoblanadi |
+| Login throttle proxy ortida bitta IP bucket (global lockout) | `TRUSTED_PROXIES` (IP/CIDR); faqat ishonchli peer’da XFF’ning o‘ngdan birinchi ishonchsiz manzili. Akkaunt bo‘yicha throttle avvaldan bor edi, test bilan qadaldi |
+| Runner har `4403` da butunlay chiqardi | Server `4403` ni har xatoda yuboradi; runner autentifikatsiyadan keyingi `4403` da qayta ulanadi, javobsiz 3 rad’da chiqadi, muddati o‘tgan token faylini kutadi |
+| MySQL: `ssl_ca` yo‘q, PyMySQL CA’siz hostname tekshiruvini o‘chirardi | Aniq `SSLContext` (hostname + zanjir, TLS ≥ 1.2); ixtiyoriy `ssl_ca_env` (CA fayl yo‘li env’da) yoki absolyut `ssl_ca`; inline PEM va `tls_verify: false` rad etiladi |
+
+Qolgan: server tomonda runner close kodlarini ajratish (`platform_api.py`, 4401/4403/1011),
+ERP reconcile uchun HTTP route va live ERP/MySQL tekshiruvi.
+
 ---
 
 <details>

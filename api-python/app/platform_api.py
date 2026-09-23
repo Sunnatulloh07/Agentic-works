@@ -130,26 +130,46 @@ DEFAULT_BRIEFING_ROWS = 5
 
 
 def agents(tenant):
-    return [{'id':a.id,'name':a.name,'department':a.department,'tools':a.tools,'ladder':a.ladder} for a in load_pack(tenant).agents]
+    # triggers and conversation let app/planning.py pick a conversation agent by
+    # capability (a message trigger on the inbound channel), never by agent id.
+    return [{'id':a.id,'name':a.name,'department':a.department,'tools':a.tools,'ladder':a.ladder,
+             'triggers':[t.model_dump() for t in a.triggers],'conversation':a.conversation.model_dump()}
+            for a in load_pack(tenant).agents]
 
 
 def policy(tenant,agent):
     a=next((x for x in load_pack(tenant).agents if x.id==agent),None)
     if a is None:raise Forbidden('Agent not in tenant pack')
-    # persona is prompt material, not authorisation: see DESCRIPTIVE_POLICY_KEYS.
-    return {'tools':a.tools,'ladder':a.ladder,'approval':a.approval.required_for,'approver_role':a.approval.approver_role,'independent_approval':a.approval.independent,'allowed_recipients':a.allowed_recipients,'allowed_connections':a.allowed_connections,'persona':a.prompt}
+    # persona and conversation shape what an agent proposes, not what it may do:
+    # both are DESCRIPTIVE_POLICY_KEYS, so editing them keeps granted approvals.
+    return {'tools':a.tools,'ladder':a.ladder,'approval':a.approval.required_for,'approver_role':a.approval.approver_role,'independent_approval':a.approval.independent,'allowed_recipients':a.allowed_recipients,'allowed_connections':a.allowed_connections,'persona':a.prompt,
+            'conversation':a.conversation.model_dump()}
 
 
 def catalog(tenant,query):
-    from .tools import products_search
-    return [p.model_dump() for p in products_search(load_pack(tenant),query)]
+    # product_view, not model_dump: the model gets stock and in-stock sizes and a
+    # bounded description, so a search hit fits one observation.
+    from .tools import product_view,products_search
+    return [product_view(p) for p in products_search(load_pack(tenant),query)]
+
+
+def shop_data(tenant):
+    """The tenant's shop as plain data for shop.info / orders.draft (platform_runtime.shop_tools).
+
+    The runtime reads it through this injected reader and never imports a pack.
+    """
+    pack=load_pack(tenant)
+    return {'shop_name':pack.shop_name,'faq':dict(pack.faq),
+            'branches':[b.model_dump() for b in pack.branches],
+            'products':[{'id':p.id,'name':p.name,'price_uzs':p.price_uzs,'sizes':list(p.sizes),
+                         'stock':dict(p.stock)} for p in pack.products]}
 
 
 def engine():
     from .storage import _path, db
     from .runtime_authority import runtime_authority
     db()  # Ensure directory migrations before the engine opens its independent connections.
-    return Engine(_path(),build_registry(catalog),policy,authority=runtime_authority)
+    return Engine(_path(),build_registry(catalog,shop_data),policy,authority=runtime_authority)
 
 
 def identity(request,tenant,roles=('owner','operator','integrator','viewer')):

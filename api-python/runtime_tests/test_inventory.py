@@ -389,6 +389,46 @@ class InventoryTests(unittest.TestCase):
     def test_an_untruncated_read_does_not_claim_truncation(self):
         result = self.call('inventory.stock', {'limit': 50})
         self.assertFalse(result['truncated'])
+        self.assertEqual([], result['sources_truncated'])
+
+    def _seed_padding(self, count, late=''):
+        db = sqlite3.connect(self.erp)
+        try:
+            db.executemany('INSERT INTO products VALUES(?,?,?,?,?,?)',
+                           [(f'PAD-{i:03d}', 'p', 1, 1, 1, 'dona') for i in range(count)])
+            if late:
+                db.execute('INSERT INTO products VALUES(?,?,?,?,?,?)',
+                           (late, 'Kech', 500, 400, 9, 'dona'))
+            db.commit()
+        finally:
+            db.close()
+
+    def test_a_product_past_the_source_ceiling_is_not_reported_as_absent(self):
+        """The ERP table is read without a where-filter and connectors.read stops at
+        50 rows, so a product past it had no price -- `blank`, `complete: true`."""
+        self._seed_padding(60, late='SKU-LATE')
+        result = self.call('inventory.product', {'product_id': 'SKU-LATE'})
+        self.assertTrue(result['truncated'])
+        self.assertEqual(['erp'], result['sources_truncated'])
+
+    def test_a_catalogue_read_past_the_source_ceiling_says_so(self):
+        self._seed_padding(60)
+        for name in ('inventory.stock', 'inventory.price', 'inventory.margin'):
+            with self.subTest(tool=name):
+                result = self.call(name, {'limit': 100})
+                self.assertEqual(['erp'], result['sources_truncated'])
+                self.assertTrue(result['truncated'])
+        # One product: a source at its ceiling matters only when the id was NOT
+        # found in it. SKU-77 is in the first rows, so its answer is whole.
+        for name in ('inventory.stock', 'inventory.price', 'inventory.margin'):
+            with self.subTest(tool=name, one='SKU-77'):
+                result = self.call(name, {'product_id': 'SKU-77'})
+                self.assertEqual([], result['sources_truncated'])
+                self.assertFalse(result['truncated'])
+            with self.subTest(tool=name, one='SKU-NOWHERE'):
+                result = self.call(name, {'product_id': 'SKU-NOWHERE'})
+                self.assertEqual(['erp'], result['sources_truncated'])
+                self.assertTrue(result['truncated'])
 
     # ------------------------------------------------------------ the margin
 

@@ -17,7 +17,13 @@ from pathlib import Path
 # Policy keys that describe an agent rather than authorise it. Prompt material
 # shapes what an agent proposes, never what it may do, so editing it must not
 # cancel approvals an operator already granted for specific, unchanged arguments.
-DESCRIPTIVE_POLICY_KEYS = ('persona',)
+# The conversation block (enabled, step/time budget, history depth, fallback text)
+# is the same kind of material: it decides whether and how a turn is PLANNED, and
+# every step that turn produces is still validated against the authorising keys.
+# A drafted reply awaiting approval carries its text in the step arguments, so an
+# edited fallback_text cannot change what the operator approved -- and must not
+# void that approval either.
+DESCRIPTIVE_POLICY_KEYS = ('persona', 'conversation')
 
 # Tools that reach a destination outside the tenant, and the argument that names
 # that destination. Naming it here rather than inline matters: a channel added to
@@ -71,6 +77,43 @@ class Conflict(ValueError): pass
 class Forbidden(PermissionError): pass
 class NotFound(LookupError): pass
 class RateLimited(RuntimeError): pass
+
+
+# The only shape a rejection reason may take: a status or a provider verdict,
+# never a message. A provider message can quote the URL, and the URL carries
+# the bot token.
+SAFE_REASON = re.compile(r'[a-z0-9_]{1,40}')
+
+
+class DeliveryRejected(RuntimeError):
+    """The provider answered and definitively did NOT perform the effect.
+
+    ``uncertain`` is for the outcome nobody can know: the request may have
+    reached the provider and the effect may have happened (a timeout, a reset,
+    a 502 from a gateway). A 4xx from the Bot API or an ``ok: false`` body is
+    not that case -- the provider said no, and nothing was delivered. An adapter
+    raises this only where the outcome is certain; ``Engine.tick`` turns it into
+    ``failed`` so the operator is not sent to reconcile a delivery that never
+    happened, and a conversation turn is handed off rather than marked "never
+    resend". A RuntimeError, so callers that already catch adapter failures
+    keep catching this one.
+
+    ``reason`` is kept only when it matches ``SAFE_REASON``; anything else is
+    collapsed to ``rejected``, so no future adapter can leak a message through
+    it by accident.
+    """
+    def __init__(self, reason='rejected'):
+        self.reason = reason if isinstance(reason, str) and SAFE_REASON.fullmatch(reason) else 'rejected'
+        super().__init__(self.reason)
+
+
+# Operator takeover replies. A human answers a customer from the dashboard; the
+# task is keyed under a channel of its own so that the generic submit path can
+# never mint one, and the idempotency key is namespaced so it cannot collide
+# with a dashboard task key.
+OPERATOR_CHANNEL = 'operator'
+OPERATOR_REPLY_PREFIX = 'operator-reply:'
+OPERATOR_ROLES = frozenset({'owner', 'operator'})
 
 
 def encode(value):
@@ -150,6 +193,7 @@ CREATE TABLE IF NOT EXISTS p_agent_runs(
  current_task TEXT NOT NULL DEFAULT '', claim TEXT NOT NULL DEFAULT '',
  lease REAL NOT NULL DEFAULT 0, answer TEXT NOT NULL DEFAULT '',
  evidence_ids TEXT NOT NULL DEFAULT '[]', error TEXT NOT NULL DEFAULT '',
+ channel TEXT NOT NULL DEFAULT 'agent',
  UNIQUE(tenant,request_key));
 CREATE TABLE IF NOT EXISTS p_agent_turns(
  tenant TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES p_agent_runs(id),
@@ -159,6 +203,8 @@ CREATE INDEX IF NOT EXISTS p_agent_runs_pending ON p_agent_runs(tenant,status,cr
 CREATE INDEX IF NOT EXISTS p_steps_queue ON p_steps(tenant,status,position);
 CREATE INDEX IF NOT EXISTS p_tasks_tenant ON p_tasks(tenant,created);
 CREATE INDEX IF NOT EXISTS p_audit_tenant ON p_audit(tenant,id);
+CREATE INDEX IF NOT EXISTS p_events_conversation
+ ON p_events(tenant,channel,json_extract(payload,'$.conversation_id'));
 '''
 
 
@@ -168,10 +214,23 @@ CREATE INDEX IF NOT EXISTS p_audit_tenant ON p_audit(tenant,id);
 # a warm database or never invalidate it.
 SCHEMA_MODULES = ('usage_budget', 'knowledge', 'oauth', 'google_adapters', 'sync_store',
                   'reengagement', 'briefing', 'supervisor', 'documents', 'erp',
-                  'escalation')
+                  'escalation', 'conversation')
 
 # The migration rows the engine records for itself, applied with the schema.
-MIGRATION_NUMBERS = range(1, 9)
+# 9: p_agent_runs.channel (see _add_columns).
+MIGRATION_NUMBERS = range(1, 10)
+
+# Columns added to a table that already existed in an older schema. CREATE TABLE IF
+# NOT EXISTS cannot add them there, so each is added once, guarded by table_info,
+# the pattern app/identity_schema.py uses. The default keeps every pre-existing
+# row's meaning: a run created before the column existed was a dashboard run.
+ADDED_COLUMNS = (('p_agent_runs', 'channel', "TEXT NOT NULL DEFAULT 'agent'"),)
+
+
+def _add_columns(c):
+    for table, name, definition in ADDED_COLUMNS:
+        if name not in {row[1] for row in c.execute(f'PRAGMA table_info({table})')}:
+            c.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
 
 
 def _schema_script():
@@ -224,6 +283,7 @@ class Engine:
                 # with the default, 45 ms with NORMAL.
                 c.execute('PRAGMA synchronous=NORMAL')
                 c.executescript(script)
+                _add_columns(c)
                 for number in MIGRATION_NUMBERS:
                     c.execute('INSERT OR IGNORE INTO p_migrations VALUES(?,?)',
                               (number, self.clock()))
@@ -342,6 +402,13 @@ class Engine:
             raise Forbidden('Invalid autonomy policy')
         if not isinstance(steps, list) or not 1 <= len(steps) <= 20:
             raise ValueError('Plan requires 1..20 steps')
+        # An operator origin (see operator_reply) authorises exactly one thing: the
+        # plain channel send the human wrote. It never relaxes approval -- it forces
+        # it, so the human's decision is what the claim path re-verifies -- and a
+        # destructive or physical tool never rides on it (PRD F5).
+        operator = bool(origin and origin.get('channel') == OPERATOR_CHANNEL)
+        if operator and len(steps) != 1:
+            raise ValueError('An operator reply is exactly one send')
         result = []
         for step in steps:
             if not isinstance(step, dict) or set(step)-{'tool','args','device'}:
@@ -350,6 +417,9 @@ class Engine:
             spec = self.registry.get(name)
             if name not in policy.get('tools', []):
                 raise Forbidden('Tool not allowed for agent')
+            if operator and (name != origin['reply_channel'] + '.send'
+                             or spec.risk in ('destructive', 'physical')):
+                raise Forbidden('Operator reply may only carry a plain channel send')
             args = step.get('args', {})
             spec.validate(args)
             if name in {'connectors.read', 'database.read', 'database.plan_write', 'database.write'} and args['connection'] not in policy.get('allowed_connections',[]):
@@ -371,6 +441,7 @@ class Engine:
             # human_led gates everything, required_for gates by name, and
             # destructive or physical risk is never unattended.
             needed = (policy['ladder'] == 'human_led'
+                      or operator
                       or name in policy.get('approval', [])
                       or spec.risk in ('destructive', 'physical')
                       or (spec.risk != 'read'
@@ -399,6 +470,10 @@ class Engine:
         """Internal: caller owns the write transaction; never calls providers."""
         for v in (tenant,channel,event_key,agent,actor):
             if not isinstance(v,str) or not v or len(v)>256: raise ValueError('Invalid identity')
+        if channel == OPERATOR_CHANNEL:
+            # Reserved: only operator_reply mints a task on this channel, because the
+            # claim path treats that channel as "a human authorised this send".
+            raise Forbidden('Channel reserved for operator replies')
         origin = self._origin(c, tenant, channel, event_key)
         validated = self._validated(tenant,agent,steps,origin)
         # External destinations are authorized in the engine, not just in LLM prompting.
@@ -410,11 +485,22 @@ class Engine:
             if step['tool'] in OUTBOUND_TOOLS:
                 recipient=step.get('args',{}).get(DIRECT_DESTINATION_FIELD.get(step['tool'],'conversation_id'))
                 if channel in OUTBOUND_CHANNELS:
-                    origin=c.execute('SELECT payload FROM p_events WHERE tenant=? AND channel=? AND event_key=?',(tenant,channel,event_key)).fetchone()
-                    if not origin or step['tool'] != channel+'.send' or json.loads(origin['payload']).get('conversation_id')!=recipient:
+                    # The origin is read once above; it used to be re-read here into the
+                    # same name, shadowing the dict with a sqlite Row mid-loop.
+                    if not origin or step['tool'] != channel+'.send' or origin['conversation_id']!=recipient:
                         raise Forbidden('Outbound destination differs from verified inbound event')
                 elif recipient not in self.policy(tenant,agent).get('allowed_recipients',[]):
                     raise Forbidden('Direct outbound destination must be pack-allowlisted')
+        return self._create_task(c,tenant,channel,event_key,agent,steps,actor,validated)
+
+    def _create_task(self, c, tenant, channel, event_key, agent, steps, actor, validated, approver=''):
+        """Insert an already validated plan; the idempotent half of every submit.
+
+        ``approver`` is set only by operator_reply: the human who wrote the reply
+        has decided it, so its approval row is inserted already ``approved`` by
+        that actor and audited as such. The claim path then consumes it exactly as
+        it consumes a dashboard approval, including the approver authority check.
+        """
         fp = digest({'agent':agent,'steps':steps})
         # Replay is not an authorization bypass. An authorized frozen-tenant
         # replay remains read-only, but a revoked actor cannot recover a task.
@@ -435,12 +521,92 @@ class Engine:
             sid = uuid.uuid4().hex
             c.execute('INSERT INTO p_steps(id,task,tenant,position,tool,args,risk,approval_needed,fingerprint,status,device) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                       (sid,tid,tenant,pos,name,encode(args),risk,needed,sfp,'queued',device))
-            if needed:
+            if needed and approver:
+                c.execute('INSERT INTO p_approvals(step,tenant,fingerprint,status,actor,expires,decided) VALUES(?,?,?,?,?,?,?)',
+                          (sid,tenant,sfp,'approved',approver,now+86400,now))
+                self.audit(c,tenant,tid,'approval.approved',approver,{'step':sid,'fingerprint':sfp,'operator_reply':True})
+            elif needed:
                 c.execute('INSERT INTO p_approvals(step,tenant,fingerprint,status,expires) VALUES(?,?,?,?,?)',
                           (sid,tenant,sfp,'pending',now+86400))
         self.audit(c,tenant,tid,'task.created',actor,{'agent':agent,'steps':len(steps)})
         self._refresh(c,tenant,tid)
         return tid
+
+    def _operator_origin(self, c, tenant, tool, args):
+        """The conversation an operator reply answers, re-derived from the step itself.
+
+        A dashboard reply has no inbound event of its own to bind to, so the binding
+        is the step's destination checked against the tenant's verified inbound
+        stream: some event on that channel, accepted by a verified webhook, must
+        carry this conversation_id. Read at submission AND at claim, like _origin,
+        so a conversation that is no longer known is not written to. Raises
+        NotFound when it is not known; Forbidden when the tool is not a channel
+        send at all.
+        """
+        if tool not in OUTBOUND_TOOLS or not tool.endswith('.send'):
+            raise Forbidden('Operator reply requires a channel send')
+        channel = tool[:-len('.send')]
+        if channel not in OUTBOUND_CHANNELS:
+            raise Forbidden('Operator reply needs a channel with a verified inbound stream')
+        target = args.get(DIRECT_DESTINATION_FIELD[tool])
+        if not isinstance(target, str) or not target:
+            raise ValueError('Invalid conversation identity')
+        known = c.execute("SELECT 1 FROM p_events WHERE tenant=? AND channel=? "
+                          "AND json_extract(payload,'$.conversation_id')=? LIMIT 1",
+                          (tenant, channel, target)).fetchone()
+        if not known:
+            raise NotFound('Conversation unknown to this tenant')
+        return {'channel': OPERATOR_CHANNEL, 'reply_channel': channel, 'conversation_id': target}
+
+    def _task_origin(self, c, tenant, row):
+        """The origin a claimed step is re-validated against: event-bound or operator-bound."""
+        if row['channel'] == OPERATOR_CHANNEL:
+            return self._operator_origin(c, tenant, row['tool'], json.loads(row['args']))
+        return self._origin(c, tenant, row['channel'], row['event_key'])
+
+    def operator_reply(self, tenant, channel, conversation_id, text, *, actor, role, key, agent):
+        """A human answers a customer: one ``<channel>.send`` the human has decided.
+
+        The third authorising shape for an outbound send, deliberately narrow:
+
+        * ``channel`` must own a verified inbound stream (OUTBOUND_CHANNELS) and
+          ``conversation_id`` must have sent this tenant an event on it;
+        * ``actor`` must hold an owner/operator role NOW (``role`` is the
+          authenticated claim; ``require_authority`` re-checks the directory
+          inside this transaction), and must satisfy the agent's approver_role;
+        * ``agent`` is whichever pack agent holds the send tool -- resolved by the
+          caller through capability routing, never named here -- and its ladder
+          does not gate the human's own reply, because the human is the approver;
+        * the task is idempotent on ``key``: same key and text -> same task; a
+          different text or destination under the same key -> Conflict.
+
+        The approval is recorded as decided by ``actor`` so the audit answers "who
+        sent this", and the claim path re-checks the actor's authority, the
+        conversation's existence and the tenant's freeze before dispatch.
+        """
+        if channel not in OUTBOUND_CHANNELS:
+            raise ValueError('Channel cannot carry an operator reply')
+        if role not in OPERATOR_ROLES:
+            raise Forbidden('Operator reply requires an owner or operator')
+        for value in (actor, agent, conversation_id):
+            if not isinstance(value, str) or not value or len(value) > 256:
+                raise ValueError('Invalid identity')
+        if not isinstance(key, str) or not key or len(OPERATOR_REPLY_PREFIX + key) > 256:
+            raise ValueError('Invalid idempotency key')
+        if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+            raise ValueError('Reply text must be 1..4000 characters')
+        tool = channel + '.send'
+        steps = [{'tool': tool, 'args': {DIRECT_DESTINATION_FIELD[tool]: conversation_id, 'text': text}}]
+        with self.tx() as c:
+            policy = self.policy(tenant, agent)
+            required = ('owner',) if policy.get('approver_role') == 'owner' else ('owner', 'operator')
+            if role not in required:
+                raise Forbidden('Owner-only approval')
+            self.require_authority(c, tenant, 'approval', actor, required)
+            origin = self._operator_origin(c, tenant, tool, steps[0]['args'])
+            validated = self._validated(tenant, agent, steps, origin)
+            return self._create_task(c, tenant, OPERATOR_CHANNEL, OPERATOR_REPLY_PREFIX + key,
+                                     agent, steps, actor, validated, approver=actor)
 
     def _refresh(self,c,tenant,tid):
         rows = c.execute('SELECT status FROM p_steps WHERE tenant=? AND task=? ORDER BY position', (tenant,tid)).fetchall()
@@ -532,16 +698,20 @@ class Engine:
                     self.audit(c,tenant,r['task'],'step.cancelled','agent-loop',{'step':r['id'],'reason':'agent_run_inactive'})
                     self._refresh(c,tenant,r['task'])
                     continue
+                error='policy_changed'
                 try:
                     self.require_authority(c,tenant,r['channel'],r['creator'])
-                    # The origin event is re-read so an unattended reply is re-bound
-                    # to the same verified conversation it was submitted against.
-                    origin=self._origin(c,tenant,r['channel'],r['event_key'])
+                    # The origin is re-read so a reply is re-bound to the same verified
+                    # conversation it was submitted against: the inbound event for a
+                    # channel task, the tenant's inbound stream for an operator reply.
+                    origin=self._task_origin(c,tenant,r)
                     validated=self._validated(tenant,r['agent'],[{'tool':r['tool'],'args':json.loads(r['args']),'device':r['device']}],origin)[0]
+                except NotFound:
+                    validated=None;error='conversation_unknown'
                 except (ValueError,LookupError,PermissionError):
                     validated=None
                 if validated is None or validated[4]!=r['fingerprint']:
-                    c.execute("UPDATE p_steps SET status='failed',error='policy_changed' WHERE id=?",(r['id'],));self._refresh(c,tenant,r['task']);continue
+                    c.execute("UPDATE p_steps SET status='failed',error=? WHERE id=?",(error,r['id']));self._refresh(c,tenant,r['task']);continue
                 if r['approval_needed']:
                     a=c.execute('SELECT * FROM p_approvals WHERE tenant=? AND step=?',(tenant,r['id'])).fetchone()
                     if not a or a['fingerprint']!=r['fingerprint'] or a['expires']<=now:
@@ -587,6 +757,10 @@ class Engine:
             return False
         try:
             result=spec.handler(self,tenant,step['agent'],step['args'],step['id'])
+        except DeliveryRejected as e:
+            # The provider answered and did nothing: a definite failure, whatever the
+            # tool's externality. The reason is SAFE_REASON-bounded by construction.
+            self.finish(tenant,step['id'],step['claim'],{},'failed','DeliveryRejected: '+e.reason)
         except Exception as e:
             # Do not disclose provider URLs, tokens, arguments or exception messages.
             status='uncertain' if spec.external and spec.risk!='read' else 'failed'
@@ -687,13 +861,24 @@ class Engine:
             # Stable task ID key recovers crash between submit and event completion.
             with self.read() as c:
                 old=c.execute('SELECT id FROM p_tasks WHERE tenant=? AND channel=? AND event_key=?',(tenant,r['channel'],r['event_key'])).fetchone()
-            if old:tid=old['id']
+                # A recorded conversation turn is this event's outcome too: re-planning
+                # it after a lease expiry could route it to a one-shot plan and reply twice.
+                turn=c.execute('SELECT 1 FROM p_conversation_turns WHERE tenant=? AND channel=? AND event_key=?',(tenant,r['channel'],r['event_key'])).fetchone()
+            if old:result={'task_id':old['id']}
+            elif turn:result={'turn':r['event_key']}
             else:
                 payload=json.loads(r['payload'])
                 with self.read() as c:self.require_authority(c,tenant,r['channel'],payload.get('sender',''))
                 plan=planner(tenant,r['channel'],payload)
-                tid=self.submit(tenant,r['channel'],r['event_key'],plan['agent'],plan['steps'],payload.get('sender','event'))
-            result={'task_id':tid};status='done';error=''
+                if 'steps' in plan:
+                    result={'task_id':self.submit(tenant,r['channel'],r['event_key'],plan['agent'],plan['steps'],payload.get('sender','event'))}
+                else:
+                    # No steps: the planner chose a conversation turn. The turn is
+                    # recorded here and advanced by conversation.ConversationTurns.
+                    from .conversation import record_turn
+                    record_turn(self,tenant,r['channel'],r['event_key'],plan['agent'],payload)
+                    result={'turn':r['event_key']}
+            status='done';error=''
         except Exception as e:
             result={};status='failed';error=event_error(e)
         with self.tx() as c:

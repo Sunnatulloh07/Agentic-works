@@ -58,24 +58,35 @@ python -m venv .venv
 pip install -r requirements.txt  # cryptography shu ro'yxatda
 cd ..
 
-# 2. Lokal config. Random secret yaratadi, hech nima chop etmaydi.
+# 2. Lokal config. api-python/.env (random secret, yo'l qatorlari, bo'sh
+#    DEMO_TELEGRAM_TOKEN= va PLATFORM_LLM_KEY=) va config/integrations.json
+#    (faqat env NOMLARI) yaratadi. Hech nima chop etmaydi.
 python scripts/setup_local.py
+#    api-python/.env ni oching: DEMO_TELEGRAM_TOKEN va PLATFORM_LLM_KEY ni to'ldiring.
 
-# 3. Birinchi owner hisobi. APP_DB va PACKS_DIR API bilan AYNAN bir xil bo'lishi shart.
-#    Berilmasa: APP_DB=api-python/data/app.db, PACKS_DIR=packs (repo ildizi).
-#    Skript email, ism va parolni interaktiv so'raydi; hech qanday token chop etmaydi.
+# 3. Birinchi owner hisobi. Skript .env ni run_local.py bilan bir xil yuklaydi,
+#    shuning uchun APP_DB/PACKS_DIR API bilan mos. Interaktiv:
 python scripts/provision_identity.py --workspace demo-retail --workspace-name "Demo"
+#    yoki pipe orqali (Windows'da getpass pipe'ni o'qimaydi):
+#    echo "$OWNER_PASSWORD" | python scripts/provision_identity.py --workspace demo-retail \
+#        --workspace-name "Demo" --email owner@example.com --display-name "Ega" --password-stdin
 
-# 4. Xizmatlar. Docker varianti:
-docker compose up --build -d
-#    yoki lokal venv varianti (uchta alohida terminal):
-#      cd api-python && uvicorn app.main:app --port 8000
-#      cd api-python && python -m app.worker
-#      cd apps/ui && npm ci && npm run dev
+# 4. Xizmatlar. .env ni yuklab API (127.0.0.1:8000) + worker ni ko'taradi:
+python scripts/run_local.py --check   # faqat PASS/FAIL; qiymatlar chop etilmaydi
+python scripts/run_local.py
+#    UI boshqa terminalda: cd apps/ui && npm ci && npm run dev
 
 # 5. http://localhost:3000 — 3-qadamda kiritgan email/parol bilan kiring.
 #    API OpenAPI: http://localhost:8000/docs
+
+# 6. Telegram: ochiq https URL kerak (masalan, tunnel), ?tenant=<pack> bilan:
+#    python scripts/telegram_set_webhook.py --url https://PUBLIC-HOST/webhooks/telegram?tenant=demo-retail \
+#        --token-env DEMO_TELEGRAM_TOKEN --secret-env TELEGRAM_WEBHOOK_SECRET
 ````
+
+2026-09-23 da 2–4-qadamlar, login va webhook → tasdiq → `telegram.send` Windows’da
+repo’dan tashqari sandbox’da live tasdiqlangan (batafsil: `docs/ONBOARDING-UZ.md`). UI,
+haqiqiy Telegram va Docker varianti tekshirilmagan.
 
 Uchinchi qadam `app.packs` va `app.identity_store` ni import qiladi, ya’ni
 **FastAPI, PyYAML va pydantic o‘rnatilgan bo‘lishi kerak** (1-qadam buni beradi).
@@ -147,6 +158,13 @@ platform authorizationni active membershipga bog‘laydi.
 OIDC/JWKS va MFA hali qo‘shilmagan, shuning uchun buni production login sifatida qabul
 qilmang.
 
+Login throttle ikki qatlamli: har akkaunt (email) bo‘yicha 20/15 daqiqa va har IP bo‘yicha
+60/15 daqiqa. Reverse proxy ortida `TRUSTED_PROXIES` (vergul bilan IP/CIDR, sukut bo‘sh)
+ni proxy manzillari bilan to‘ldiring: shunda IP `X-Forwarded-For` ning o‘ngdan birinchi
+ishonchsiz manzilidan olinadi. Bo‘sh qoldirilsa header umuman o‘qilmaydi (soxtalashtirib
+bo‘lmaydi), lekin proxy ortidagi barcha mijozlar bitta IP bucket’ni bo‘lishadi. Xato
+yozuv API’ni startup’da to‘xtatadi.
+
 ## Tool va kanal sozlash
 
 Konfiguratsiya ikki qatlamdan o‘qiladi. **Ustuvorlik: pack-local avval, operator JSON
@@ -180,7 +198,14 @@ python scripts/telegram_set_webhook.py --url https://SIZNING-DOMEN/webhooks/tele
 ````
 
 `--dry-run` so‘rovni token yashirilgan holda ko‘rsatadi; olib tashlasangiz, haqiqiy
-`setWebhook` chaqiriladi. Skript token ham, secret ham chop etmaydi. Instagram:
+`setWebhook` chaqiriladi. Skript token ham, secret ham chop etmaydi, lekin ro‘yxatga
+olinadigan aniq URL’ni `Webhook URL: ...` qatorida chiqaradi. Core’da sukut tenant yo‘q:
+URL `?tenant=<pack>` bilan tugashi kerak (yoki API’da `TELEGRAM_DEFAULT_TENANT` /
+`TENANT_SECRETS`), aks holda webhook `400` qaytaradi. Media xabarning matni `caption` dan olinadi;
+izohsiz rasm/fayl/ovozli xabar `[rasm]`/`[fayl]`/`[ovozli xabar]` kabi belgi bilan qabul
+qilinadi (fayl yuklab olinmaydi); stiker va servis xabarlar jim `ignored`. Bot API manzili tenant konfigida `telegram.base_url` bilan almashtiriladi:
+faqat https, raqamli loopback http esa faqat LLM bilan bir xil
+`"provider_mode": "local_loopback"` ruxsati bilan. Instagram:
 production’da account ID aynan bitta tenantga moslanadi va raw body HMAC tekshiriladi.
 Faqat Instagram Login API outbound varianti kiritilgan; Facebook Login varianti uchun
 alohida adapter kerak.
@@ -253,6 +278,13 @@ Pack agenti `ops.device_observer`. Plan misoli:
 Journalda task ID ko‘rilgan bo‘lsa qayta bajarilmaydi. Lease eskirsa yoki kill/freeze
 sodir bo‘lsa in-flight task `uncertain` bo‘ladi. Bu fizik jarayonni ortga qaytarishni
 yoki tashqi tizimda exactly-once ni kafolatlamaydi. Masofaviy runner WSS talab qiladi.
+
+Server WebSocket’ni har qanday xatoda `4403` bilan yopadi (muddati o‘tgan token, revoke,
+timeout, stale claim, DB xatosi), shuning uchun runner bitta `4403` da o‘chmaydi. Sessiya
+autentifikatsiyadan o‘tgan bo‘lsa — backoff bilan qayta ulanadi. Server hech javob bermay
+ketma-ket 3 marta rad etsa — «revoked or rotated» deb chiqadi (exit 4). Token muddati
+o‘tgan bo‘lsa: `RUNNER_TOKEN_FILE` da yangi token kutadi, `RUNNER_TOKEN` da aniq xabar
+bilan chiqadi.
 
 **Windows eslatma:** runner testlari Windows’da qizil (`privateFile()` POSIX ruxsat
 bitlarini talab qiladi). Bu platforma cheklovi, kod nuqsoni emas.

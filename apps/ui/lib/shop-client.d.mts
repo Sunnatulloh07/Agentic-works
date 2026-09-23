@@ -1,0 +1,10 @@
+export type ShopResource='approvals'|'inbox'|'products'|'orders'|'channels';
+export function shopPath(tenant:string,resource:ShopResource):string;
+export function approvalPath(tenant:string,step:string):string;
+export function canReadInbox(role:string):boolean;
+export type Draft={kind:'message';channel:string;recipient:string;text:string}|{kind:'args';text:string};
+export function draftSummary(tool:string,args:unknown):Draft;
+export function wholeNumber(value:string,min?:number,max?:number):number;
+export function formatSum(value:number,currency?:string):string;
+export function bootstrapBody(fields:{email:string;password:string;displayName:string;workspaceId:string;workspaceName:string}):{email:string;password:string;display_name:string;workspace_id:string;workspace_name:string};
+export function startAutoRefresh(fn:()=>unknown,interval?:number,env?:{setInterval:typeof setInterval;clearInterval:typeof clearInterval;document?:{hidden:boolean}}):()=>void;

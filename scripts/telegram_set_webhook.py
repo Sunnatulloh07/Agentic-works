@@ -12,6 +12,11 @@ request. `--dry-run` shows the request with the token masked.
 
     python scripts/telegram_set_webhook.py --url https://example.uz/webhooks/telegram?tenant=demo-retail \
         --token-env DEMO_TELEGRAM_TOKEN --secret-env TELEGRAM_WEBHOOK_SECRET
+
+The API has no built-in tenant: the URL must carry `?tenant=<pack name>`, unless
+the API sets TELEGRAM_DEFAULT_TENANT or maps per-tenant secrets in TENANT_SECRETS.
+The exact URL registered is printed (it holds no secret), so it can be compared
+with what `getWebhookInfo` reports.
 """
 from __future__ import annotations
 
@@ -51,6 +56,15 @@ def build_request(url: str, secret: str, token: str) -> tuple[str, dict]:
     return f'{API}/bot{token}/setWebhook', body
 
 
+def tenant_guidance(url: str) -> str:
+    """'' when the URL names a tenant, otherwise the hint printed to stderr."""
+    if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get('tenant', [''])[0]:
+        return ''
+    return ('Note: the URL has no ?tenant=<name>. The API answers 400 unless it sets '
+            'TELEGRAM_DEFAULT_TENANT or maps this secret in TENANT_SECRETS. '
+            'Example: https://YOUR-HOST/webhooks/telegram?tenant=demo-retail')
+
+
 def masked(endpoint: str) -> str:
     """The endpoint with the token replaced, for logs and dry runs."""
     return re.sub(r'/bot[^/]+/', '/bot***/', endpoint)
@@ -74,7 +88,8 @@ def call(endpoint: str, body: dict) -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--url', required=True, help='Public https URL of POST /webhooks/telegram')
+    parser.add_argument('--url', required=True, help='Public https URL of POST /webhooks/telegram, '
+                        'normally ending in ?tenant=<pack name>')
     parser.add_argument('--token-env', required=True, help='Env var holding the bot token')
     parser.add_argument('--secret-env', default='TELEGRAM_WEBHOOK_SECRET',
                         help='Env var holding the secret the API verifies (default: TELEGRAM_WEBHOOK_SECRET)')
@@ -85,11 +100,16 @@ def main(argv=None) -> int:
     except WebhookError as exc:
         print('Refused:', exc, file=sys.stderr)
         return 2
+    hint = tenant_guidance(args.url)
+    if hint:
+        print(hint, file=sys.stderr)
     if args.dry_run:
+        print('Webhook URL: ' + args.url)
         print(json.dumps({'endpoint': masked(endpoint), 'body': {**body, 'secret_token': '***'}},
                          ensure_ascii=False, indent=2))
         return 0
     result = call(endpoint, body)
+    print('Webhook URL: ' + args.url)
     # Telegram echoes only ok/result/description here; none of them carry the token.
     print(json.dumps({'ok': result.get('ok'), 'description': result.get('description', '')},
                      ensure_ascii=False))

@@ -342,6 +342,21 @@ def _selected_number(figure):
     return selected.get('number')
 
 
+def _ceiling(views):
+    """Sources that stopped at their row ceiling during a catalogue read.
+
+    The catalogue is built from the graph's id list, which never sees a row past a
+    source's ceiling, so a product there is missing from the list rather than
+    reported. Names are collected from every view's per-source status, in order.
+    """
+    names = []
+    for view in views:
+        for item in view.get('sources', ()):
+            if item.get('truncated') and item.get('source') not in names:
+                names.append(item.get('source'))
+    return names
+
+
 def _reason(figure):
     """Why an attribute produced no usable number, as a name rather than a shrug.
 
@@ -462,6 +477,10 @@ def product(engine, tenant, agent, product_id, step):
         'sources': view.get('sources', []),
         'source_errors': view.get('source_errors', []),
         'complete': bool(view.get('complete')),
+        # A source that stopped at its row ceiling without returning this product
+        # may hold it further down: a blank figure is then unproven, not absent.
+        'truncated': bool(view.get('truncated')),
+        'sources_truncated': list(view.get('sources_truncated', [])),
         'conflict_policy': view.get('conflict_policy', ''),
         'observed': view.get('observed'),
         'authority': _authority(engine, tenant, agent),
@@ -485,7 +504,8 @@ def stock(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
         one = product(engine, tenant, agent, product_id, step)
         return {'entity': settings['entity'], 'view': 'stock', 'items': [{
             'id': one['id'], 'stock': one['stock'], 'unit': one['unit'],
-        }], 'item_count': 1, 'truncated': False, 'complete': one['complete'],
+        }], 'item_count': 1, 'truncated': one['truncated'],
+        'sources_truncated': one['sources_truncated'], 'complete': one['complete'],
         'source_errors': one['source_errors'], 'observed': one['observed'],
         'authority': one['authority'],
         'note': 'Ombor soni — o‘qilgan qiymat, "sotuvga tayyor" degani emas.'}
@@ -495,8 +515,10 @@ def stock(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
                                      step, MAX_ITEMS)[0]
     out = []
     errors = []
+    views = []
     for identifier in ids:
         view = _view(engine, tenant, agent, identifier, step)
+        views.append(view)
         errors.extend(view.get('source_errors', []))
         figure = _figure(view, attribute)
         unit_attribute = _attribute(settings, 'unit')
@@ -511,7 +533,8 @@ def stock(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
     return {
         'entity': settings['entity'], 'view': 'stock', 'items': out,
         'item_count': len(out), 'scanned': len(ids),
-        'truncated': len(out) >= limit and len(ids) > len(out),
+        'truncated': (len(out) >= limit and len(ids) > len(out)) or bool(_ceiling(views)),
+        'sources_truncated': _ceiling(views),
         'complete': not errors, 'source_errors': errors,
         'observed': engine.clock(), 'authority': _authority(engine, tenant, agent),
         'note': 'Ombor soni — o‘qilgan qiymat, "sotuvga tayyor" degani emas.',
@@ -542,7 +565,8 @@ def price(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
             'id': one['id'], 'name': one['name'], 'price': one['price'],
             'currency': one['currency'], 'price_reason': reason,
             'conflicts': one['conflicts'],
-        }], 'item_count': 1, 'truncated': False, 'complete': one['complete'],
+        }], 'item_count': 1, 'truncated': one['truncated'],
+        'sources_truncated': one['sources_truncated'], 'complete': one['complete'],
         'unresolved': [reason] if reason else [],
         'conflict_policy': one['conflict_policy'],
         'source_errors': one['source_errors'], 'observed': one['observed'],
@@ -558,10 +582,12 @@ def price(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
                                      step, MAX_ITEMS)[0]
     out = []
     errors = []
+    views = []
     policy = ''
     unresolved = []
     for identifier in ids:
         view = _view(engine, tenant, agent, identifier, step)
+        views.append(view)
         errors.extend(view.get('source_errors', []))
         policy = policy or view.get('conflict_policy', '')
         figure = _figure(view, attribute)
@@ -583,7 +609,8 @@ def price(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
         'entity': settings['entity'], 'view': 'price', 'items': out,
         'item_count': len(out), 'scanned': len(ids),
         'unresolved': sorted(set(unresolved)),
-        'truncated': len(out) >= limit and len(ids) > len(out),
+        'truncated': (len(out) >= limit and len(ids) > len(out)) or bool(_ceiling(views)),
+        'sources_truncated': _ceiling(views),
         'complete': not errors, 'conflict_policy': policy,
         'source_errors': errors, 'observed': engine.clock(),
         'authority': _authority(engine, tenant, agent),
@@ -619,7 +646,8 @@ def margin(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
             'currency': one['currency'],
         }], 'item_count': 1, 'not_computable': one['not_computable'],
         'margin_blocked_by_conflict': one['margin_blocked_by_conflict'],
-        'truncated': False, 'complete': one['complete'],
+        'truncated': one['truncated'], 'sources_truncated': one['sources_truncated'],
+        'complete': one['complete'],
         'conflict_policy': one['conflict_policy'],
         'source_errors': one['source_errors'], 'observed': one['observed'],
         'authority': one['authority'],
@@ -634,9 +662,11 @@ def margin(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
     errors = []
     not_computable = []
     blocked_by_conflict = []
+    views = []
     policy = ''
     for identifier in ids:
         view = _view(engine, tenant, agent, identifier, step)
+        views.append(view)
         errors.extend(view.get('source_errors', []))
         policy = policy or view.get('conflict_policy', '')
         price_figure = _figure(view, price_attribute)
@@ -668,7 +698,8 @@ def margin(engine, tenant, agent, step, *, product_id='', limit=MAX_ITEMS):
         'item_count': len(out), 'scanned': len(ids),
         'not_computable': sorted(set(not_computable)),
         'margin_blocked_by_conflict': sorted(set(blocked_by_conflict)),
-        'truncated': len(out) >= limit and len(ids) > len(out),
+        'truncated': (len(out) >= limit and len(ids) > len(out)) or bool(_ceiling(views)),
+        'sources_truncated': _ceiling(views),
         'complete': not errors, 'conflict_policy': policy,
         'source_errors': errors,
         'observed': engine.clock(), 'authority': _authority(engine, tenant, agent),

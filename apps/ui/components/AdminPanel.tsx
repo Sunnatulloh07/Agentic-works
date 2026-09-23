@@ -1,6 +1,7 @@
 'use client';
 import {useState} from 'react';
 import {type SessionClient, type Workspace} from '../lib/session-client.mjs';
+import {bootstrapBody} from '../lib/shop-client.mjs';
 
 /**
  * Identity and membership administration.
@@ -127,7 +128,10 @@ export default function AdminPanel({client, workspace, exit}: AdminProps) {
  * least 32 characters, and `IDENTITY_BOOTSTRAP_ENABLED=true` in the deployment
  * environment. A dashboard session cannot supply either, so this form asks for the
  * admin token directly and never stores it. It exists because the alternative was
- * provisioning a first owner with `curl`, which leaves the token in shell history. */
+ * provisioning a first owner with `curl`, which leaves the token in shell history.
+ *
+ * It is rendered on the sign-in screen, because before bootstrap there is no owner to
+ * sign in as. The request is therefore sent without a session (`client.send`). */
 export function BootstrapPanel({client}: {client: SessionClient}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -153,14 +157,13 @@ export function BootstrapPanel({client}: {client: SessionClient}) {
     <label>Ko‘rsatiladigan ism<input style={control} maxLength={256} value={displayName} onChange={e => setDisplayName(e.target.value)}/></label>
     <label>Workspace ID<input style={control} maxLength={64} value={workspaceId} onChange={e => setWorkspaceId(e.target.value)}/></label>
     <label>Workspace nomi<input style={control} maxLength={256} value={workspaceName} onChange={e => setWorkspaceName(e.target.value)}/></label>
-    <button style={button} disabled={busy || !adminToken || !email.trim() || !password || !workspaceId.trim() || !workspaceName.trim()}
+    <button style={button} disabled={busy || !adminToken || !email.trim() || !password || !displayName.trim() || !workspaceId.trim() || !workspaceName.trim()}
       onClick={async () => {
         setBusy(true); setError(''); setMessage('');
         try {
-          await client.request('/identity/bootstrap',
-            {email: email.trim(), password, display_name: displayName.trim(),
-             workspace_id: workspaceId.trim(), workspace_name: workspaceName.trim()},
-            'POST', {'X-Admin-Token': adminToken});
+          await client.send('/identity/bootstrap',
+            bootstrapBody({email, password, displayName, workspaceId, workspaceName}),
+            undefined, 'POST', {'X-Admin-Token': adminToken});
           setMessage('Owner yaratildi. Endi oddiy kirish ekranidan kiring.');
           setAdminToken(''); setPassword('');
         } catch (e) { setError(e instanceof Error ? e.message : 'Xato'); }

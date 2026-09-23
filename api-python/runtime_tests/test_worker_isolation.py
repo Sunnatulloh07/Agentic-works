@@ -202,6 +202,11 @@ class ImportSurfaceTests(unittest.TestCase):
                 self.assertNotIn(forbidden, name,
                                  'top-level import must stay dependency-free: ' + name)
 
+    def test_conversation_turns_advance_after_the_agent_loop(self):
+        # A run that ended in this pass is settled into a reply in the same pass.
+        source = WORKER_SOURCE.read_text(encoding='utf-8')
+        self.assertLess(source.index("('agent_loop',"), source.index("('conversation',"))
+
 
 if __name__ == '__main__':
     unittest.main()

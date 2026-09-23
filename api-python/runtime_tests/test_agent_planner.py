@@ -86,6 +86,37 @@ class ResultPlannerTests(unittest.TestCase):
             self.planner()('tenant', {**self.context, 'input': 'x' * 64001})
         self.assertEqual([], self.calls)
 
+    def conversation_engine(self):
+        return Engine(Path(self.tmp.name) / 'conversation.db', build_registry(), lambda tenant, agent: {
+            'tools': ['reports.summary', 'telegram.send', 'instagram.send'], 'ladder': 'autonomous'})
+
+    def test_conversation_turn_hides_outbound_tools_and_states_delivery(self):
+        self.e = self.conversation_engine()
+        self.planner()('tenant', {**self.context, 'channel': 'telegram'})
+        _, body, _ = self.calls[0]
+        context = json.loads(body['messages'][1]['content'])
+        self.assertEqual({'reports.summary'}, {tool['name'] for tool in context['tools']})
+        system = body['messages'][0]['content']
+        self.assertNotIn('authenticated dashboard', system)
+        self.assertIn('delivered verbatim to the customer on telegram', system)
+        self.assertIn('use ask', system)
+
+    def test_conversation_turn_refuses_a_model_requested_send(self):
+        self.e = self.conversation_engine()
+        with self.assertRaises(Forbidden):
+            self.planner({'action': 'tool', 'tool': 'telegram.send', 'args': {}})(
+                'tenant', {**self.context, 'channel': 'telegram'})
+
+    def test_dashboard_run_keeps_outbound_tools_and_dashboard_wording(self):
+        self.e = self.conversation_engine()
+        for context in (self.context, {**self.context, 'channel': 'agent'}):
+            self.calls.clear()
+            self.planner()('tenant', context)
+            _, body, _ = self.calls[0]
+            tools = {tool['name'] for tool in json.loads(body['messages'][1]['content'])['tools']}
+            self.assertIn('telegram.send', tools)
+            self.assertIn('authenticated dashboard', body['messages'][0]['content'])
+
     def test_model_failure_has_no_adapter_retry(self):
         calls = []
         def fail(*args):

@@ -150,6 +150,41 @@ function validateTask(task,now=Date.now()) {
   return task;
 }
 
+// Server close 4403 is NOT only "device revoked": platform_api.runner closes with it
+// for every exception -- expired or invalid JWT, revoked/rotated device, a receive
+// timeout, a stale claim, an unknown message, a database error. So one 4403 must not
+// end the runner. A 4403 that arrives before the server ever answered on that
+// connection is a refusal of this token; only MAX_AUTH_REJECTIONS of those in a row,
+// with a token that has not expired, are read as revocation.
+const MAX_AUTH_REJECTIONS=3;
+
+function tokenExpiry(token) {
+  // Unverified read of `exp`, used ONLY to choose between waiting and exiting.
+  // The server remains the only verifier; nothing here grants anything.
+  try {
+    const part=String(token).split('.')[1];
+    if(!part || part.length>8192)return null;
+    const claims=JSON.parse(Buffer.from(part,'base64url').toString('utf8'));
+    return typeof claims.exp==='number' && Number.isFinite(claims.exp)?claims.exp*1000:null;
+  } catch {return null;}
+}
+
+function closeAction({code,authenticated,expiresAt,now=Date.now(),tokenFromFile,rejections=0}) {
+  // An authenticated session proves the token was accepted moments ago.
+  if(authenticated)rejections=0;
+  if(code!==4403 || authenticated)return {action:'retry',rejections,message:''};
+  if(expiresAt!==null && expiresAt<=now) {
+    // Expired, not revoked: the fix is a new token, and a token FILE can be
+    // rotated in place, so keep reconnecting (each attempt re-reads it).
+    if(tokenFromFile)return {action:'retry',rejections,message:'Device token expired; waiting for a rotated token in RUNNER_TOKEN_FILE'};
+    return {action:'exit',rejections,message:'Device token expired; issue a new device token in the UI and restart the runner'};
+  }
+  rejections+=1;
+  if(rejections>=MAX_AUTH_REJECTIONS)return {action:'exit',rejections,
+    message:`Device revoked or rotated: the server refused this token ${rejections} times in a row; re-enroll the device in the UI`};
+  return {action:'retry',rejections,message:'Server refused the device token (4403); retrying in case it was transient'};
+}
+
 function main() {
   const url=process.env.RUNNER_SERVER || 'ws://127.0.0.1:8000/platform/runner/ws';
   loadToken(); // Validate the local token source without logging its contents.
@@ -162,17 +197,19 @@ function main() {
   Object.freeze(config.folders);Object.freeze(config);
   const journal=new Journal(process.env.RUNNER_JOURNAL || './journal');
   const stopFile=process.env.RUNNER_STOP_FILE || './STOP';
-  let stopped=false,attempt=0;
+  let stopped=false,attempt=0,rejections=0,lastToken='';
   const halt=()=>{stopped=true;process.exit(3);};
   process.on('SIGINT',halt);process.on('SIGTERM',halt);
   setInterval(()=>{if(fs.existsSync(stopFile))halt();},500).unref();
   function connect() {
     if(stopped || fs.existsSync(stopFile))return halt();
     const token=loadToken();
-    const ws=new WebSocket(url);let timer;
+    // A rotated token starts a fresh count: the refusals were about the old one.
+    if(token!==lastToken){rejections=0;lastToken=token;}
+    const ws=new WebSocket(url);let timer,authenticated=false;
     const send=value=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
     ws.addEventListener('open',()=>{
-      attempt=0;send({token});send({type:'heartbeat'});
+      send({token});send({type:'heartbeat'});
       timer=setInterval(()=>send({type:'heartbeat'}),30000);
     });
     ws.addEventListener('message',event=>{
@@ -181,6 +218,10 @@ function main() {
         if(typeof event.data!=='string' || Buffer.byteLength(event.data,'utf8')>100000)throw new Error('Message byte limit');
         const msg=JSON.parse(event.data);
         if(!msg || typeof msg!=='object' || Array.isArray(msg))throw new Error('Invalid server message');
+        // The server answers only after verifying the token and the device, so the
+        // first answer is what proves this session was authenticated. Backoff resets
+        // here, not on 'open', which a refused token also reaches.
+        if(!authenticated){authenticated=true;attempt=0;}
         if(msg.stopped===true)return halt();
         if(msg.tasks!==undefined && (!Array.isArray(msg.tasks) || msg.tasks.length>20))throw new Error('Task batch limit');
         for(const task of msg.tasks || []) {
@@ -205,12 +246,16 @@ function main() {
     });
     ws.addEventListener('close',event=>{
       clearInterval(timer);
-      if(event.code===4403){stopped=true;console.error('Device authorization expired or revoked; enroll/rotate token');process.exitCode=4;return;}
+      const decision=closeAction({code:event.code,authenticated,expiresAt:tokenExpiry(token),
+        tokenFromFile:Boolean(process.env.RUNNER_TOKEN_FILE),rejections});
+      rejections=decision.rejections;
+      if(decision.message)console.error(decision.message);
+      if(decision.action==='exit'){stopped=true;process.exitCode=4;return;}
       if(!stopped)setTimeout(connect,Math.min(30000,1000*2**Math.min(++attempt,5)));
     });
     ws.addEventListener('error',()=>ws.close());
   }
   connect();
 }
-module.exports={permitted,execute,Journal,privateFile,loadToken,validateTask};
+module.exports={permitted,execute,Journal,privateFile,loadToken,validateTask,closeAction,tokenExpiry,MAX_AUTH_REJECTIONS};
 if(require.main===module){try{main();}catch{console.error('Runner configuration error; check allow.json and device token');process.exitCode=1;}}

@@ -23,6 +23,6 @@ class V037MigrationTests(unittest.TestCase):
                 engine=Engine(path,build_registry(),lambda t,a:{'tools':[],'ladder':'autonomous'})
                 with engine.read() as db:
                     self.assertEqual('{"item":"retained"}',db.execute('SELECT body FROM p_records').fetchone()[0])
-                    self.assertEqual([1,2,3,4,5,6,7,8],[r[0] for r in db.execute('SELECT version FROM p_migrations ORDER BY version')])
+                    self.assertEqual([1,2,3,4,5,6,7,8,9],[r[0] for r in db.execute('SELECT version FROM p_migrations ORDER BY version')])
                     for table in ['p_oauth_connections','p_oauth_states','p_oauth_revocations','p_google_dispatch','p_sync_streams','p_sync_records']:
                         self.assertEqual(1,db.execute('SELECT count(*) FROM sqlite_master WHERE name=?',(table,)).fetchone()[0])

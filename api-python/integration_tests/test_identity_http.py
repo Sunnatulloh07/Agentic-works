@@ -113,3 +113,33 @@ def test_cross_tenant_and_frozen_customer_mutation(client):
     assert client.get('/platform/other/customers',headers=headers(token)).status_code==403
     assert client.post('/platform/demo-retail/freeze',headers=headers(token),json={'stopped':True}).status_code==200
     assert client.post('/platform/demo-retail/customers',headers=headers(token),json={'display_name':'A'}).status_code==403
+
+
+def _behind_proxy(tmp_path,monkeypatch,proxies):
+    monkeypatch.setenv('APP_DB',str(tmp_path/'proxy.db'));monkeypatch.setenv('IDENTITY_DIRECTORY','true')
+    monkeypatch.setenv('PIPELINE_MODE','platform');monkeypatch.setenv('TRUSTED_PROXIES',proxies);reset()
+    return TestClient(app,client=('10.0.0.1',5000))
+
+
+def _logout(c,forwarded):
+    return c.post('/identity/logout',json={'refresh_token':'x'*32},headers={'X-Forwarded-For':forwarded})
+
+
+def test_per_ip_throttle_behind_a_trusted_proxy_is_per_client(tmp_path,monkeypatch):
+    # Every request arrives from the proxy (10.0.0.1). Keyed on that peer, one
+    # client's 61 requests used to lock out every other client of the proxy.
+    with _behind_proxy(tmp_path,monkeypatch,'10.0.0.0/8') as c:
+        for _ in range(60):assert _logout(c,'203.0.113.7').status_code!=429
+        assert _logout(c,'203.0.113.7').status_code==429
+        assert _logout(c,'203.0.113.8').status_code!=429
+        # The client cannot escape its bucket by prepending a forged hop.
+        assert _logout(c,'198.51.100.1, 203.0.113.7').status_code==429
+    reset()
+
+
+def test_forwarded_for_is_ignored_when_no_proxy_is_trusted(tmp_path,monkeypatch):
+    with _behind_proxy(tmp_path,monkeypatch,'') as c:
+        for i in range(60):assert _logout(c,f'203.0.113.{i}').status_code!=429
+        # A new forged address per request does not buy a new bucket.
+        assert _logout(c,'198.51.100.99').status_code==429
+    reset()

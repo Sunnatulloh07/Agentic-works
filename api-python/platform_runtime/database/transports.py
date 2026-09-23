@@ -46,6 +46,38 @@ def _credential(raw):
     return value
 
 
+MAX_CA_PATH_CHARS = 4096
+
+
+def _validate_mysql_ca(raw):
+    """Shape of the optional MySQL CA declaration; the file itself is read at connect.
+
+    A private CA (RDS, Azure, a customer's own) is named by an environment variable
+    holding a file path (``ssl_ca_env``) or by an absolute path (``ssl_ca``) --
+    never by inline PEM, which would put certificate material into tenant config.
+    ``tls_verify`` exists only to be stated: verification cannot be switched off.
+    """
+    if 'tls_verify' in raw and raw['tls_verify'] is not True:
+        raise ValueError('Unverified MySQL TLS is refused; declare ssl_ca or ssl_ca_env '
+                         'for a private certificate authority')
+    if 'ssl_ca' in raw and 'ssl_ca_env' in raw:
+        raise ValueError('Ambiguous MySQL CA: declare ssl_ca or ssl_ca_env, not both')
+    if 'ssl_ca_env' in raw:
+        ref = raw['ssl_ca_env']
+        if not isinstance(ref, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]*', ref) or ref.startswith('DSEC_'):
+            raise ValueError('ssl_ca_env must name an environment variable holding a CA file path')
+    if 'ssl_ca' in raw:
+        _ca_path(raw['ssl_ca'])
+
+
+def _ca_path(value):
+    if (not isinstance(value, str) or not value or len(value) > MAX_CA_PATH_CHARS
+            or '-----BEGIN' in value or '\n' in value or '\x00' in value
+            or not os.path.isabs(value)):
+        raise ValueError('MySQL CA must be an absolute file path, never an inline certificate')
+    return value
+
+
 def validate_endpoint(raw):
     host, allowed = raw.get('host'), raw.get('allowed_hosts')
     if (not isinstance(host, str) or not 1 <= len(host) <= 253 or not isinstance(allowed, list)
@@ -81,6 +113,7 @@ def validate_endpoint(raw):
     elif raw['driver'] in {'mysql_managed', 'mariadb_managed'}:
         if raw.get('tls') is not True:
             raise ValueError('Verified MySQL TLS required')
+        _validate_mysql_ca(raw)
         schema = name(raw.get('schema'))
         if schema != raw['database'] or schema.lower() in {'mysql', 'sys', 'information_schema', 'performance_schema'}:
             raise Forbidden('Explicit ordinary MySQL database/schema required')
