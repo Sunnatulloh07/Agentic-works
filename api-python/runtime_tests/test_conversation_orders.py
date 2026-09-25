@@ -216,6 +216,7 @@ class ConversationOrderTests(unittest.TestCase):
         self.decisions = self.draft_then_final('Jami 198 000 so‘m.')
         for _ in range(8):  # open, run the draft, final -- stop before settling
             self.loop.tick(T, self.model) or self.e.tick(T) or self.turns._open(T)
+        self.assertEqual(['succeeded'], [r['status'] for r in self.rows('SELECT status FROM p_agent_runs')])
         self.e.freeze(T, True, 'owner')
         self.assertFalse(self.turns._settle(T))
         self.assertEqual('open', self.turn()['status'])

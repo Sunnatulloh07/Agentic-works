@@ -98,6 +98,9 @@ CONVERSATION_MAX_HISTORY_TURNS = 20
 CONVERSATION_MAX_FALLBACK_CHARS = 1000
 CONVERSATION_MAX_ID_CHARS = 128
 CONVERSATION_MAX_KIND_CHARS = 64
+# Equal to platform_runtime/conversation.TAKEOVER_MINUTES.
+CONVERSATION_MIN_TAKEOVER_MINUTES = 1
+CONVERSATION_MAX_TAKEOVER_MINUTES = 1440
 
 
 class ConversationPolicy(Strict):
@@ -122,6 +125,10 @@ class ConversationPolicy(Strict):
     # Operator chat told about every handoff and captured order. It must also be
     # in this agent's allowed_recipients: the engine's allowlist rule still decides.
     notify_recipient: str = Field(default="", max_length=CONVERSATION_MAX_ID_CHARS)
+    # After an operator replies in a chat, the bot answers nothing there for this
+    # many minutes (a later reply restarts it; "Botga qaytarish" ends it early).
+    takeover_minutes: int = Field(default=30, ge=CONVERSATION_MIN_TAKEOVER_MINUTES,
+                                  le=CONVERSATION_MAX_TAKEOVER_MINUTES)
 
 
 class AgentRef(Strict):

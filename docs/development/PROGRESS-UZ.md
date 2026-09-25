@@ -2368,3 +2368,180 @@ eng qimmatli darsi:
 `app/` qatlamida qolgan modullar: `storage.py` (260 satr), `pipeline.py` (167), `main.py`
 (137) — ularning chegaralari boshqa sinfda; `apps/runner/portable_fs.py`. Keyin:
 `api-python/tests/` (33 qizil, gatesiz) ning taqdiri — tiklash yoki o'chirish.
+
+## §158 — Hujjatlarda "yo'q / qadalmagan" deb yozilgan joylarni to'ldirish (2026-09-25)
+
+Uch ish, uch o'lchov; har biri oldingi sessiya qoldirgan aniq qatordan olindi. Qatorlardan
+biri allaqachon yopilgan edi: `api-python/tests/` nafaqaga chiqarilgan (papka yo'q,
+`LEGACY-RETIRED.md` yozilgan) — §157 dagi "taqdiri: tiklash yoki o'chirish" shu bilan yopildi.
+
+### 1. WhatsApp inbound HTTP route — modul bor edi, route yo'q edi
+
+`app/whatsapp_api.py` yozildi (`engine.py` izohi va `whatsapp_inbound` docstring'i aynan shu
+nomni kutgan edi) va `app/main.py`ga ulandi. Avvaldan yozilgan 16 test 404 edi (route yo'q),
+uchta yangi chegara testi qo'shildi — **19/19 PASS**.
+
+Qarorlar kodda yozilgan sabablar bilan: imzo **RAW baytlar** ustida, hech narsa parse
+qilinishidan oldin; tenant **tasdiqlanmagan** `phone_number_id`dan faqat imzoni tekshiruvchi
+sirni tanlash uchun o'qiladi; sir yo'q bo'lsa **500**, dev-bypass yo'q (tasdiqlanmagan delivery
+24 soatlik oynani ochib, `whatsapp.send`li har bir agentni mijoz yozdi deb ishontira oladi);
+noma'lum biznes raqami **200 + `ignored`** (Meta non-2xx ni qayta yuboradi, retry bo'roni
+tuzatish emas); **bir raqamni ikki tenant e'lon qilsa 409** — taxmin bir do'kon mijozini
+boshqasiga beradi.
+
+Yo'l-yo'lakay topilgan **ikki nuqson** (ikkisi ham oldingi sessiyadan, ikkisi ham test
+yashil bo'lmagani uchun yashiringan edi):
+
+1. **Test helper'i imzoning uch holatini bittaga qo'shib qo'ygan**: `signature or sign(raw)`
+   tufayli `''` (bo'sh header) **to'g'ri imzo** bilan almashtirilardi — ya'ni bo'sh header
+   hech qachon sinalmagan. Endi `None` / `False` / `''` ajratilgan.
+2. **`test_security_helpers.py::test_auth_token_admin_gate` o'z muhitini e'lon qilmasdi**:
+   `IDENTITY_DIRECTORY=false` ni yurgizuvchi eksport qilishini kutardi, CI esa faqat
+   `ENV` va `PIPELINE_MODE` beradi → test **CI'da doim qizil** bo'lardi (410 ≠ 403). Endi
+   test o'zi tayinlaydi.
+
+`whatsapp` `OUTBOUND_CHANNELS`ga qo'shilgani (oldingi sessiya) bilan eskirgan ikki kutish
+tuzatildi: runtime testi "whatsapp — chat hech qachon yozmagan" uchun `NotFound`ni qadaydi;
+integratsiya testi esa whatsapp reply'ning **ijobiy** yo'lini (`api.agents` + engine policy
+tikilgan, task `queued`, `approval_status=approved`, adapter chaqirilmagan) va notanish chat
+uchun **404**ni qo'shdi.
+
+O'lchov: `integration_tests` **351 passed** (o'sha daraxtda avval 350: 1 qizil).
+
+### 2. `app/pipeline.py` chegara auditi — 36 test, 17/17 RED matritsa
+
+Modulning **runtime test fayli umuman yo'q edi**; chegaralar inline: `4000` ikki joyda,
+`1..99` uchinchi nusxasi (Order modeli + approval re-check bilan birga **uch joyda**), `200`,
+`500`, `8`, `10**9`, pattern ichida yalang'och `998`. Endi oraliq `app/orders.py`da **bir
+marta** e'lon qilinadi va `pipeline` import qiladi; qolgani nomlangan konstanta
+(`MAX_TEXT_CHARS`, `MAX_CUSTOMER_CHARS`, `MAX_LEAD_CHARS`, `STABLE_ID_HEX_CHARS`,
+`STABLE_ID_MODULUS`, `UZ_COUNTRY_CODE`, `UZ_NATIONAL_DIGITS`, `UZ_PHONE`, `BUY_COMMAND`,
+`STOP_COMMAND`).
+
+Yangi `runtime_tests/test_pipeline_bounds.py` (**36 test**) ularni ham literal, ham xulq
+bilan qadaydi: platform ko'prigi (`ui→web`, truncation, conversation default) haqiqiy
+funksiyada, engine seam'lari patchlangan holda; `remember` haqiqiy SQLite faylda; legacy
+production refusal `is_prod` patchlangan holda.
+
+`scripts/probes/audit_pipeline_bounds.py`: **17 mutatsiya, 17 RED, 0 GREEN, 0 o'lchanmagan,
+restore YES**. Bitta qator ataylab halol yozildi: `STOP_COMMAND` nomi **konstantaning literal
+pin'i** bilan tutildi, **legacy xulqi bilan emas** — qator izohi shuni aytadi. Legacy happy
+path bu specda ataylab yo'q (pack papkasi, approvals store, quota jadvali kerak) va ochiq
+qoladi.
+
+### 3. Node runner Windows bloklangan yuzasi — endi qadalgan
+
+Hujjat "11/24, **qadalmagan**" derdi. Qayta o'lchov (node v24.18.1): **31 test, 20 pass,
+11 fail, 0 skip** — to'plam o'sgan, bloklangan yuza o'sha 11. Uch sabab: `execute()` Linux
+bo'lmagan platformada rad etadi (5), `symlink` EPERM (2), POSIX ruxsat bitlari (4).
+
+`apps/runner/windows-baseline.test.js` o'n bittasini sabablari bilan yozadi va **har bir
+sababni haqiqatda yurgizib** tasdiqlaydi (`test_platform_baseline.py` darsi: shartning rostligi
+sabab ekanini isbotlamaydi). U qo'shimcha ravishda: har bir nom `test.js`da borligini qadaydi
+(qayta nomlash baseline'ni yangilashga majbur qiladi), yozilgan imzo ichki izchilligini
+tekshiradi, va **POSIX'da o'sha uch amal muvaffaqiyatli bo'lishini** talab qiladi — ya'ni bu
+Windows o'lchovi, umumiy bahona emas. `verify.yml` va `verify_offline.py`ga ulandi.
+
+### Yo'l-yo'lakay: CI `core` job yig'ilmasdi
+
+`verify.yml` `core` job'i faqat `requirements-offline.txt` o'rnatadi, unda esa `fastapi`
+yo'q edi — holbuki `test_app_layer_bounds.py` va (yangi) `test_pipeline_bounds.py` modul
+darajasida `fastapi` import qiladi. Import xatosi discovery'ni yiqitadi, ya'ni job **hech
+qachon yashil bo'lmagan**. Tuzatish: `requirements-offline.txt`ga `fastapi>=0.115` qo'shildi
+(sababi faylning o'zida yozilgan).
+
+### Ochiq qolgan, aniq nomlangan
+
+- `whatsapp.*` tool'ini birorta yetkazilgan pack e'lon qilmaydi → route bor, **reachability
+  o'zgarmadi**; UI va live Meta acceptance yo'q.
+- `app/storage.py`, `app/main.py`, `apps/runner/portable_fs.py` chegaralari hamon audit
+  qilinmagan (`pipeline.py` shu sessiyada yopildi).
+- Yuqoridagi `fastapi` tuzatishi **CI'da yurgizilmagan** — lokal, import zanjirini kuzatish
+  bilan topilgan; CI dalili yo'q.
+
+## §159 — Commit qilinmagan ishni tugatish: uch chegara auditi va WhatsApp reachability (2026-09-25, ikkinchi o'tirish)
+
+### 0. Claude'ning commit qilinmagan ishi — review natijasi
+
+`conversation_api.py` + `operator_reply.py` + `ConversationPanels.tsx` +
+`conversation-client.mjs`, `erp_api.py`, `version.py`, `turkish-baby` pack, `e2e_smoke.py`,
+`import_catalog.py`, `test_runner_close_codes.py`, `demo-retail` pack/persona o'zgarishlari.
+Chala yoki bog'lanmagan **hech narsa topilmadi**: `ConversationPanels` `page.tsx`da
+`conversations`/`handoffs` tab sifatida render qilinadi, `HandoffsPanel` va
+`ReconcileControl` ham ulangan. `scripts/e2e_smoke.py` **jonli yurgizildi**: haqiqiy API +
+worker + soxta model/Bot API, **15 passed, 0 failed** — conversation turn, operator
+takeover, buyurtma tasdiqlash, handoff, `/orders`, 401 imzo, token sizib chiqmasligi.
+Butun conversation qatlami shu bilan lokal ravishda tasdiqlandi.
+
+### 1. `app/storage.py` — 18 test, 9/9 RED
+
+Inline raqamlar nomlandi: `CONNECT_TIMEOUT_SECONDS = 30.0`, `DELIVERY_LEASE_SECONDS = 60`,
+`MAX_DELIVERY_ERROR_CHARS = 500`. Yangi `runtime_tests/test_storage_bounds.py` (18 test)
+haqiqiy SQLite faylda claim eksklyuzivligi va lease tugashini, 1 sekundlik clamp'ni,
+tenant scoping'ni, attempt sanashni, xato qirqilishini va `record_inbound` idempotentligini
+qadaydi. `scripts/probes/audit_storage_bounds.py`: **9/9 RED**, restore YES.
+
+### 2. `app/main.py` — 15 test, 11/11 RED
+
+Front-door yuzalari nomlandi: CORS origin/method/header, `MAX_TENANT_CHARS=64`, `ROLES`,
+`MUTATION_ROLES`, `OWNER_ONLY_PREFIX`, `LEGACY_EXEMPT_PREFIXES`, `NO_STORE_PREFIXES`,
+`LEGACY_RUNNER_PREFIX`. Yangi `runtime_tests/test_main_bounds.py` (15 test) middleware
+korutinasini **qo'lda** yuritadi (Windows'da event loop — socket; offline suite taqiqlaydi),
+shuning uchun 410/401/403 va no-store qarorlari offline o'lchanadi. Probe: **11/11 RED**
+(uchtasi faqat xulq bilan tutadi).
+
+Topilma: **role tekshiruvi faqat legacy rejimda yetib boriladi** — platform rejimida 410
+undan oldin javob beradi. Bu testlarda yozib qo'yildi, chunki aks holda "tekshiruv bor"
+degan noto'g'ri taassurot qolardi.
+
+Ikkinchi topilma: refaktor **mavjud guard tomonidan tutildi**. `test_security_surface_v037`
+`main.py`ni AST bilan o'qib, `allow_methods` qiymatini `ast.literal_eval` qilardi — qiymat
+endi `CORS_METHODS` nomi bo'lgani uchun yiqildi va to'plam signaturasi `errors=13` bo'ldi.
+Guard nomni ham hal qiladigan qilib tuzatildi (literal **yoki** modul konstantasi), bu esa
+uni kuchaytirdi: endi u konstantaning qiymatini o'qiydi, shaklini emas.
+
+### 3. `apps/runner/portable_fs.py` — 28 test, 11/11 RED
+
+Validatsiya chegaralari inline edi (root 1..32, deny 100×128, yo'l 2000, stdin 64000),
+nomlanganlari esa (MAX_BYTES/MAX_ENTRIES/MAX_VISITED) hech qayerda qadalmagan edi.
+`test_portable_fs.py`ga `DeclaredBoundTests` (12 test, hammasi platforma-mustaqil).
+Probe: **11/11 RED**.
+
+**Birinchi o'lchovda bir qator GREEN chiqdi** ("path length 2000→20000"): uzun yo'l hamon
+ValueError berardi, lekin **boshqa sababdan** (commonpath). Test aynan chegarani
+o'lchaydigan qilib qayta yozildi — endi RED. §154/§155 sabog'ining yana bir uchrashuvi:
+sababni emas, natijani tekshirish yetarli emas.
+
+### 4. WhatsApp reachability — 12/88 → 17/88
+
+`packs/turkish-baby`ga **`sales.wa_assistant`** qo'shildi: trigger `source: whatsapp`,
+`ladder: human_assisted` (birinchi WhatsApp agenti — har bir erkin javob operator
+tasdig'ini kutadi, oyna qoidasi jonli Meta'da sinalmaguncha), tools
+`[whatsapp.send, whatsapp.window, whatsapp.templates, products.search, shop.info, orders.draft]`,
+`order_agent: sales.order_taker`. Persona (`prompts/sales/whatsapp.md`) oyna qoidasini
+yozadi: `whatsapp.window` → ochiq bo'lsa matn, yopiq bo'lsa `whatsapp.templates`dan shablon;
+`ungrounded_numbers(prompt, "") == []` bilan qadalgan. 3 yangi pack testi — jami
+`test_pack_turkish_baby` + contract **54 passed**.
+
+O'lchov (2026-09-25): registry **88**, yetib boriladigan **17**; yetib bo'lmaydigan LOC
+**10 758 / 19 182 = 56%**. Eski 81% **boshqa metodika** bilan o'lchangan (yadro modullari
+hisobdan chiqarilgan) — raqamlar solishtirilmasligi hujjatlarda yozib qo'yildi.
+`whatsapp.verify`/`whatsapp.webhook` ataylab yetib borilmaydi: ular ingest/operator yuzasi.
+
+### Yakuniy o'lchov (2026-09-25)
+
+| To'plam | Natija |
+|---|---|
+| `runtime_tests` | **3 569 test**, `failures=1, errors=12, skipped=1` — 13 bloklangan aynan baseline ro'yxati |
+| `integration_tests` | **354/354 PASS** |
+| Yangi probelar | storage 9/9, main 11/11, portable_fs 11/11, pipeline 17/17 — **hammasi RED, restore YES** |
+| `e2e_smoke.py` | **15 passed, 0 failed** |
+
+### Ochiq qolgan
+
+- Reachability: 71 tool hamon yetib bo'lmaydi (`erp`, `documents`, `inventory`, `telephony`,
+  `vision`, `manufacturing`, `oee`, `workforce`, `supervisor`, `assets`, `graph`, `crm`,
+  `sheets`, `database`, `agent.*`, `voice.tts`, ...) — har biri pack qatori + konfiguratsiya.
+- Live acceptance hamon yo'q; `production_release: NO_GO`.
+
+

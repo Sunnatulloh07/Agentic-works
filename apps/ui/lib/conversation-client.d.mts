@@ -1,0 +1,16 @@
+export function conversationsPath(tenant:string):string;
+export function handoffsPath(tenant:string):string;
+export function threadPath(tenant:string,channel:string,conversationId:string):string;
+export function replyPath(tenant:string,channel:string,conversationId:string):string;
+export function replyRequest(text:string,key:string):{body:{text:string};method:'POST';headers:{'Idempotency-Key':string}};
+export function replyErrorText(err:unknown):string;
+export type ThreadLine={role:string;label:string;text:string;at:number;status?:string};
+export function threadLines(thread:unknown):ThreadLine[];
+export function turnStatusLabel(status:string):string;
+export function reasonLabel(reason:string):string;
+export type OrderView={product:string;size:string;qty:unknown;total:number;customer:string;phone:string;delivery:string;channel:string;conversationId:string};
+export function orderView(body:unknown):OrderView|null;
+export function releasePath(tenant:string,channel:string,conversationId:string):string;
+export function releaseRequest(key:string):{body:Record<string,never>;method:'POST';headers:{'Idempotency-Key':string}};
+export type Takeover={actor:string;until:number};
+export function takeoverActive(takeover:Takeover|null|undefined,nowSeconds:number):boolean;

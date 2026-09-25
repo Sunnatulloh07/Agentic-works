@@ -54,11 +54,22 @@ The one thing this block adds to the engine's event payload is the **window
 attribute**: it records that the customer wrote, at what time, so the outbound
 block's window answer stops depending on a hand-maintained sheet. That is the
 whole point of the block.
+
+There are two entry points, for two different relationships. ``ingest`` serves
+outreach: rule 4 above holds and only operator-declared contacts become events.
+``customer_messages`` + ``accept_customer_messages`` serve the CONVERSATION channel
+behind the HTTP route (app/whatsapp_api.py), where -- exactly as on Telegram --
+anyone who writes to the tenant's business number is a customer, keyed by the wa_id
+Meta signed. That is not an open send surface because ``whatsapp`` is an engine
+OUTBOUND_CHANNEL: every reply is bound to the verified inbound event, so the only
+number a reply can name is one that wrote to this tenant.
 """
 import hashlib
 import hmac
 import json
+import os
 import re
+from pathlib import Path
 
 from . import cells
 from .engine import Conflict, Forbidden, encode
@@ -257,12 +268,11 @@ def _message(message, contacts, declared):
     # 'ali', not '998901234567').
     #
     # Note what is and is not true here, because an earlier revision got this wrong in
-    # both directions. The engine does *not* compare this conversation_id against the
-    # outbound destination for WhatsApp: engine._submit binds a reply to the verified
-    # inbound event only for channels in OUTBOUND_CHANNELS -- {'telegram','instagram'}
-    # -- and whatsapp is deliberately absent, so a whatsapp.send is authorized by the
-    # pack's static allowed_recipients list. What the engine and the outbound adapter
-    # *do* now share is the value stored here: whatsapp.window_sources reads
+    # both directions. whatsapp IS now an engine OUTBOUND_CHANNEL (for the customer
+    # conversation route, see customer_messages), so a task submitted on the whatsapp
+    # channel binds its whatsapp.send to this event's conversation_id -- the contact id
+    # here. Sends from any other channel (cron, web, agent) are still authorized by the
+    # pack's static allowed_recipients list. whatsapp.window_sources reads
     # window_until from these events and gives it precedence over the operator's sheet
     # register, so the fact this block records is the one the send gate acts on.
     contact = declared.get(wa_id)
@@ -524,6 +534,253 @@ def ingest(engine, tenant, body, headers, *, actor='whatsapp', now=None):
         'dropped': report['dropped'],
         'declared_contacts': len(declared),
     }
+
+
+# ------------------------------------------------- customer conversation route
+
+# A webhook URL belongs to ONE Meta app, so its secret is the deployment's default.
+DEFAULT_APP_SECRET_ENV = 'META_APP_SECRET'
+# Equal to app.platform_api.MAX_TEXT_CHARS: the bound app.pipeline.handle_text_message
+# gives every other inbound channel's text.
+MAX_CUSTOMER_TEXT_CHARS = 4000
+MAX_PROFILE_NAME_CHARS = 256
+PHONE_NUMBER_ID_RE = re.compile(r'^[0-9]{1,32}$')
+# Media is not fetched; the placeholder is all the agent sees, so it can ask for a
+# text description or hand off. The words are app/telegram.MEDIA_PLACEHOLDERS'.
+MEDIA_PLACEHOLDERS = {'image': '[rasm]', 'video': '[video]', 'document': '[fayl]',
+                      'audio': '[audio]'}
+VOICE_PLACEHOLDER = '[ovozli xabar]'
+# What a customer produces by tapping a button or list row the business sent.
+INTERACTIVE_REPLIES = ('button_reply', 'list_reply')
+
+
+def phone_number_ids(payload):
+    """The business numbers a delivery addresses, first-seen order, bounded.
+
+    Read from UNVERIFIED input for one purpose only: choosing whose secret verifies
+    the signature. Nothing else is read from the body until that check has passed.
+    """
+    found = []
+    entries = payload.get('entry') if isinstance(payload, dict) else None
+    for entry in entries[:MAX_ENTRIES] if isinstance(entries, list) else []:
+        changes = entry.get('changes') if isinstance(entry, dict) else None
+        for change in changes[:MAX_CHANGES] if isinstance(changes, list) else []:
+            value = change.get('value') if isinstance(change, dict) else None
+            metadata = value.get('metadata') if isinstance(value, dict) else None
+            number = metadata.get('phone_number_id') if isinstance(metadata, dict) else None
+            if isinstance(number, str) and PHONE_NUMBER_ID_RE.match(number) \
+                    and number not in found:
+                found.append(number)
+    return found
+
+
+def _configured_tenants():
+    """Every tenant with integration configuration, from both sources ``tools.config`` reads."""
+    from .tools import DEFAULT_PACKS_DIR, PACK_INTEGRATIONS_FILE, TENANT_NAME
+
+    names = set()
+    path = os.environ.get('PLATFORM_INTEGRATIONS_FILE', '')
+    if path:
+        try:
+            with open(path, encoding='utf-8') as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            data = {}
+        if isinstance(data, dict):
+            names.update(name for name, block in data.items()
+                         if isinstance(block, dict) and TENANT_NAME.fullmatch(name))
+    root = Path(os.environ.get('PACKS_DIR') or DEFAULT_PACKS_DIR)
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        children = []
+    for child in children:
+        if TENANT_NAME.fullmatch(child.name) and (child / PACK_INTEGRATIONS_FILE).is_file():
+            names.add(child.name)
+    return sorted(names)
+
+
+def tenants_for_phone_number(number):
+    """Tenants whose ``whatsapp`` registers declare this business number, sorted.
+
+    The route acts only on exactly one. Two is a configuration error it will not
+    guess at -- a guess hands one shop's customers to another -- and none is a number
+    this deployment does not serve. It mirrors ``tools.tenant_for_instagram_account``
+    but reads each tenant through ``whatsapp_config``, pack-local integrations.yaml
+    included, so routing and the send side agree on which register owns the number.
+    """
+    if not isinstance(number, str) or not PHONE_NUMBER_ID_RE.match(number):
+        return []
+    from .whatsapp import _registers
+
+    owners = []
+    for tenant in _configured_tenants():
+        try:
+            registers = _registers(tenant)
+        except OSError:
+            continue
+        if any(entry['phone_number_id'] == number for entry in registers.values()):
+            owners.append(tenant)
+    return owners
+
+
+def app_secret_for(tenant=None):
+    """The Meta app secret that signs this tenant's deliveries, or '' when none is set.
+
+    The default is META_APP_SECRET. A tenant whose number sits under a different
+    Meta app declares ``whatsapp_webhook.app_secret_env``; once declared it is
+    authoritative, and an unset variable is refused (WebhookError) rather than
+    quietly replaced by the default.
+    """
+    if tenant:
+        from .tools import config
+
+        try:
+            block = config(tenant).get('whatsapp_webhook')
+        except (RuntimeError, OSError, ValueError, AttributeError):
+            block = None
+        if isinstance(block, dict) and 'app_secret_env' in block:
+            return _app_secret(tenant)
+    return os.environ.get(DEFAULT_APP_SECRET_ENV, '')
+
+
+def _reply_text(message, kind):
+    """What a customer message says as text, or None when its type says nothing.
+
+    Text, a tapped button or list row, a media caption, else a media placeholder --
+    the same order app/telegram.message_text uses.
+    """
+    if kind == 'text':
+        return _text(message)
+    if kind == 'button':
+        button = message.get('button')
+        return button.get('text') if isinstance(button, dict) else None
+    if kind == 'interactive':
+        interactive = message.get('interactive')
+        if not isinstance(interactive, dict) or interactive.get('type') not in INTERACTIVE_REPLIES:
+            return None
+        reply = interactive.get(interactive['type'])
+        return reply.get('title') if isinstance(reply, dict) else None
+    if kind in MEDIA_PLACEHOLDERS:
+        media = message.get(kind) if isinstance(message.get(kind), dict) else {}
+        caption = media.get('caption')
+        if isinstance(caption, str) and caption.strip():
+            return caption
+        if kind == 'audio' and media.get('voice') is True:
+            return VOICE_PLACEHOLDER
+        return MEDIA_PLACEHOLDERS[kind]
+    return None
+
+
+def _customer_message(message, number, names):
+    """One Meta message -> (event, None) or (None, drop). Any sender is a customer."""
+    if not isinstance(message, dict):
+        return None, {'reason': 'not_a_message'}
+    message_id, wa_id, kind = message.get('id'), message.get('from'), message.get('type')
+    if not isinstance(message_id, str) or not MESSAGE_ID_RE.match(message_id):
+        return None, {'reason': 'not_a_message'}
+    if not isinstance(wa_id, str) or not WA_ID_RE.match(wa_id):
+        return None, {'reason': 'not_a_message'}
+    text = _reply_text(message, kind)
+    if not isinstance(text, str):
+        return None, {'reason': 'empty_text' if kind == 'text' else 'unsupported_type',
+                      'wa_id': _mask_number(wa_id),
+                      'type': kind if kind in KNOWN_TYPES else 'unrecognised'}
+    if not text.strip():
+        return None, {'reason': 'empty_text', 'wa_id': _mask_number(wa_id)}
+    stamp = _epoch(message.get('timestamp'))
+    return {'message_id': message_id, 'phone_number_id': number, 'payload': {
+        # The wa_id Meta signed is the customer AND the conversation, as a Telegram
+        # chat id is: the engine binds the reply to it, the model never chooses it.
+        'sender': wa_id, 'conversation_id': wa_id, 'wa_id': wa_id,
+        'text': text[:MAX_CUSTOMER_TEXT_CHARS],
+        'profile_name': names.get(wa_id, ''),
+        # Which business number was written to: the reply must leave from it, and
+        # Meta's window is per (customer, business number).
+        'phone_number_id': number,
+        # Meta's timestamp only, never our clock (see ``unwrap``).
+        'received_at': stamp,
+        'window_until': stamp + WINDOW_SECONDS if isinstance(stamp, int) else None,
+    }}, None
+
+
+def customer_messages(payload):
+    """Every customer message in a signature-verified delivery, and what was dropped.
+
+    Returns ``{'events': [...], 'dropped': [...]}``; each event is
+    ``{'message_id', 'phone_number_id', 'payload'}`` with the engine payload the
+    conversation turn reads (sender, conversation_id, text) plus the window evidence.
+    Status updates (sent/delivered/read/failed) are Meta talking to us, not a
+    customer talking to us: they are dropped with a reason, never raised, because
+    Meta retries a non-2xx. A whole body of the wrong shape is a WebhookError.
+    """
+    if not isinstance(payload, dict):
+        raise WebhookError('the webhook body must be a JSON object')
+    if payload.get('object') != WEBHOOK_OBJECT:
+        raise WebhookError(f'the webhook object must be {WEBHOOK_OBJECT!r}')
+    entries = payload.get('entry')
+    if not isinstance(entries, list):
+        raise WebhookError('the webhook entry must be a list')
+    events, dropped = [], []
+    for entry in entries[:MAX_ENTRIES]:
+        changes = entry.get('changes') if isinstance(entry, dict) else None
+        if not isinstance(changes, list):
+            dropped.append({'reason': 'not_a_message'})
+            continue
+        for change in changes[:MAX_CHANGES]:
+            if not isinstance(change, dict) or change.get('field') != MESSAGE_FIELD:
+                dropped.append({'reason': 'field_not_subscribed' if isinstance(change, dict)
+                                else 'not_a_message'})
+                continue
+            value = change.get('value') if isinstance(change.get('value'), dict) else {}
+            metadata = value.get('metadata') if isinstance(value.get('metadata'), dict) else {}
+            number = metadata.get('phone_number_id')
+            if not isinstance(number, str) or not PHONE_NUMBER_ID_RE.match(number):
+                dropped.append({'reason': 'not_a_message'})
+                continue
+            names = {}
+            profiles = value.get('contacts')
+            for item in profiles[:MAX_MESSAGES_PER_CHANGE] if isinstance(profiles, list) else []:
+                profile = item.get('profile') if isinstance(item, dict) else None
+                name = profile.get('name') if isinstance(profile, dict) else None
+                if isinstance(name, str) and isinstance(item.get('wa_id'), str):
+                    names[item['wa_id']] = name[:MAX_PROFILE_NAME_CHARS]
+            messages = value.get('messages')
+            for raw in messages[:MAX_MESSAGES_PER_CHANGE] if isinstance(messages, list) else []:
+                event, drop = _customer_message(raw, number, names)
+                if event is not None:
+                    events.append(event)
+                else:
+                    dropped.append(drop)
+            statuses = value.get('statuses')
+            for raw in statuses[:MAX_MESSAGES_PER_CHANGE] if isinstance(statuses, list) else []:
+                state = raw.get('status') if isinstance(raw, dict) else None
+                dropped.append({'reason': 'status_callback',
+                                'status': state if state in STATUS_STATES else 'unrecognised'})
+    return {'events': events, 'dropped': dropped}
+
+
+def accept_customer_messages(engine, tenant, events, *, actor='whatsapp'):
+    """Durably accept customer events: the engine's inbox is the only dedup.
+
+    Keyed by Meta's message id, so a redelivery is a duplicate. The same id with a
+    different body is refused and audited rather than raised, as in ``ingest``: a
+    409 would make Meta retry a conflict forever. A frozen tenant or a full inbox
+    DOES raise (Forbidden, RateLimited), so the route answers non-2xx and Meta
+    redelivers later.
+    """
+    accepted, duplicates, refused = [], [], []
+    for event in events:
+        key = event['message_id']
+        try:
+            result = engine.accept_event(tenant, CHANNEL, key, event['payload'])
+        except Conflict:
+            engine.audit_write(tenant, 'webhook.conflict', actor,
+                               {'channel': CHANNEL, 'message_id': key})
+            refused.append({'message_id': key, 'reason': 'fingerprint_conflict'})
+            continue
+        (duplicates if result.get('duplicate') else accepted).append(key)
+    return {'accepted': accepted, 'duplicates': duplicates, 'refused': refused}
 
 
 # ------------------------------------------------------------------- tools

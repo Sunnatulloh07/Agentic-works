@@ -15,12 +15,23 @@ from . import runner_ws as rws  # noqa: F401 (kelajak: operator xabarnomasi)
 from . import trace
 from .hotlead import log_lead
 from .limits import check_and_hit, warned
-from .orders import Order, validate_order_payload
+from .orders import MAX_QUANTITY, MIN_QUANTITY, Order, validate_order_payload
 from .packs import PackError, load_pack
 from .responder import FALLBACK, RuleResponder
 
 _responder = RuleResponder()
+BUY_COMMAND = "/buy"
+STOP_COMMAND = "/stop"
 ORDER_AGENT = "sales.order_taker"
+# Declared ceilings; pinned literally in runtime_tests/test_pipeline_bounds.py.
+MAX_TEXT_CHARS = 4000
+MAX_CUSTOMER_CHARS = 200
+MAX_LEAD_CHARS = 500
+UZ_COUNTRY_CODE = "998"
+UZ_NATIONAL_DIGITS = 9
+UZ_PHONE = re.compile(UZ_COUNTRY_CODE + "[0-9]{%d}" % UZ_NATIONAL_DIGITS)
+STABLE_ID_HEX_CHARS = 8
+STABLE_ID_MODULUS = 10 ** 9
 PHONE_CLEAN = re.compile(r"[\s\-()]")
 
 
@@ -44,12 +55,12 @@ def _stable_id(channel: str, update_key: str, numeric_id: int | None) -> int:
     """Deterministik int: Telegram — asl update_id, IG — sha256(mid)."""
     if numeric_id is not None:
         return numeric_id
-    return int(hashlib.sha256(f"{channel}:{update_key}".encode()).hexdigest()[:8], 16) % 10**9
+    return int(hashlib.sha256(f"{channel}:{update_key}".encode()).hexdigest()[:STABLE_ID_HEX_CHARS], 16) % STABLE_ID_MODULUS
 
 
 def _norm_phone(raw: str) -> str:
     p = PHONE_CLEAN.sub("", raw)
-    if re.fullmatch(r"998\d{9}", p):
+    if UZ_PHONE.fullmatch(p):
         p = "+" + p
     return p
 
@@ -57,7 +68,7 @@ def _norm_phone(raw: str) -> str:
 def _parse_buy(text: str, pack, tenant: str, order_uid: int, channel: str) -> Order:
     parts = text.split()
     head = parts[0].split("@")[0].lower() if parts else ""
-    if len(parts) < 5 or head != "/buy":
+    if len(parts) < 5 or head != BUY_COMMAND:
         raise HTTPException(status_code=422, detail="Format: /buy KOD SON FILIAL TELEFON [ISM]")
     _, pid, qty_s, branch_raw, phone_raw, *rest = parts
     pid = pid.strip(",.!;:")
@@ -72,13 +83,13 @@ def _parse_buy(text: str, pack, tenant: str, order_uid: int, channel: str) -> Or
         qty = int(qty_s)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Son noto'g'ri: {qty_s}")
-    if qty < 1 or qty > 99:
-        raise HTTPException(status_code=422, detail="Son 1-99 oralig'ida bo'lsin")
+    if qty < MIN_QUANTITY or qty > MAX_QUANTITY:
+        raise HTTPException(status_code=422, detail=f"Son {MIN_QUANTITY}-{MAX_QUANTITY} oralig'ida bo'lsin")
     phone = _norm_phone(phone_raw)
     order = Order(
         tenant=tenant,
         update_id=order_uid,
-        customer=" ".join(rest)[:200] or "mijoz",
+        customer=" ".join(rest)[:MAX_CUSTOMER_CHARS] or "mijoz",
         phone=phone,
         product_id=product.id,
         qty=qty,
@@ -100,12 +111,12 @@ def _legacy_handle_text_message(tenant: str, channel: str, update_key: str, send
         pack = load_pack(tenant)
     except PackError:
         raise HTTPException(status_code=404, detail="tenant pack topilmadi")
-    clean = (text or "").strip()[:4000]
-    if clean == "/stop":
+    clean = (text or "").strip()[:MAX_TEXT_CHARS]
+    if clean == STOP_COMMAND:
         return {"ok": True, "reply": "To'xtatish faqat operator panelidan (xavfsizlik)."}
     parts = clean.split()
     head = parts[0].split("@")[0].lower() if parts else ""
-    is_buy = head == "/buy"
+    is_buy = head == BUY_COMMAND
     order_uid = _stable_id(channel, update_key, numeric_id)
     if is_buy:  # 422 kvota/dedup yemasligi uchun limitdan oldin parse
         order = _parse_buy(clean, pack, tenant, order_uid, channel)
@@ -136,7 +147,7 @@ def _legacy_handle_text_message(tenant: str, channel: str, update_key: str, send
     else:
         reply = _responder.reply(clean or "/start", pack)
         if reply == FALLBACK:
-            log_lead(tenant, channel, sender, clean[:500])
+            log_lead(tenant, channel, sender, clean[:MAX_LEAD_CHARS])
     ms = int((time.perf_counter() - t0) * 1000)
     trace.log({"tenant": tenant, "channel": channel, "update_key": str(update_key),
                "agent": agent_id, "action": action, "ms": ms})
@@ -164,4 +175,4 @@ def handle_text_message(tenant: str, channel: str, update_key: str, sender: str,
     # a failed quota check must not poison the inbox idempotency key.
     if channel == "ui": channel = "web"
     return call(engine().accept_event,tenant,channel,str(update_key),{
-        "sender":sender,"conversation_id":conversation_id or sender,"text":(text or "")[:4000]})
+        "sender":sender,"conversation_id":conversation_id or sender,"text":(text or "")[:MAX_TEXT_CHARS]})

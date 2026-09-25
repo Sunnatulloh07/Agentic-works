@@ -1,0 +1,64 @@
+# NAMUNA katalog (6 ta sinov mahsuloti). Do‘kon katalogi bilan almashtiring:
+#   python scripts/import_catalog.py --tenant turkish-baby --csv katalog.csv
+# scripts/import_catalog.py yaratgan fayl. Qo‘lda tahrirlamang: CSV’ni o‘zgartirib
+# qayta import qiling (--dry-run bilan avval tekshiring).
+products:
+  - id: "TB-NAMUNA-01"
+    name: "NAMUNA: Bodi, uzun yengli (paxta)"
+    price_uzs: 89000
+    sizes: ["62", "68", "74", "80"]
+    stock: {"62": 3, "68": 5, "74": 2, "80": 0}
+    category: "bodi"
+    gender: "unisex"
+    age: "0-12 oy"
+    colors: ["oq", "ko‘k"]
+    description: "100% paxta, old tomoni tugmali."
+  - id: "TB-NAMUNA-02"
+    name: "NAMUNA: Futbolka (qizlar uchun)"
+    price_uzs: 99000
+    sizes: ["86", "92", "98", "104"]
+    stock: {"86": 4, "92": 6, "98": 1, "104": 0}
+    category: "futbolka"
+    gender: "qiz"
+    age: "1-4 yosh"
+    colors: ["pushti", "oq"]
+    description: "Yumshoq trikotaj."
+  - id: "TB-NAMUNA-03"
+    name: "NAMUNA: Shim (o‘g‘il bolalar uchun)"
+    price_uzs: 129000
+    sizes: ["86", "92", "98"]
+    stock: {"86": 2, "92": 0, "98": 3}
+    category: "shim"
+    gender: "o‘g‘il"
+    age: "1-3 yosh"
+    colors: ["ko‘k", "kulrang"]
+    description: "Rezinkali bel."
+  - id: "TB-NAMUNA-04"
+    name: "NAMUNA: Qishki kombinezon"
+    price_uzs: 459000
+    sizes: ["74", "80", "86", "92"]
+    stock: {"74": 1, "80": 2, "86": 2, "92": 1}
+    category: "kombinezon"
+    gender: "unisex"
+    age: "6-24 oy"
+    colors: ["ko‘k", "pushti"]
+    description: "Issiq, suv o‘tkazmaydigan mato."
+  - id: "TB-NAMUNA-05"
+    name: "NAMUNA: Pijama to‘plami"
+    price_uzs: 149000
+    sizes: ["92", "98", "104"]
+    stock: {"92": 5, "98": 5, "104": 2}
+    category: "pijama"
+    gender: "unisex"
+    age: "1.5-4 yosh"
+    colors: ["sariq", "oq"]
+    description: "Ikki qismli."
+  - id: "TB-NAMUNA-06"
+    name: "NAMUNA: Paypoq (3 juft)"
+    price_uzs: 45000
+    sizes: ["S", "M", "L"]
+    stock: {"S": 10, "M": 8, "L": 0}
+    category: "paypoq"
+    gender: "unisex"
+    age: "0-3 yosh"
+    colors: ["aralash"]

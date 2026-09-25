@@ -25,6 +25,8 @@ class AuthorityTests(unittest.TestCase):
     def test_queued_task_creator_revoked_before_claim(self):
         tid=self.submit();self.revoke();self.assertIsNone(self.e.claim('work','w'))
         self.assertEqual('failed',self.e.get('work',tid)['status'])
+        # Named for what happened, not folded into policy_changed (a pack edit).
+        self.assertEqual('authority_revoked',self.e.get('work',tid)['steps'][0]['error'])
     def test_dispatch_fence_checks_membership_again(self):
         self.submit();step=self.e.claim('work','w');self.revoke()
         with self.assertRaises(Forbidden):self.e.dispatch_allowed('work',step)
@@ -53,5 +55,16 @@ class AuthorityTests(unittest.TestCase):
             c.execute('UPDATE p_schedules SET next_due=1');c.execute("UPDATE p_workspaces SET status='suspended'")
         self.assertEqual(0,self.e.run_schedules('work'))
         self.assertEqual([],self.e.list_tasks('work'))
+    def test_operator_channel_creator_membership_is_rechecked(self):
+        # Operator replies run on the reserved 'operator' channel. The approval row
+        # already re-checks the approver; the creator is checked too (same person),
+        # so revoking them stops the reply even if the approval check ever changes.
+        from platform_runtime.engine import OPERATOR_CHANNEL
+        with tx() as c:runtime_authority(c,'work',OPERATOR_CHANNEL,self.member['id'])
+        self.revoke()
+        with tx() as c:
+            with self.assertRaises(Forbidden):runtime_authority(c,'work',OPERATOR_CHANNEL,self.member['id'])
+        with tx() as c:
+            with self.assertRaises(Forbidden):runtime_authority(c,'work',OPERATOR_CHANNEL,'stranger')
     def test_unknown_workspace_webhook_denied(self):
         with self.assertRaises(Forbidden):self.e.accept_event('unknown','telegram','1',{'sender':'external'})

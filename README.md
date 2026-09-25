@@ -7,11 +7,11 @@ mahsulotning o‘zi emas, faqat kirish kanallaridan biri.
 
 | Ko‘rsatkich | Holat (2026-09-22 da o‘lchangan) |
 |---|---|
-| `runtime_tests` (Windows, `cryptography` o‘rnatilgan) | **3 239 sinov**, `failures=1, errors=12` — **13 tasi Windows-only** (`os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink privilegiyasi, POSIX fayl rejimlari) |
-| `integration_tests` | **192/192 PASS** (2026-09-23; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`, `cryptography` o‘rnatilgan). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi |
+| `runtime_tests` (Windows, `cryptography` o‘rnatilgan) | **3 569 sinov**, `failures=1, errors=12` — **13 tasi Windows-only** va ro‘yxat `runtime_tests/test_platform_baseline.py` da sabab bilan qadalgan (2026-09-25 o‘lchovi) |
+| `integration_tests` | **351/351 PASS** (2026-09-25; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`, `cryptography` o‘rnatilgan). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi |
 | `api-python/tests/` (legacy) | **nafaqaga chiqarildi (2026-09-22)** — 33 qizil / 172 pass edi va hech bir gate uni yurgizmasdi; qarang `api-python/integration_tests/LEGACY-RETIRED.md` |
 | CI `http` job | endi **yig‘iladi** (`integration_tests/conftest.py` qo‘shilgani uchun) |
-| CI `ui_dependency_security` job | **FAIL** — `next@14.2.35` da 1 critical + 1 high; tuzatish Next 15 + React 19 talab qiladi |
+| CI `ui_dependency_security` job | **PASS** — `npm audit --audit-level=high` → **0 vulnerabilities** (`next@16.3.6` + `react@19.3.0`; 2026-09-25 o‘lchovi). Eski `next@14.2.35` zaifliklari shu bilan yopildi |
 | Live provider acceptance | **hech biri** — eng yaxshisi `LOCAL_CONTRACT_TESTED` |
 | API bu mashinada ishga tushirilganmi | **yo‘q** — `api-python/.env` yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori bor |
 
@@ -130,22 +130,43 @@ qadami kabi engine siyosatidan, dispatch paytidagi qabul qiluvchi qayta tekshiru
 
 ## Qamrov: nima haqiqatan yetib boradi
 
-Registry’da **89** tool bor, lekin **12 tasigina** yetkazib berilayotgan pack’lardan
-(`demo-retail`, `marketing`, `_template`) chaqirilishi mumkin. `platform_runtime`
-kodining **81%** shu uch pack’dan **yetib bo‘lmaydi**.
+Registry’da **88** tool bor va ulardan **17 tasi** yetkazib berilayotgan pack’lardan
+(`demo-retail`, `marketing`, `turkish-baby`, `_template`) chaqirilishi mumkin
+(2026-09-25 o‘lchovi; `whatsapp.*` endi `turkish-baby`da). Qolgan 15 modulning
+**10 758 satri** (19 182 dan, 56%) hamon chaqirilmaydi.
 
 Quyidagi modullarni ishlatadigan **birorta pack yo‘q**:
 
-`erp` · `documents` · `inventory` · `business_graph` · `whatsapp` · `whatsapp_inbound` ·
+`erp` · `documents` · `inventory` · `business_graph` ·
 `telephony` · `assets` · `vision` · `manufacturing` · `oee` · `workforce` · `supervisor` ·
 `reengagement` · `escalation` · `briefing` · `oversight`
 
-WhatsApp inbound uchun **umuman HTTP route yo‘q**.
+WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`: handshake + imzolangan
+inbound, 19 HTTP testi bilan) va `whatsapp.*` tool’lari `turkish-baby` pack’ida e’lon
+qilingan — lekin live Meta acceptance hamon yo‘q.
 
 Bular **muzlatilgan preview modullar**, mahsulot funksiyasi emas. Ular test va chegara
 auditi bilan qoplangan, ammo hech bir mijoz konfiguratsiyasi ularga yetib bormaydi.
 Hujjatning boshqa joyida backend «tayyor» deb yozilgan bo‘lsa, u **yadro** haqida —
 bu modullar haqida emas.
+
+## Chakana savdo vertikali (Telegram savdo boti)
+
+`packs/turkish-baby` — real do‘kon sinovi uchun tayyor tenant (bolalar kiyimlari):
+
+- **Katalog**: `products.yaml` da ixtiyoriy `description`, `category`, `gender`, `age`,
+  `colors`, o‘lcham bo‘yicha `stock`, `photo_url` (faqat https). CSV’dan import:
+  `scripts/import_catalog.py` (`--dry-run`, xato qatorlar raqami bilan).
+- **Grounded javob**: `products.search` (o‘lcham/qoldiq bilan), `shop.info` (FAQ,
+  filiallar), `orders.draft` (buyurtmani tekshiradi, narxni serverda hisoblaydi).
+- **Buyurtma**: to‘g‘ri draft → pack’dagi `order_agent` uchun bitta `records.create`
+  vazifasi; ladder tasdiqni hal qiladi (Tasdiqlar → Buyurtmalar).
+- **Operator**: `notify_recipient` (allowlist’da bo‘lishi shart) ga handoff va
+  buyurtma xabarlari; UI’da **Suhbatlar** (thread + operator javobi + operator rejimi /
+  botga qaytarish) va **Operatorga uzatilganlar**.
+
+Qo‘shish tartibi: `docs/ONBOARDING-UZ.md` → "Yangi do‘kon (tenant) qo‘shish". Haqiqiy
+Telegram va model bilan hali **tekshirilmagan** (lokal kontrakt testlari).
 
 ## Identity va workspace foundation
 
@@ -279,12 +300,12 @@ Journalda task ID ko‘rilgan bo‘lsa qayta bajarilmaydi. Lease eskirsa yoki ki
 sodir bo‘lsa in-flight task `uncertain` bo‘ladi. Bu fizik jarayonni ortga qaytarishni
 yoki tashqi tizimda exactly-once ni kafolatlamaydi. Masofaviy runner WSS talab qiladi.
 
-Server WebSocket’ni har qanday xatoda `4403` bilan yopadi (muddati o‘tgan token, revoke,
-timeout, stale claim, DB xatosi), shuning uchun runner bitta `4403` da o‘chmaydi. Sessiya
-autentifikatsiyadan o‘tgan bo‘lsa — backoff bilan qayta ulanadi. Server hech javob bermay
-ketma-ket 3 marta rad etsa — «revoked or rotated» deb chiqadi (exit 4). Token muddati
-o‘tgan bo‘lsa: `RUNNER_TOKEN_FILE` da yangi token kutadi, `RUNNER_TOKEN` da aniq xabar
-bilan chiqadi.
+Server WebSocket’ni har sabab uchun alohida kod bilan yopadi (`platform_api.RUNNER_CLOSE_*`):
+`4403` — qurilma revoke qilingan yoki token rotatsiya bo‘lgan (runner darhol chiqadi, exit 4,
+qurilmani qayta ro‘yxatdan o‘tkazish kerak); `4401` — token yaroqsiz yoki muddati o‘tgan
+(`RUNNER_TOKEN_FILE` da yangi token kutadi, `RUNNER_TOKEN` da aniq xabar bilan chiqadi;
+muddati o‘tmagan token 3 marta ketma-ket rad etilsa chiqadi); `4400` protokol, `1011` server
+xatosi va tarmoq uzilishi — backoff bilan qayta ulanadi.
 
 **Windows eslatma:** runner testlari Windows’da qizil (`privateFile()` POSIX ruxsat
 bitlarini talab qiladi). Bu platforma cheklovi, kod nuqsoni emas.

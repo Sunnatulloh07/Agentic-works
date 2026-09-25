@@ -2,6 +2,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
 import {approvalPath, draftSummary, formatSum, shopPath, startAutoRefresh} from '../lib/shop-client.mjs';
+import {orderView} from '../lib/conversation-client.mjs';
 
 /**
  * Shop-wide views: approval queue, inbox with customer text, orders, catalogue and
@@ -127,14 +128,24 @@ export function OrdersPanel({client, tenant}: Base) {
   const {data, busy, error, refresh} = useLoader(load);
   return <section style={panel}>
     <h2>Buyurtmalar</h2>
-    <p style={muted}>Agent yozgan buyurtma yozuvlari va mijozlar 360 dagi buyurtmalar (oxirgi 100 tadan).</p>
+    <p style={muted}>Agent yozgan buyurtma yozuvlari va mijozlar 360 dagi buyurtmalar (oxirgi 100 tadan).
+      Suhbatda olingan buyurtma avval “Tasdiqlar”da kutadi; tasdiqlangach shu yerda chiqadi.</p>
     <button style={button} disabled={busy} onClick={() => void refresh()}>Yangilash</button>
     {error && <p role="alert" style={{color: '#fca5a5'}}>{error}</p>}
     {data && <>
       <h3>Agent yozuvlari · {data.orders.length}</h3>
       {data.orders.length === 0 && <p>Yozuv yo‘q.</p>}
-      {data.orders.map(o => <article key={o.id} style={row}><strong>{o.title || o.id.slice(0, 10)}</strong>
-        <span style={muted}> · {when(o.created)}</span>{o.body && <p style={{whiteSpace: 'pre-wrap'}}>{o.body}</p>}</article>)}
+      {data.orders.map(o => {
+        // A conversation-captured order carries its draft as JSON; anything else stays raw text.
+        const v = orderView(o.body);
+        return <article key={o.id} style={row}><strong>{o.title || o.id.slice(0, 10)}</strong>
+          <span style={muted}> · {when(o.created)}</span>
+          {v ? <p style={{margin: '8px 0 0'}}>{v.product} · o‘lcham {v.size || '—'} · {String(v.qty)} dona ·
+              jami <strong>{formatSum(v.total)}</strong><br/>
+              {v.customer} · {v.phone} · {v.delivery}
+              {v.conversationId && <><br/><span style={muted}>Suhbat: {v.channel} · {v.conversationId}</span></>}</p>
+            : o.body && <p style={{whiteSpace: 'pre-wrap'}}>{o.body}</p>}</article>;
+      })}
       <h3>Mijoz buyurtmalari · {data.customer_orders.length}</h3>
       {data.customer_orders.length === 0 ? <p>Buyurtma yo‘q.</p> : <table style={table}><thead><tr>
         <th style={cell}>Raqam</th><th style={cell}>Mijoz</th><th style={cell}>Holat</th><th style={cell}>Jami (minor)</th><th style={cell}>Yangilangan</th>

@@ -9,17 +9,20 @@ agents:
   - id: sales.responder
     name: "DM javobchi"
     persona: prompts/sales/responder.md
-    tools: [telegram.send, instagram.send, products.search]
+    tools: [telegram.send, instagram.send, products.search, shop.info, orders.draft]
     # autonomous: a reply to the verified inbound chat goes out unattended; every
     # other write still waits for an operator (engine autonomy rule).
     ladder: autonomous
     triggers:
       - type: message
         source: telegram
-    # Inbound Telegram message -> products.search -> reply grounded in the result.
-    # Prices in a reply must come from the lookup, or the fallback is sent instead.
+    # Inbound Telegram message -> products.search / shop.info -> reply grounded in
+    # the result. Prices in a reply must come from a lookup, or the fallback is
+    # sent instead. A valid orders.draft becomes one "order" record for
+    # sales.order_taker (human_assisted: an operator approves it).
     conversation:
       enabled: true
+      order_agent: sales.order_taker
   - id: sales.order_taker
     name: "Buyurtma qabulchi"
     tools: [telegram.send, instagram.send, records.create, sheets.append]

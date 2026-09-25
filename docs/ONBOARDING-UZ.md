@@ -257,6 +257,53 @@ Test yoki lokal fake server uchun Bot API manzilini tenant konfigida almashtiris
 faqat LLM bilan **aynan bir xil** aniq ruxsat bo‘lganda: `"provider_mode": "local_loopback"`.
 `localhost` nomi rad etiladi.
 
+## 10. Yangi do‘kon (tenant) qo‘shish
+
+Tayyor namuna: `packs/turkish-baby/` — bolalar kiyimlari do‘konining Telegram savdo boti.
+Core kodga tegilmaydi: yangi do‘kon = yangi pack papkasi.
+
+1. **Nusxa oling.** `packs/turkish-baby` ni `packs/<do‘kon-nomi>` ga nusxalang (nom faqat
+   `A-Z a-z 0-9 _ -`). `pack.yaml` da `name`, `shop_name`, `faq` (yetkazish, to‘lov,
+   qaytarish — raqamlar bilan aniq yozing) va `branches` ni o‘zgartiring. "NAMUNA" deb
+   belgilangan hamma narsa almashtirilishi kerak. Persona:
+   `prompts/sales/responder.md`.
+2. **Katalogni import qiling.** Excel/Sheets jadvalini **CSV UTF-8** qilib saqlang.
+   Ustunlar: `id,name,price_uzs,sizes,stock,category,gender,age,colors,description,photo_url`
+   (namuna: `packs/_template/products.example.csv`; `sizes` va `colors` — `;` bilan,
+   `stock` — `86:2;92:3`). Avval tekshiring, keyin yozing:
+
+   ````sh
+   python scripts/import_catalog.py --tenant <do‘kon-nomi> --csv katalog.csv --dry-run
+   python scripts/import_catalog.py --tenant <do‘kon-nomi> --csv katalog.csv
+   ````
+
+   Xato qatorlar raqami bilan chiqadi va fayl umuman yozilmaydi.
+3. **Integratsiya.** `packs/_template/integrations.example.yaml` ni
+   `packs/<do‘kon-nomi>/integrations.yaml` ga nusxalang: `telegram.token_env` (bot token
+   env **nomi**), `llm` bloki va `agent_loop_enabled: true`. Qiymatlar faqat `.env` da.
+4. **Operator xabarnomasi.** Botni operatorlar guruhiga qo‘shing, guruh chat id’sini
+   (`-100...`) `conversation.notify_recipient` ga **va** o‘sha agentning
+   `allowed_recipients` ro‘yxatiga yozing (biri bo‘lmasa pack yuklanmaydi). Shunda har
+   bir operatorga uzatish va har bir yangi buyurtma guruhga qisqa xabar bo‘lib boradi.
+5. **Webhook.** `?tenant=` bilan ro‘yxatdan o‘tkazing:
+
+   ````sh
+   python scripts/telegram_set_webhook.py --url https://PUBLIC-HOST/webhooks/telegram?tenant=<do‘kon-nomi> \
+       --token-env <BOT_TOKEN_ENV> --secret-env TELEGRAM_WEBHOOK_SECRET --dry-run
+   ````
+
+6. **Owner hisobi** — 4-qadam (`provision_identity.py --workspace <do‘kon-nomi>`), keyin
+   `python scripts/run_local.py --check` pack va integratsiyani tekshiradi.
+
+Ish jarayoni: mijoz yozadi → agent `products.search` / `shop.info` bilan javob beradi
+(narx va raqamlar faqat natijadan, aks holda operatorga uzatiladi) → hamma ma’lumot
+yig‘ilgach `orders.draft` narxni serverda hisoblaydi → buyurtma **Tasdiqlar** da
+kutadi, tasdiqlangach **Buyurtmalar** da chiqadi. **Suhbatlar** panelida operator
+suhbatni o‘qiydi va o‘zi javob yozadi; shundan keyin bot shu suhbatda
+`conversation.takeover_minutes` (sukut 30) daqiqa jim turadi ("Operator rejimi"),
+**Botga qaytarish** tugmasi uni oldinroq tugatadi. **Operatorga uzatilganlar** —
+bot javob bera olmagan xabarlar.
+
 ## Tez-tez uchraydigan xatolar
 
 | Belgi | Sabab | Yechim |
@@ -280,11 +327,13 @@ faqat LLM bilan **aynan bir xil** aniq ruxsat bo‘lganda: `"provider_mode": "lo
 
 - **Live provider integratsiyasi** — hech biri `live_verified` emas. Telegram, Instagram,
   Sheets, Google, MoySklad, 1C: eng yuqorisi `LOCAL_CONTRACT_TESTED`.
-- **Mahsulot funksiyalarining to‘liq to‘plami** — registry’dagi 89 tool’dan **12 tasi**
-  yetkazilgan pack’lardan chaqiriladi. ERP, hujjatlar, ombor, WhatsApp, telefoniya,
+- **Mahsulot funksiyalarining to‘liq to‘plami** — registry’dagi 88 tool’dan **17 tasi**
+  yetkazilgan pack’lardan chaqiriladi (2026-09-25; `whatsapp.*` endi `turkish-baby`da).
+  ERP, hujjatlar, ombor, telefoniya,
   vision, ishlab chiqarish, OEE, xodimlar, supervisor, brifing, eskalatsiya va boshqa
   modullar **muzlatilgan preview** — birorta pack ularni ishlatmaydi. WhatsApp inbound
-  uchun HTTP route umuman yo‘q.
+  HTTP route ham bor va 19 test bilan qadalgan (`app/whatsapp_api.py`), ammo
+  `whatsapp_inbound` tool’lari pack’da e’lon qilinmagan va live Meta acceptance yo‘q.
 - **Windows runner** — lokal-executor shartnomasi POSIX-only (`O_NOFOLLOW`, `mkfifo`,
   `0600`). Windows’da runner testlari qizil, bu platforma cheklovi.
 - **Production** — `production_release: NO_GO`. HA, observability, DR va live acceptance

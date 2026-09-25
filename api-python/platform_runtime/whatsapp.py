@@ -10,7 +10,10 @@ sentence from the PRD:
 An agent that believes it replied, while the provider silently refused, is worse
 than an agent that could not reply at all: the customer is left waiting and the
 operator's CRM looks answered. So the channel is built so that 131047 is
-**impossible to reach by design** rather than being caught after the fact:
+**not reached by design** rather than being caught after the fact -- and, because
+Meta's clock and records, not ours, are the authority, when Meta answers 131047
+anyway it is recorded as what it is: a DEFINITE non-delivery (``DeliveryRejected``,
+step ``failed``), never an ``uncertain`` send an operator must reconcile:
 
 * ``whatsapp.window`` (read) reports, per recipient, whether the service window is
   open and exactly when it closes. The closing time is computed from *our* clock
@@ -36,8 +39,9 @@ Other rules that shape the code:
   Reclassifying a marketing template as utility to slip past a restriction is the
   exact abuse Meta punishes.
 * **One number is one destination.** Every recipient is an operator-declared
-  contact under a connection; a raw phone number is never accepted from a tool
-  argument, because a model-supplied number is an unbounded send surface.
+  contact under a connection, or a customer who wrote to the register's business
+  number (the wa_id the inbound route verified). Any other raw phone number is
+  refused, because a model-supplied number is an unbounded send surface.
 * **Free-form inside the window is free.** Meta prices per message from
   2025-07-01 but a free-form reply inside the service window is free, so the
   window read also reports that the cheap path is available.
@@ -54,7 +58,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .engine import Conflict, Forbidden, NotFound
+from .engine import (EVENT_CONVERSATION_ID, SAFE_REASON, Conflict, DeliveryRejected,
+                     Forbidden, NotFound)
 
 # ------------------------------------------------------------------ constants
 
@@ -94,11 +99,25 @@ LANGUAGE_RE = re.compile(r'^[a-z]{2}(?:_[A-Z]{2})?$')
 # validated so a declared contact cannot smuggle a second destination.
 PHONE_RE = re.compile(r'^[1-9][0-9]{6,14}$')
 
-# The provider's error code for "outside the 24-hour window". It is named here
-# only so the module can prove it never *sends* anything that could produce it;
-# the module never parses it as a control-flow signal, because by then the
-# customer has already waited.
+# The provider's error code for "outside the 24-hour window" (re-engagement
+# required). The send gate refuses free-form text before any I/O when OUR evidence
+# says the window is closed, so it is not reached by design. It used to be named
+# "only to prove it is never sent" and never read, which modelled it wrongly twice:
+# Meta can still answer it (its clock and its record of the last message are the
+# authority, not ours), and when it did, the HTTP 400 surfaced as a generic
+# WhatsAppError, which the engine records as ``uncertain`` -- sending an operator to
+# reconcile a message Meta says it did not deliver, and marking the customer's
+# conversation "never resend". 131047 is a DEFINITE non-delivery: both our own gate
+# and Meta's answer now raise DeliveryRejected, and the step is ``failed``.
 ERROR_OUTSIDE_WINDOW = 131047
+# DeliveryRejected reasons (engine.SAFE_REASON-shaped): our gate refused before any
+# I/O, and Meta answered with its own numeric code (``meta_131047``).
+REASON_WINDOW_CLOSED = 'window_closed'
+REASON_NOT_A_CUSTOMER = 'not_a_customer'
+REASON_NO_REGISTER = 'no_register'
+# A Graph error body is small; only its integer ``error.code`` is ever read.
+MAX_ERROR_BYTES = 20_000
+MAX_META_CODE = 10 ** 9
 
 
 class WhatsAppError(RuntimeError):
@@ -108,6 +127,22 @@ class WhatsAppError(RuntimeError):
     transport or provider problem and may be retried or reported, whereas the
     others are deterministic refusals that must stay refusals.
     """
+
+
+class Undeliverable(Forbidden, DeliveryRejected):
+    """Refused before any provider I/O: nothing was sent, and nothing will be.
+
+    A ``Forbidden`` for direct callers (the refusal is a policy decision), and a
+    ``DeliveryRejected`` for ``Engine.tick``, which checks that class first and
+    records the step ``failed`` with ``reason`` -- not ``uncertain``, which is what
+    any other exception from an external write becomes. The message stays with the
+    caller; only the SAFE_REASON-shaped ``reason`` reaches the step row.
+    """
+
+    def __init__(self, reason, message):
+        Forbidden.__init__(self, message)
+        self.reason = reason if isinstance(reason, str) and SAFE_REASON.fullmatch(reason) \
+            else 'rejected'
 
 
 # -------------------------------------------------------------------- config
@@ -384,12 +419,31 @@ def _bounded_json(url, token, *, method='GET', body=None, timeout=20):
             return json.loads(raw.decode('utf-8'))
     except urllib.error.HTTPError as error:
         # The provider body can echo the recipient, the phone number id or a token
-        # fragment. Only the status is surfaced.
+        # fragment. Only the status and Meta's integer error code are surfaced.
+        if 400 <= error.code < 500:
+            # Meta answered and did not send: 131047 (outside the window), 131026
+            # (undeliverable), 190 (token), 130429 (throughput). Definite -> failed.
+            raise DeliveryRejected(_rejection(error)) from None
+        # A 5xx says nothing about what happened upstream: uncertain.
         raise WhatsAppError(f'WhatsApp HTTP status {error.code}') from None
     except WhatsAppError:
         raise
     except Exception:
         raise WhatsAppError('WhatsApp transport failure') from None
+
+
+def _rejection(error):
+    """A 4xx as a safe reason: ``meta_<code>`` when Meta named one, else ``http_<status>``."""
+    try:
+        raw = error.read(MAX_ERROR_BYTES + 1)
+        body = json.loads(raw.decode('utf-8')) if len(raw) <= MAX_ERROR_BYTES else None
+    except Exception:
+        body = None
+    detail = body.get('error') if isinstance(body, dict) else None
+    code = detail.get('code') if isinstance(detail, dict) else None
+    if type(code) is int and 0 < code < MAX_META_CODE:
+        return f'meta_{code}'
+    return f'http_{error.code}'
 
 
 def _token(register, kind, tenant):
@@ -416,8 +470,14 @@ def _token(register, kind, tenant):
     return value
 
 
-def _window_from_events(engine, tenant, contacts):
+def _window_from_events(engine, tenant, contacts, *, phone_number_id=None):
     """The last inbound time per contact, as recorded by *verified* messages.
+
+    ``contacts`` maps a contact id to its E.164 number. A message is attributed to a
+    contact by its ``conversation_id`` (``ingest`` stores the contact id) or by its
+    signed ``wa_id`` (the conversation route stores the wa_id as the conversation).
+    With ``phone_number_id``, a message that names a DIFFERENT business number is
+    skipped: Meta's window is per (customer, business number).
 
     Returns ``{contact_id: last_inbound_epoch}`` for contacts this tenant has actually
     heard from, read from the durable inbox the inbound block writes:
@@ -459,6 +519,7 @@ def _window_from_events(engine, tenant, contacts):
             "ORDER BY rowid DESC LIMIT ?",
             (tenant, INBOUND_CHANNEL, MAX_EVENTS_SCANNED)).fetchall()
     known = set(contacts)
+    by_phone = {phone: contact_id for contact_id, phone in contacts.items()}
     latest = {}
     for row in rows:
         try:
@@ -468,10 +529,16 @@ def _window_from_events(engine, tenant, contacts):
         if not isinstance(payload, dict):
             continue
         contact = payload.get('conversation_id')
-        if contact not in known or contact in latest:
+        if not isinstance(contact, str) or contact not in known:
+            wa_id = payload.get('wa_id')
+            contact = by_phone.get(wa_id) if isinstance(wa_id, str) else None
+        if contact is None or contact in latest:
             # The scan is newest-first, so the first sighting of a contact is the
             # latest message from them; later rows are older and cannot widen a
             # window that a newer message already set.
+            continue
+        number = payload.get('phone_number_id')
+        if phone_number_id and number is not None and number != phone_number_id:
             continue
         stamp = payload.get('window_until')
         if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
@@ -555,7 +622,8 @@ def window_sources(engine, tenant, agent, entry, step, *, contacts):
     tenant that declared no ``window_register`` simply has no fallback and reads
     purely from events.
     """
-    verified = _window_from_events(engine, tenant, contacts)
+    verified = _window_from_events(engine, tenant, contacts,
+                                   phone_number_id=entry['phone_number_id'])
     status = 'ok'
     registered = {}
     try:
@@ -654,6 +722,49 @@ def _mask(phone):
 # --------------------------------------------------------------- send function
 
 
+def _verified_inbound(engine, tenant, step, contact):
+    """The verified inbound message this send answers, as its payload, or None.
+
+    The step's own task first: a conversation turn's reply is keyed by the inbound
+    event it answers, and the engine has already bound its destination to that
+    event's conversation. Otherwise (an operator reply, an allowlisted direct send)
+    the customer's latest message. Only the webhook route writes the ``whatsapp``
+    channel, after verifying Meta's signature, so only a wa_id that wrote to this
+    tenant can be found here.
+    """
+    if not isinstance(contact, str) or not contact:
+        return None
+    with engine.read() as c:
+        row = c.execute('''SELECT e.payload FROM p_steps s
+          JOIN p_tasks t ON t.tenant=s.tenant AND t.id=s.task
+          JOIN p_events e ON e.tenant=t.tenant AND e.channel=t.channel AND e.event_key=t.event_key
+          WHERE s.tenant=? AND s.id=? AND t.channel=?''',
+                        (tenant, step, INBOUND_CHANNEL)).fetchone()
+        if row is None:
+            row = c.execute('SELECT payload FROM p_events WHERE tenant=? AND channel=? AND '
+                            + EVENT_CONVERSATION_ID + '=? ORDER BY rowid DESC LIMIT 1',
+                            (tenant, INBOUND_CHANNEL, contact)).fetchone()
+    try:
+        payload = json.loads(row['payload']) if row else None
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get('conversation_id') != contact:
+        return None
+    return payload
+
+
+def _register_for(tenant, inbound):
+    """The one register whose business number the customer wrote to, or a refusal."""
+    number = inbound.get('phone_number_id') if isinstance(inbound, dict) else None
+    names = [name for name, entry in _registers(tenant).items()
+             if number and entry['phone_number_id'] == number]
+    if len(names) != 1:
+        raise Undeliverable(REASON_NO_REGISTER,
+                            'A WhatsApp send without a register must answer a verified '
+                            'customer message to exactly one declared business number')
+    return names[0]
+
+
 def send(engine, tenant, agent, args, step):
     """Send one message — template or, only inside the window, free-form text.
 
@@ -663,6 +774,12 @@ def send(engine, tenant, agent, args, step):
     customer. So the window is checked **here, before any provider I/O**, and a
     free-form send outside the window is refused outright rather than being
     silently downgraded to a template.
+
+    ``register`` may be omitted only by a conversation reply (``{contact, text}``,
+    the shape conversation turns and operator replies submit): the register is then
+    the one owning the business number the customer wrote to, and ``contact`` is the
+    customer's verified wa_id. A pre-I/O refusal is ``Undeliverable`` where it
+    concerns this recipient, so the engine records ``failed``, not ``uncertain``.
     """
     register = args.get('register')
     contact = args.get('contact')
@@ -675,10 +792,27 @@ def send(engine, tenant, agent, args, step):
     if has_text and len(text) > MAX_TEXT_CHARS:
         raise ValueError(f'text must be at most {MAX_TEXT_CHARS} characters')
 
+    inbound = None
+    if register is None:
+        # A conversation reply names no register: a conversation turn and an operator
+        # reply build the step from the verified inbound conversation alone. It
+        # leaves from the business number the customer wrote to.
+        inbound = _verified_inbound(engine, tenant, step, contact)
+        register = _register_for(tenant, inbound)
     entry = _resolve(tenant, register)
     contacts = entry['contacts']
-    if contact not in contacts:
-        raise Forbidden(f'Contact {contact!r} is not declared for register {register!r}')
+    if contact in contacts:
+        phone = contacts[contact]
+    else:
+        # Not an operator-declared contact: only a customer who wrote to THIS
+        # register's number may be answered, at the wa_id Meta signed.
+        inbound = inbound or _verified_inbound(engine, tenant, step, contact)
+        if (inbound is None or inbound.get('phone_number_id') != entry['phone_number_id']
+                or not isinstance(contact, str) or not PHONE_RE.match(contact)):
+            raise Undeliverable(REASON_NOT_A_CUSTOMER,
+                                f'Contact {_mask(contact)} is not declared for register '
+                                f'{register!r} and has not written to its number')
+        phone = contact
 
     if has_template:
         declared = entry['templates'].get(template)
@@ -696,21 +830,33 @@ def send(engine, tenant, agent, args, step):
         # the inbound block recorded takes precedence over the operator's sheet. Reading
         # the sheet alone here (as this did before the inbound block existed) meant a
         # customer's real message was ignored whenever nobody had updated the cell.
-        resolved, sources, _status = window_sources(
-            engine, tenant, agent, entry, step, contacts={contact: contacts[contact]})
-        _kind, last = resolved.get(contact, ('absent', None))
+        # A customer who is not a declared contact has no sheet row: their window is
+        # their own latest verified message to this number, and nothing else.
+        if contact in contacts:
+            resolved, sources, _status = window_sources(
+                engine, tenant, agent, entry, step, contacts={contact: phone})
+            _kind, last = resolved.get(contact, ('absent', None))
+            source, who = sources.get(contact, 'register'), repr(contact)
+        else:
+            last = _window_from_events(engine, tenant, {contact: phone},
+                                       phone_number_id=entry['phone_number_id']).get(contact)
+            source, who = 'event', _mask(contact)
         opened, _closes_at = window_state(last, _engine_now(engine))
         if not opened:
-            raise Forbidden(
-                f'Free-form text cannot be sent to {contact!r}: the 24-hour service '
-                f'window is closed (the window is read from {sources.get(contact, "register")}'
+            # Undeliverable, not plain Forbidden: the engine records it as a definite
+            # ``failed`` (nothing was sent), where any other exception from this
+            # external write would be recorded ``uncertain``.
+            raise Undeliverable(
+                REASON_WINDOW_CLOSED,
+                f'Free-form text cannot be sent to {who}: the 24-hour service '
+                f'window is closed (the window is read from {source}'
                 f' evidence). WhatsApp would refuse it with error '
                 f'{ERROR_OUTSIDE_WINDOW} and the customer would never receive it. '
                 f'Send a declared template instead, or wait for the customer to '
                 f'message first')
         payload = {'type': 'text', 'text': {'preview_url': False, 'body': text}}
 
-    body = {'messaging_product': 'whatsapp', 'to': contacts[contact],
+    body = {'messaging_product': 'whatsapp', 'to': phone,
             'recipient_type': 'individual', **payload}
     token = _token(entry, 'messaging', tenant)
     phone_number_id = entry['phone_number_id']
@@ -790,9 +936,14 @@ def register_whatsapp_tools(registry):
          obj({'contact': string(64)}, required=[]), _window_tool),
         ('whatsapp.templates', 'read',
          obj({'register': string(64)}, required=[]), _templates_tool),
+        # register is optional: a conversation reply is {contact, text} -- the shape
+        # conversation.py and Engine.operator_reply build for every <channel>.send,
+        # keyed by DIRECT_DESTINATION_FIELD -- and send() resolves the register from
+        # the verified inbound message. Required, it failed schema validation, so no
+        # WhatsApp conversation turn could ever be delivered.
         ('whatsapp.send', 'write',
          obj({'register': string(64), 'contact': string(64), 'text': string(MAX_TEXT_CHARS),
-              'template': string(64)}, required=['register', 'contact']),
+              'template': string(64)}, required=['contact']),
          send),
     ]
     for name, risk, schema, handler in definitions:

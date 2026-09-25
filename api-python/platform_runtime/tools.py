@@ -298,6 +298,9 @@ def deliver_json(url,body,headers=None):
     except urllib.error.HTTPError as error:
         if 400<=error.code<500:raise DeliveryRejected('http_%d'%error.code) from None
         raise RuntimeError('Provider request failed') from None
+    # A URLError or OSError quotes the URL in its message; its type is all the
+    # engine stores, but a message that reaches a log must not carry the token.
+    except Exception:raise RuntimeError('Provider request failed') from None
 
 
 def telegram(e,t,a,p,key):

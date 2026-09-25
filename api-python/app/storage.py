@@ -22,6 +22,13 @@ if TYPE_CHECKING:
 _lock = threading.RLock()
 _local = threading.local()
 
+# Declared bounds; pinned literally in runtime_tests/test_storage_bounds.py.
+# A connection timeout, a delivery lease and an error ceiling are all numbers a
+# caller depends on, and none of them was addressable before they were named.
+CONNECT_TIMEOUT_SECONDS = 30.0
+DELIVERY_LEASE_SECONDS = 60
+MAX_DELIVERY_ERROR_CHARS = 500
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals(
   id TEXT PRIMARY KEY, tenant TEXT, kind TEXT, agent TEXT, summary TEXT,
@@ -137,7 +144,7 @@ def db() -> sqlite3.Connection:
             except sqlite3.Error:
                 pass
         Path(p).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(p, timeout=30.0, isolation_level=None)
+        conn = sqlite3.connect(p, timeout=CONNECT_TIMEOUT_SECONDS, isolation_level=None)
         conn.row_factory = sqlite3.Row
         with _lock:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -218,13 +225,13 @@ def update_delivery(tenant_id: str, delivery_id: int, status: DeliveryStatus,
             "UPDATE deliveries SET status=?, external_id=?, error=?, "
             "attempt_count=attempt_count+1, claimed_by='', lease_until=0, "
             "updated_at=? WHERE tenant=? AND id=?",
-            (status.value, external_id, error[:500], int(time.time()), tenant_id, delivery_id),
+            (status.value, external_id, error[:MAX_DELIVERY_ERROR_CHARS], int(time.time()), tenant_id, delivery_id),
         )
         return cursor.rowcount == 1
 
 
 def claim_delivery(tenant_id: str, delivery_id: int, worker_id: str,
-                   *, now: int | None = None, lease_seconds: int = 60) -> bool:
+                   *, now: int | None = None, lease_seconds: int = DELIVERY_LEASE_SECONDS) -> bool:
     """Bitta worker uchun delivery'ni compare-and-set bilan claim qiladi."""
     if not worker_id.strip():
         raise ValueError("worker_id bo'sh bo'lmasin")

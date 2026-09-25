@@ -8,6 +8,7 @@ import {BudgetPanel,KnowledgePanel} from '../../components/DevelopmentData';
 import {BriefingPanel,CustomerResourcesPanel,EscalationPanel,MetricsPanel,ReconcileControl,ReengagementPanel,SchedulesPanel,SupervisorPanel} from '../../components/OperationsPanels';
 import AdminPanel from '../../components/AdminPanel';
 import {ApprovalsPanel,CatalogPanel,ChannelsPanel,InboxPanel,OrdersPanel} from '../../components/ShopPanels';
+import {ConversationsPanel,HandoffsPanel,type ThreadRef} from '../../components/ConversationPanels';
 import {draftSummary} from '../../lib/shop-client.mjs';
 import {type SessionClient,type Workspace} from '../../lib/session-client.mjs';
 type Tool={name:string;risk:string;schema:unknown;runner:boolean};
@@ -35,6 +36,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
   const [audit,setAudit]=useState<Audit[]>([]);const [devices,setDevices]=useState<Device[]>([]);
   const [selected,setSelected]=useState<Detail|null>(null);const [customers,setCustomers]=useState<Customer[]>([]);const [selectedCustomer,setSelectedCustomer]=useState<Customer|null>(null);const [customerName,setCustomerName]=useState('');const [agent,setAgent]=useState('ops.assistant');
   const [steps,setSteps]=useState(example);const [text,setText]=useState('/report');const [tab,setTab]=useState('tasks');
+  const [thread,setThread]=useState<ThreadRef|null>(null);
   const [deviceId,setDeviceId]=useState('office-1');const [deviceToken,setDeviceToken]=useState('');
   async function req<T>(path:string,body?:unknown):Promise<T>{
     return client.request<T>(`/platform/${encodeURIComponent(tenant)}${path}`,body);
@@ -54,7 +56,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
   return <main style={{fontFamily:'system-ui,sans-serif',background:'#0b1220',color:'#e2e8f0',minHeight:'100vh',padding:'28px',maxWidth:1500,margin:'auto'}}>
     <header style={{display:'flex',justifyContent:'space-between',gap:20,flexWrap:'wrap'}}>
       <div><h1 style={{margin:0}}>Agent Platform</h1><p style={{color:'#94a3b8'}}>AI xodimlar boshqaruvi · Kanalga bog‘lanmagan runtime</p></div>
-      <span style={{color:'#fde68a'}}>Development 0.3.8 · Lokal dalillar mavjud · Yakuniy mahsulot emas</span>
+      <span style={{color:'#fde68a'}}>Development 0.5.0 · Lokal dalillar mavjud · Yakuniy mahsulot emas</span>
     </header>
     <section style={panel}>
       <strong>{workspace.name}</strong><p>Workspace: {tenant}</p>
@@ -66,7 +68,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
     {busy && <p role="status">Yuklanmoqda...</p>}
     {connected && <>
       <p>Rol: <strong>{role}</strong> · {frozen?'Ijro to‘xtatilgan':'Faol'}</p>
-      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['approvals','Tasdiqlar'],['orders','Buyurtmalar'],['catalog','Katalog'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync'],['reengagement','Qayta aloqa'],['briefing','Brifing'],['escalation','Eskalatsiya'],['supervisor','Supervisor'],['schedules','Jadval'],['metrics','Holat'],['admin','Hisob']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox','approvals'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role)) && (!['reengagement','briefing','escalation','supervisor','schedules'].includes(id) || ['owner','operator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
+      <nav style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>{[['tasks','Vazifalar'],['conversations','Suhbatlar'],['handoffs','Operatorga uzatilganlar'],['approvals','Tasdiqlar'],['orders','Buyurtmalar'],['catalog','Katalog'],['agent-runs','Agent loop'],['customers','Mijozlar 360'],['agents','Agentlar'],['inbox','Kiruvchi hodisalar'],['audit','Audit'],['devices','Qurilmalar'],['connections','Connectorlar'],['budget','Xarajat budjeti'],['knowledge','Bilim bazasi'],['oauth','Google OAuth'],['google-data','Google sync'],['reengagement','Qayta aloqa'],['briefing','Brifing'],['escalation','Eskalatsiya'],['supervisor','Supervisor'],['schedules','Jadval'],['metrics','Holat'],['admin','Hisob']].filter(([id])=>(!['oauth','google-data'].includes(id) || role==='owner') && (!['budget','knowledge'].includes(id) || ['owner','operator','integrator'].includes(role)) && (!['audit','inbox','approvals','conversations','handoffs'].includes(id) || ['owner','operator'].includes(role)) && (id!=='connections' || ['owner','integrator'].includes(role)) && (!['reengagement','briefing','escalation','supervisor','schedules'].includes(id) || ['owner','operator'].includes(role))).map(([id,label])=><button key={id} style={{...button,background:tab===id?'#2563eb':'#1e293b'}} onClick={()=>run(async()=>{
         setTab(id);if(id==='audit')setAudit((await req<{events:Audit[]}>('/audit')).events);
         if(id==='customers')setCustomers((await req<{customers:Customer[]}>('/customers')).customers);
         if(id==='connections')setConnections((await req<{connections:typeof connections}>('/connections')).connections);
@@ -132,6 +134,8 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
       </div>}
       {tab==='agents' && <section style={panel}><h2>Pack agentlari</h2>{agents.map(a=><article key={a.id} style={{borderBottom:'1px solid #334155',padding:12}}><h3>{a.name}</h3><p>{a.department} · {a.ladder}</p><p>{a.tools.join(', ')}</p>{a.tools.some(n=>!tools.find(t=>t.name===n)) && <p style={{color:'#fca5a5'}}>Pack ichidagi ayrim tool uchun runtime adapter mavjud emas.</p>}</article>)}</section>}
       {tab==='inbox' && <InboxPanel client={client} tenant={tenant} canWrite={canWrite}/>}
+      {tab==='conversations' && <ConversationsPanel client={client} tenant={tenant} canReply={canWrite} selected={thread} onSelect={setThread}/>}
+      {tab==='handoffs' && <HandoffsPanel client={client} tenant={tenant} onOpen={ref=>{setThread(ref);setTab('conversations');}}/>}
       {tab==='approvals' && <ApprovalsPanel client={client} tenant={tenant} canDecide={canWrite} onOpenTask={id=>void run(async()=>{await open(id);setTab('tasks');})}/>}
       {tab==='orders' && <OrdersPanel client={client} tenant={tenant}/>}
       {tab==='catalog' && <CatalogPanel client={client} tenant={tenant}/>}

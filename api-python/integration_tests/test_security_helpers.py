@@ -29,6 +29,12 @@ def test_auth_token_admin_gate(monkeypatch):
 
     from app.main import app
 
+    # The legacy admin gate only exists when the directory is disabled; that is the
+    # documented opt-in triple (ENV=test/dev, ALLOW_INSECURE_DEV=true,
+    # IDENTITY_DIRECTORY=false).  The suite used to pass only because the runner
+    # exported the third variable by hand, and CI does not -- the test now declares
+    # the environment its own assertion needs instead of inheriting it.
+    monkeypatch.setenv("IDENTITY_DIRECTORY", "false")
     client = TestClient(app)
     monkeypatch.setenv("ADMIN_TOKEN", "s3cr3t")
     r1 = client.post("/auth/token", json={"tenant_id": "x"})

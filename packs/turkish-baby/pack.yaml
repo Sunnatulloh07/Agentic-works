@@ -1,0 +1,94 @@
+# Bolalar kiyimlari do‘koni ("Turkish Baby" uslubi): Telegram savdo boti.
+# Haqiqiy do‘kon bilan uchdan-uchgacha sinov uchun tayyor tenant.
+#
+# Ishga tushirishdan oldin (docs/ONBOARDING-UZ.md -> "Yangi do‘kon (tenant) qo‘shish"):
+#   1. "NAMUNA" deb belgilangan hamma narsani o‘zingiznikiga almashtiring:
+#      shop_name, faq, branches va products.yaml (katalog).
+#   2. Katalog: python scripts/import_catalog.py --tenant turkish-baby --csv katalog.csv
+#      (avval --dry-run bilan tekshiring; namuna: packs/_template/products.example.csv).
+#   3. packs/_template/integrations.example.yaml -> packs/turkish-baby/integrations.yaml
+#      (telegram.token_env, llm bloki va agent_loop_enabled: true).
+#   4. Webhook: python scripts/telegram_set_webhook.py --url https://<domen>/webhooks/telegram?tenant=turkish-baby ...
+#   5. Operator xabarnomasi: notify_recipient (pastda) -- izohni o‘qing.
+name: turkish-baby
+language: uz
+shop_name: "Turkish Baby (NAMUNA nom -- o‘zgartiring)"
+# shop.info tool shu bo‘limni o‘qiydi: yetkazish, to‘lov, qaytarish haqidagi javoblar
+# faqat shu matnlardan olinadi. Raqamlarni (narx, muddat) shu yerga aniq yozing.
+faq:
+  delivery: "NAMUNA: Toshkent bo‘ylab yetkazib berish 1-2 kun ichida, narxi 30 000 so‘m. Viloyatlarga pochta orqali 3-5 kun."
+  payment: "NAMUNA: to‘lov qabul qilishda naqd, Click yoki Payme orqali. Oldindan to‘lov talab qilinmaydi."
+  returns: "NAMUNA: kiyilmagan, yorlig‘i saqlangan mahsulotni 7 kun ichida almashtirish yoki qaytarish mumkin."
+  sizes: "NAMUNA: o‘lcham bola bo‘yiga qarab tanlanadi: 62 (0-3 oy), 68 (3-6 oy), 74 (6-9 oy), 80 (9-12 oy), 86 (1-1.5 yosh), 92 (1.5-2 yosh), 98 (2-3 yosh), 104 (3-4 yosh)."
+  hours: "NAMUNA: har kuni 10:00 dan 20:00 gacha. Telegram’da buyurtma istalgan vaqtda qabul qilinadi."
+agents:
+  - id: sales.assistant
+    name: "Savdo maslahatchisi"
+    department: sales
+    persona: prompts/sales/responder.md
+    tools: [telegram.send, products.search, shop.info, orders.draft]
+    # autonomous: tasdiqlangan (verified) mijoz chatiga javob operator kutmasdan
+    # ketadi. Boshqa har qanday yozuv engine qoidasi bo‘yicha tasdiq kutadi.
+    ladder: autonomous
+    # notify_recipient'dagi chat id shu ro‘yxatda ham bo‘lishi SHART (pack aks holda
+    # yuklanmaydi). Masalan: allowed_recipients: ["-1001234567890"]
+    allowed_recipients: []
+    triggers:
+      - type: message
+        source: telegram
+    conversation:
+      enabled: true
+      max_steps: 4
+      max_seconds: 120
+      history_turns: 8
+      fallback_text: "Rahmat! Savolingizni menejerimizga uzatdim, tez orada shu yerda javob beramiz."
+      # To‘g‘ri orders.draft -> sales.order_taker uchun BITTA "order" yozuvi. U
+      # human_assisted: menejer "Tasdiqlar" panelida tasdiqlagach "Buyurtmalar"da chiqadi.
+      order_agent: sales.order_taker
+      order_kind: order
+      # Operator Telegram chati (guruh yoki shaxsiy chat id, masalan "-1001234567890").
+      # Har bir operatorga uzatish va har bir yangi buyurtma shu chatga qisqa xabar
+      # bo‘lib boradi. Bo‘sh -- xabar yuborilmaydi. To‘ldirganda AYNAN shu qiymatni
+      # yuqoridagi allowed_recipients ro‘yxatiga ham qo‘shing; bot shu chatda
+      # a’zo bo‘lishi (guruhga qo‘shilgan bo‘lishi) kerak.
+      notify_recipient: ""
+  # WhatsApp: the same shop on the customer's other channel, as a SEPARATE agent,
+  # because a channel is a capability boundary -- the conversation router picks it
+  # by its trigger source, never by id. Its ladder is human_assisted: every
+  # free-form reply waits for an operator until the service-window rule has been
+  # exercised against a live Meta app. Flip to autonomous only after that.
+  # `whatsapp.window`/`whatsapp.templates` are reads; `whatsapp.send` is the one
+  # write, and the engine binds its destination to the verified inbound event.
+  - id: sales.wa_assistant
+    name: "WhatsApp savdo maslahatchisi"
+    department: sales
+    persona: prompts/sales/whatsapp.md
+    tools: [whatsapp.send, whatsapp.window, whatsapp.templates, products.search, shop.info, orders.draft]
+    ladder: human_assisted
+    triggers:
+      - type: message
+        source: whatsapp
+    conversation:
+      enabled: true
+      max_steps: 4
+      max_seconds: 120
+      history_turns: 8
+      fallback_text: "Rahmat! Savolingizni menejerimizga uzatdim, tez orada shu yerda javob beramiz."
+      order_agent: sales.order_taker
+      order_kind: order
+  - id: sales.order_taker
+    name: "Buyurtma qabulchi"
+    department: sales
+    tools: [records.create]
+    ladder: human_assisted
+  - id: ops.assistant
+    name: "Operatsion yordamchi"
+    department: operations
+    tools: [reports.summary, records.list, memory.search]
+    ladder: human_assisted
+branches:
+  - id: markaz
+    name: "NAMUNA: Markaziy do‘kon"
+    address: "NAMUNA: Toshkent sh., manzilni yozing"
+    phone: "+998900000000"
+    hours: "10:00-20:00"

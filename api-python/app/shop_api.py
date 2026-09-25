@@ -6,7 +6,8 @@ the agent/tool catalogue. Authentication and role checks are
 ``platform_api.identity`` -- the same function every platform route uses -- so
 the role matrix below mirrors the routes these views sit next to:
 
-* approvals, inbox messages: owner/operator (as ``/inbox`` and step approval);
+* approvals, inbox messages, handoffs, conversations: owner/operator (as
+  ``/inbox`` and step approval -- they carry customer text);
 * products, orders: any member (as ``/catalog`` and ``/customers``);
 * channels: owner/integrator (as ``/connections``).
 
@@ -121,6 +122,123 @@ def shop_orders(tenant: str, request: Request):
                        'title': str(body.get('title', ''))[:200],
                        'body': _text(body.get('body'))[0]})
     return {'orders': orders, 'customer_orders': [dict(r) for r in customer]}
+
+
+# ---- conversations (R5) ------------------------------------------------------
+# Customer text, so owner/operator only, like /inbox/messages.
+
+MAX_CONVERSATION_ID_CHARS = 256
+
+
+@router.get('/{tenant}/handoffs')
+def shop_handoffs(tenant: str, request: Request):
+    """What the bot passed to a human (conversation.handoff records), newest first."""
+    from platform_runtime.conversation import HANDOFF_KIND
+    identity(request, tenant, OPERATORS)
+    with engine().read() as c:
+        rows = c.execute('SELECT id,body,created FROM p_records WHERE tenant=? AND kind=? '
+                         'ORDER BY created DESC,id DESC LIMIT ?',
+                         (tenant, HANDOFF_KIND, MAX_SHOP_ROWS)).fetchall()
+    out = []
+    for r in rows:
+        body = _json(r['body'], {})
+        out.append({'id': r['id'], 'created': r['created'], 'text': _text(body.get('text'))[0],
+                    **{k: str(body.get(k, ''))[:MAX_CONVERSATION_ID_CHARS]
+                       for k in ('channel', 'event_key', 'conversation_id', 'reason', 'agent')}})
+    return {'handoffs': out}
+
+
+@router.get('/{tenant}/conversations')
+def shop_conversations(tenant: str, request: Request):
+    """Latest line and latest turn of each conversation, most recent first."""
+    from platform_runtime.conversation import takeover_state
+    identity(request, tenant, OPERATORS)
+    e = engine()
+    with e.read() as c:
+        now = e.clock()
+        rows = c.execute(
+            '''SELECT h.channel,h.conversation_id,h.role,h.text,h.created FROM p_conversation_history h
+               JOIN (SELECT channel,conversation_id,MAX(seq) seq FROM p_conversation_history
+                     WHERE tenant=? GROUP BY channel,conversation_id) m
+                 ON m.channel=h.channel AND m.conversation_id=h.conversation_id AND m.seq=h.seq
+               WHERE h.tenant=? ORDER BY h.created DESC,h.rowid DESC LIMIT ?''',
+            (tenant, tenant, MAX_SHOP_ROWS)).fetchall()
+        out = []
+        for r in rows:
+            turn = c.execute(
+                'SELECT status,error,sender FROM p_conversation_turns WHERE tenant=? AND channel=? '
+                'AND conversation_id=? ORDER BY created DESC,rowid DESC LIMIT 1',
+                (tenant, r['channel'], r['conversation_id'])).fetchone()
+            out.append({'channel': r['channel'], 'conversation_id': r['conversation_id'],
+                        'last_role': r['role'], 'last_text': _text(r['text'])[0], 'last_at': r['created'],
+                        'turn_status': turn['status'] if turn else '', 'turn_error': turn['error'] if turn else '',
+                        'sender': turn['sender'] if turn else '',
+                        'takeover': takeover_state(c, tenant, r['channel'], r['conversation_id'], now)})
+    return {'conversations': out}
+
+
+@router.get('/{tenant}/conversations/{channel}/{conversation_id}')
+def shop_conversation(tenant: str, channel: str, conversation_id: str, request: Request):
+    """One thread: history lines in order, its turns, and operator replies sent to it."""
+    from platform_runtime.conversation import takeover_state
+    from platform_runtime.engine import DIRECT_DESTINATION_FIELD, OPERATOR_CHANNEL
+    from platform_runtime.operator_reply import OPERATOR_LINE_KIND
+    identity(request, tenant, OPERATORS)
+    if len(channel) > 32 or len(conversation_id) > MAX_CONVERSATION_ID_CHARS:
+        raise HTTPException(404, 'Conversation not found')
+    key = (tenant, channel, conversation_id)
+    e = engine()
+    with e.read() as c:
+        takeover = takeover_state(c, *key, e.clock())
+        history = [dict(r) for r in c.execute(
+            'SELECT seq,role,text,created FROM p_conversation_history WHERE tenant=? AND channel=? '
+            'AND conversation_id=? ORDER BY seq', key)]
+        turns = [dict(r) for r in c.execute(
+            '''SELECT * FROM (SELECT event_key,seq,status,error,task,reply,run_id,sender,created,updated
+               FROM p_conversation_turns WHERE tenant=? AND channel=? AND conversation_id=?
+               ORDER BY created DESC,rowid DESC LIMIT ?) ORDER BY created,seq''', (*key, MAX_SHOP_ROWS))]
+        replies = []
+        tool = channel + '.send'
+        if tool in DIRECT_DESTINATION_FIELD:
+            path = '$.' + DIRECT_DESTINATION_FIELD[tool]
+            replies = [{'task_id': r['id'], 'status': r['status'], 'actor': r['actor'],
+                        'created': r['created'], 'text': _text(_json(r['args'], {}).get('text'))[0]}
+                       for r in c.execute(
+                           '''SELECT t.id,t.status,t.actor,t.created,s.args FROM p_tasks t
+                              JOIN p_steps s ON s.task=t.id AND s.tenant=t.tenant
+                              WHERE t.tenant=? AND t.channel=? AND s.tool=? AND json_extract(s.args,?)=?
+                              AND NOT EXISTS(SELECT 1 FROM p_records r WHERE r.tenant=t.tenant
+                                             AND r.kind=? AND r.id=t.id)
+                              ORDER BY t.created DESC LIMIT ?''',
+                           (tenant, OPERATOR_CHANNEL, tool, path, conversation_id, OPERATOR_LINE_KIND,
+                            MAX_SHOP_ROWS))]
+            replies.reverse()
+    if not history and not turns and not replies:
+        raise HTTPException(404, 'Conversation not found')
+    for line in history:
+        line['text'] = _text(line['text'])[0]
+    for turn in turns:
+        turn['reply'] = _text(turn['reply'])[0]
+    return {'channel': channel, 'conversation_id': conversation_id, 'history': history,
+            'turns': turns, 'operator_replies': replies, 'takeover': takeover}
+
+
+@router.post('/{tenant}/conversations/{channel}/{conversation_id}/release')
+def shop_conversation_release(tenant: str, channel: str, conversation_id: str, request: Request):
+    """Hand an operator-held chat back to the bot before its takeover expires."""
+    from platform_runtime.conversation import release_takeover, takeover_state
+    from platform_runtime.engine import Forbidden
+    who = identity(request, tenant, OPERATORS)
+    if not request.headers.get('Idempotency-Key', ''):
+        raise HTTPException(422, 'Idempotency-Key header required')
+    e = engine()
+    try:
+        released = release_takeover(e, tenant, channel, conversation_id, who['sub'])
+    except Forbidden:
+        raise HTTPException(403, 'Policy denied') from None
+    with e.read() as c:
+        state = takeover_state(c, tenant, channel, conversation_id, e.clock())
+    return {'released': released, 'takeover': state}
 
 
 def _credential_refs(block, scoped=False):

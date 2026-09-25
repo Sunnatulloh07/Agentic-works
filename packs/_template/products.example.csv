@@ -1,0 +1,5 @@
+id,name,price_uzs,sizes,stock,category,gender,age,colors,description,photo_url
+NAMUNA-001,"Bodi, uzun yengli (paxta)",89000,62;68;74;80,62:3;68:5;74:2;80:0,bodi,unisex,0-12 oy,oq;ko‘k,"100% paxta, tugmali. Namuna qator — o‘zingiznikiga almashtiring.",https://cdn.example.uz/namuna-001.jpg
+NAMUNA-002,Futbolka (qizlar uchun),99000,86;92;98;104,86:4;92:6;98:1;104:0,futbolka,qiz,1-4 yosh,pushti;oq,Yumshoq trikotaj,
+NAMUNA-003,Qishki kombinezon,459000,74;80;86;92,,kombinezon,o‘g‘il,6-24 oy,ko‘k;kulrang,"Issiq, suv o‘tkazmaydigan mato",
+NAMUNA-004,Paypoq (3 juft),45000,S;M;L,S:10;M:8;L:0,paypoq,unisex,0-3 yosh,aralash,,

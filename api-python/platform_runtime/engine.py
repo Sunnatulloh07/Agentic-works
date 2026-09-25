@@ -35,24 +35,15 @@ DIRECT_DESTINATION_FIELD = {'telegram.send': 'conversation_id',
                             'whatsapp.send': 'contact'}
 OUTBOUND_TOOLS = frozenset(DIRECT_DESTINATION_FIELD)
 # Channels that own an inbound event stream, so a reply can be bound to the event
-# that opened it. WhatsApp is absent, and that is now a deliberate choice rather than
-# the "no inbound ingest yet" this comment used to claim.
-#
-# The whatsapp_inbound block does ingest verified customer messages, and whatsapp.py
-# now reads the window it records (``window_sources``) with the verified event taking
-# precedence over the operator's sheet. So the window the inbound block opens IS
-# consulted when the send gate runs.
-#
-# What is NOT done here is binding the *destination* to the event. Adding whatsapp to
-# this set would move a whatsapp.send from the allowlist branch below to the
-# event-binding branch, which changes which rule authorizes the send rather than
-# merely adding one. That would also make a template send -- which legitimately
-# happens outside the window and has no inbound event to bind to -- fail at
-# submission. The two checks answer different questions: "is the customer inside the
-# window" (answered in whatsapp.py from the verified events) and "may this step name
-# this recipient" (answered here from the pack's allowlist). Keeping them separate is
-# the current, tested behaviour.
-OUTBOUND_CHANNELS = frozenset({'telegram', 'instagram'})
+# that opened it. WhatsApp joined once it got a verified webhook route
+# (app/whatsapp_api.py): its events carry the sender's wa_id as conversation_id, so a
+# task on the whatsapp channel -- a conversation turn's reply -- may only send
+# whatsapp.send to that wa_id. This moves only tasks ON the whatsapp channel to the
+# event-binding branch below; a template or outreach send from cron, web or an agent
+# run has no inbound event and stays on the allowlist branch, unchanged. "Is the
+# customer inside the 24-hour window" is still answered in whatsapp.py, from the
+# verified events, before any provider I/O.
+OUTBOUND_CHANNELS = frozenset({'telegram', 'instagram', 'whatsapp'})
 
 # ERP posting is deliberately NOT in the set above, and it is worth naming why,
 # because "reaches an external system" sounds like the same category and is not.
@@ -137,6 +128,13 @@ def event_error(exc):
     return type(exc).__name__
 
 
+# The conversation an inbound event belongs to, as an expression that is TOTAL over
+# p_events: SQLite evaluates an index expression on every INSERT and while building
+# the index, and bare json_extract raises on a non-JSON payload -- which would fail
+# the insert, or fail Engine startup on a database that already holds such a row.
+# The lookup must use this exact text, or the planner cannot use the index.
+EVENT_CONVERSATION_ID = "(CASE WHEN json_valid(payload) THEN json_extract(payload,'$.conversation_id') END)"
+
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS p_migrations(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS p_tasks(
@@ -203,8 +201,9 @@ CREATE INDEX IF NOT EXISTS p_agent_runs_pending ON p_agent_runs(tenant,status,cr
 CREATE INDEX IF NOT EXISTS p_steps_queue ON p_steps(tenant,status,position);
 CREATE INDEX IF NOT EXISTS p_tasks_tenant ON p_tasks(tenant,created);
 CREATE INDEX IF NOT EXISTS p_audit_tenant ON p_audit(tenant,id);
-CREATE INDEX IF NOT EXISTS p_events_conversation
- ON p_events(tenant,channel,json_extract(payload,'$.conversation_id'));
+DROP INDEX IF EXISTS p_events_conversation;
+CREATE INDEX IF NOT EXISTS p_events_conversation_id
+ ON p_events(tenant,channel,''' + EVENT_CONVERSATION_ID + ''');
 '''
 
 
@@ -551,8 +550,8 @@ class Engine:
         target = args.get(DIRECT_DESTINATION_FIELD[tool])
         if not isinstance(target, str) or not target:
             raise ValueError('Invalid conversation identity')
-        known = c.execute("SELECT 1 FROM p_events WHERE tenant=? AND channel=? "
-                          "AND json_extract(payload,'$.conversation_id')=? LIMIT 1",
+        known = c.execute('SELECT 1 FROM p_events WHERE tenant=? AND channel=? AND '
+                          + EVENT_CONVERSATION_ID + '=? LIMIT 1',
                           (tenant, channel, target)).fetchone()
         if not known:
             raise NotFound('Conversation unknown to this tenant')
@@ -698,9 +697,10 @@ class Engine:
                     self.audit(c,tenant,r['task'],'step.cancelled','agent-loop',{'step':r['id'],'reason':'agent_run_inactive'})
                     self._refresh(c,tenant,r['task'])
                     continue
-                error='policy_changed'
+                error='authority_revoked'
                 try:
                     self.require_authority(c,tenant,r['channel'],r['creator'])
+                    error='policy_changed'
                     # The origin is re-read so a reply is re-bound to the same verified
                     # conversation it was submitted against: the inbound event for a
                     # channel task, the tenant's inbound stream for an operator reply.

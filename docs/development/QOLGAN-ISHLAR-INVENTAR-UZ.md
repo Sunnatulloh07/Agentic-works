@@ -21,16 +21,16 @@
 |---|---|---|
 | Runtime modullari | **43** fayl (retry.py qo'shildi) | `api-python/platform_runtime/` |
 | Registry tool'lari | **88** (known **89**) | `build_registry()` |
-| **Pack'dan yetib boradigan tool'lar** | **12** — 89 dan | yetkazilgan pack'lar: `demo-retail`, `marketing`, `_template` |
-| **Yetib bo'lmaydigan `platform_runtime` LOC** | **81%** | shu uch pack'dan chaqirib bo'lmaydi |
+| **Pack'dan yetib boradigan tool'lar** | **17** — 88 dan (2026-09-25) | yetkazilgan pack'lar: `demo-retail`, `marketing`, `turkish-baby`, `_template`; `whatsapp.*` endi `turkish-baby`da e'lon qilingan |
+| **Yetib bo'lmaydigan `platform_runtime` LOC** | **56%** — 15 modul, 10 758 / 19 182 satr (2026-09-25) | eski **81%** boshqa metodika bilan o'lchangan (yadro modullari hisobdan chiqarilgan), shuning uchun raqamlar **solishtirilmaydi** |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
-| `app/` modullari | **40** fayl | `api-python/app/` |
-| Offline testlar | **3 148** | `Ran 3148 tests` |
-| Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`) |
+| `app/` modullari | **41** fayl (`whatsapp_api.py` qo‘shildi) | `api-python/app/` |
+| Offline testlar | **3 569** | `Ran 3569 tests in 180.3s` (2026-09-25) |
+| Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`); 13 bloklangan test `test_platform_baseline.py` da sabab bilan qadalgan |
 | Windows uchun **bloklangan** sinovlar | **13** (12 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
 | Ultra-audit fazalari | **§125–§157** — 33 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
-| UI gate'lari | typecheck **PASS**, build **PASS** (`next@14.2.35`), `npm audit` **FAIL** | `apps/ui` |
-| `MANIFEST.sha256` | **PASS** — 510 fayl, 0 xato; **va endi toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
+| UI gate'lari | typecheck **PASS** (2026-09-25), build **PASS**, `npm audit` **0 vulnerabilities** (`next@16.3.6`, `react@19.3.0`) | `apps/ui` |
+| `MANIFEST.sha256` | **PASS** — 543 fayl, 0 xato (2026-09-25); **toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
 | **API bu mashinada ishga tushirilganmi** | **YO'Q** | `.env` yo'q, `config/integrations.json` yo'q, `data/app.db` da faqat migratsiya qatori |
 | **README first-run yo'li** | **O'LIK edi, tuzatildi** | `setup_local.py` → `owner_login.py` = 410 + 403; yagona yo'l `provision_identity.py` |
 | `production_release` | **NO_GO** | `BACKLOG.json` |
@@ -38,12 +38,15 @@
 **Muhim:** `production_release: NO_GO` — bu **ataylab**. Tizim hozir
 "mijozga topshiriladigan mahsulot" emas, "tekshirilgan platforma yadrosi".
 
-**Ikkinchi muhim gap — yetib borish.** Registry'dagi 89 tool'dan **12 tasigina**
-yetkazib berilayotgan pack'lardan chaqirilishi mumkin. Quyidagi modullarni
+**Ikkinchi muhim gap — yetib borish.** Registry'dagi 88 tool'dan **17 tasi**
+yetkazib berilayotgan pack'lardan chaqirilishi mumkin (2026-09-25; `whatsapp.*`
+`turkish-baby`da e'lon qilindi). Quyidagi modullarni
 ishlatadigan **birorta pack yo'q**: `erp`, `documents`, `inventory`,
-`business_graph`, `whatsapp`, `whatsapp_inbound`, `telephony`, `assets`, `vision`,
+`business_graph`, `telephony`, `assets`, `vision`,
 `manufacturing`, `oee`, `workforce`, `supervisor`, `reengagement`, `escalation`,
-`briefing`, `oversight`. WhatsApp inbound uchun **umuman HTTP route yo'q**.
+`briefing`, `oversight`. WhatsApp inbound HTTP route **2026-09-25 da yozildi**
+(`app/whatsapp_api.py`), lekin birorta pack `whatsapp.*` tool'ini e'lon qilmagani uchun
+modul amalda hamon yetib bo'lmaydi.
 
 Bular **muzlatilgan (frozen) preview modullar** — mahsulot funksiyasi emas. Ular test
 va chegara auditi bilan qoplangan, lekin hech bir mijoz konfiguratsiyasi ularga yetib
@@ -110,7 +113,9 @@ qarang: birorta yetkazilgan pack ularni chaqirmaydi):**
   (`.env` yo'q, `config/integrations.json` yo'q), shuning uchun **hech bir**
   integratsiyani `live_verified` deb yozib bo'lmaydi — eng yuqorisi
   `LOCAL_CONTRACT_TESTED`
-- **WhatsApp inbound HTTP route** — modul bor, **route yo'q**
+- **WhatsApp inbound HTTP route** — ~~modul bor, route yo'q~~ **2026-09-25 da yozildi**
+  (`app/whatsapp_api.py`; handshake, imzo, tenant routing; 19 HTTP testi). Qolgani: pack
+  e'loni (`whatsapp.*` tool'lari) va live Meta acceptance.
 
 ---
 
@@ -337,9 +342,9 @@ Ya'ni qolgan UI ishi — bitta **tool chaqirish yuzasi**, alohida panel emas.
 `production_release: NO_GO`. Ikki sabab, ikkalasi ham kod sifati emas:
 
 1. **Operatsion qattiqlashtirish yo'q** — HA, observability, DR, live acceptance.
-2. **Yetib borish bo'shlig'i** — 89 tool'dan 12 tasi, `platform_runtime` kodining
-   19% qismi yetkazilgan pack'lardan chaqiriladi. Qolgan 17 modul **muzlatilgan
-   preview**, mahsulot funksiyasi emas (§0).
+2. **Yetib borish bo'shlig'i** — 88 tool'dan 17 tasi (2026-09-25), `platform_runtime`
+   kodining 56%i (15 modul) hamon yetkazilgan pack'lardan chaqirilmaydi. Ular
+   **muzlatilgan preview**, mahsulot funksiyasi emas (§0).
 
 Bunga qo'shimcha, **birinchi ishga tushirish yo'li o'lik edi**: README'dagi
 `setup_local.py` → `owner_login.py` ketma-ketligi 410 va 403 bilan to'xtardi, UI'da
@@ -365,7 +370,7 @@ ham yopiq turgan.
 | CI `http` job | endi **yig'iladi** — `integration_tests/conftest.py` `ENV` va `ALLOW_INSECURE_DEV` ni qo'yib, collection ordering bog'liqligini yo'q qildi |
 | CI `ui_dependency_security` job | **hamon FAIL** — `next@14.2.35` da 1 critical + 1 high; Next 15 + React 19 kerak |
 | POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
-| **Node runner** (`apps/runner/test.js`) | **11 / 24 qizil** Windows'da — `privateFile()` `(mode & 0o077) === 0` ni talab qiladi, Windows POSIX ruxsat bitlarini modellashtirmaydi. **Qadalmagan** |
+| **Node runner** (`apps/runner/test.js`) | **11 / 31 qizil** Windows'da (2026-09-25 o'lchovi; ilgari 11/24 deb yozilgan edi, to'plam o'sgan). Uch sabab: `execute()` Linux'da bo'lmaganda rad etadi (5), `symlink` EPERM (2), POSIX ruxsat bitlari (4). **Endi qadalgan**: `apps/runner/windows-baseline.test.js` har bir sababni **yurgizib** tasdiqlaydi va 11 ta nomni `test.js`da qidiradi |
 | `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` FAIL — **platforma**, kod emas |
 | `test_customer360_bounds.py` (§157) | **72 sinov** (77 subtest), yashil; `scripts/probes/audit_customer360_bounds.py` — **ikki yurishli** matritsa (52 o'z moduli + 8 mustaqil iste'molchi), **60/60 RED** |
 | Umumiy baseline fixture (deyarli 3 daqiqalik to'plam uchun) | **hali yo'q** |

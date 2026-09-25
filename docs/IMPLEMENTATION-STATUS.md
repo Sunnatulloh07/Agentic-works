@@ -10,26 +10,29 @@ faqat pastga ko‘chirildi.
 |---|---|
 | API bu mashinada ishga tushirilganmi? | **Yo‘q.** `api-python/.env` yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori bor. |
 | Biror provider `live_verified`mi? | **Yo‘q.** Eng yuqori daraja — `LOCAL_CONTRACT_TESTED`. |
-| `runtime_tests` | **3 239 sinov**; Windows’da `failures=1, errors=12` — **13 tasi Windows-only** sabab bilan (`os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink privilegiyasi, POSIX fayl rejimlari). |
-| `integration_tests` | **192/192 PASS** (2026-09-23; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`; birinchi ikkitasini `conftest.py` o‘zi qo‘yadi; `cryptography` o‘rnatilgan bo‘lishi shart). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi. |
+| `runtime_tests` | **3 569 sinov** (2026-09-25); Windows’da `failures=1, errors=12` — **13 tasi Windows-only** sabab bilan va ro‘yxat `test_platform_baseline.py` da qadalgan. |
+| `integration_tests` | **351/351 PASS** (2026-09-25; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`; birinchi ikkitasini `conftest.py` o‘zi qo‘yadi; `cryptography` o‘rnatilgan bo‘lishi shart). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi. |
 | `api-python/tests/` (legacy) | **Nafaqaga chiqarildi (2026-09-22).** U 33 qizil / 172 pass edi va hech bir gate uni yurgizmasdi. Sabablar: `api-python/integration_tests/LEGACY-RETIRED.md`. |
 | CI `http` job | endi **yig‘iladi** — `integration_tests/conftest.py` ordering bog‘liqligini yo‘q qildi. |
-| CI `ui_dependency_security` job | **FAIL** — `next@14.2.35` da 1 critical + 1 high; tuzatish **Next 15 + React 19** talab qiladi, 14.x liniyasida yopilmaydi. |
+| CI `ui_dependency_security` job | **PASS** — `npm audit --audit-level=high` → 0 vulnerabilities (2026-09-25; `next@16.3.6` + `react@19.3.0`). |
 | First-run yo‘li | Faqat `scripts/provision_identity.py`. Eski `setup_local.py` → `owner_login.py` ketma-ketligi **o‘lik** (410 / 403, UI’da token maydoni yo‘q). |
 
 ## Qamrov: registry va pack’lar orasidagi bo‘shliq
 
-Registry’da **89** tool bor. Yetkazib berilayotgan pack’lardan (`demo-retail`, `marketing`,
-`_template`) **12 tasigina** chaqirilishi mumkin. `platform_runtime` kodining **81%** shu
-uch pack’dan **yetib bo‘lmaydi**.
+Registry’da **88** tool bor. Yetkazib berilayotgan pack’lardan (`demo-retail`, `marketing`,
+`turkish-baby`, `_template`) **17 tasi** chaqirilishi mumkin (2026-09-25 o‘lchovi;
+`whatsapp.*` endi `turkish-baby`da). Qolgan 15 modulning **10 758 satri**
+(19 182 dan, 56%) hamon chaqirilmaydi.
 
 Quyidagi modullarni ishlatadigan **birorta pack yo‘q**:
 
-`erp` · `documents` · `inventory` · `business_graph` · `whatsapp` · `whatsapp_inbound` ·
+`erp` · `documents` · `inventory` · `business_graph` ·
 `telephony` · `assets` · `vision` · `manufacturing` · `oee` · `workforce` · `supervisor` ·
 `reengagement` · `escalation` · `briefing` · `oversight`
 
-WhatsApp inbound uchun **umuman HTTP route yo‘q**.
+WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`; 19 HTTP testi
+`integration_tests/test_whatsapp_webhook_http.py`) va `whatsapp.*` tool’lari
+`turkish-baby` pack’ida e’lon qilingan — live Meta acceptance hamon yo‘q.
 
 Bular **muzlatilgan (frozen) preview modullar** — mahsulot funksiyasi emas. Ular test va
 chegara auditi bilan qoplangan, lekin hech bir mijoz konfiguratsiyasi ularga yetib
@@ -120,14 +123,13 @@ Internetga chiqadigan production’dan oldin dependency/security review majburiy
 
 | Nuqson | Endi |
 |---|---|
-| ERP «post once» kafolat emas edi: ledger qatori POST’dan **keyin** yozilardi, POST va ledger orasidagi crash retry’da ikkinchi posting berardi | POST’dan **oldin** claim qiluvchi `posting` qatori deterministik idempotency kaliti bilan yoziladi va ERP’ga `Idempotency-Key` header’ida yuboriladi. Javobi yo‘qolgan POST (timeout, 5xx, crash; 180 s dan eski rezerv) `uncertain` bo‘ladi va owner `erp.reconcile_posting` qilmaguncha qayta yuborilmaydi. Faqat aniq rad javobi (408/409/425/429 dan boshqa 4xx) retry’ga ochiq. `unconfirmed` ham endi retry’ni to‘sadi. HTTP route yo‘q — reconcile hozircha Python funksiyasi |
+| ERP «post once» kafolat emas edi: ledger qatori POST’dan **keyin** yozilardi, POST va ledger orasidagi crash retry’da ikkinchi posting berardi | POST’dan **oldin** claim qiluvchi `posting` qatori deterministik idempotency kaliti bilan yoziladi va ERP’ga `Idempotency-Key` header’ida yuboriladi. Javobi yo‘qolgan POST (timeout, 5xx, crash; 180 s dan eski rezerv) `uncertain` bo‘ladi va owner `erp.reconcile_posting` qilmaguncha qayta yuborilmaydi. Faqat aniq rad javobi (408/409/425/429 dan boshqa 4xx) retry’ga ochiq. `unconfirmed` ham endi retry’ni to‘sadi. Endi HTTP route ham bor: `GET /platform/{tenant}/erp/postings?status=...` (owner/operator o‘qiydi) va `POST /platform/{tenant}/erp/postings/{id}/reconcile` (owner only) |
 | Business Graph / inventory: source 50 qatorli chegarada (where-filtersiz) to‘xtasa natija jim kesilardi | Har source status’ida `truncated`; javoblarda `truncated` va `sources_truncated`. Bitta entity uchun faqat id topilmagan kesilgan source hisoblanadi |
 | Login throttle proxy ortida bitta IP bucket (global lockout) | `TRUSTED_PROXIES` (IP/CIDR); faqat ishonchli peer’da XFF’ning o‘ngdan birinchi ishonchsiz manzili. Akkaunt bo‘yicha throttle avvaldan bor edi, test bilan qadaldi |
-| Runner har `4403` da butunlay chiqardi | Server `4403` ni har xatoda yuboradi; runner autentifikatsiyadan keyingi `4403` da qayta ulanadi, javobsiz 3 rad’da chiqadi, muddati o‘tgan token faylini kutadi |
+| Runner har `4403` da butunlay chiqardi | Server endi alohida kodlar yuboradi: `4401` token, `4403` revoke/rotatsiya, `4400` protokol, `1011` server xatosi (`integration_tests/test_runner_close_codes.py`). Runner: `4403` → darhol chiqadi, `4401` → token yo‘li (fayldan kutadi, 3 raddan keyin chiqadi), qolganlari → backoff bilan qayta ulanadi |
 | MySQL: `ssl_ca` yo‘q, PyMySQL CA’siz hostname tekshiruvini o‘chirardi | Aniq `SSLContext` (hostname + zanjir, TLS ≥ 1.2); ixtiyoriy `ssl_ca_env` (CA fayl yo‘li env’da) yoki absolyut `ssl_ca`; inline PEM va `tls_verify: false` rad etiladi |
 
-Qolgan: server tomonda runner close kodlarini ajratish (`platform_api.py`, 4401/4403/1011),
-ERP reconcile uchun HTTP route va live ERP/MySQL tekshiruvi.
+Qolgan: live ERP/MySQL tekshiruvi.
 
 ---
 

@@ -1,2 +1,8 @@
 # Required by real AES-GCM tests. Install outside offline verification.
 cryptography==50.0.1
+
+# The app-layer bounds modules import FastAPI's HTTPException
+# (runtime_tests/test_app_layer_bounds.py, runtime_tests/test_pipeline_bounds.py),
+# so CI's core job -- which installs only this file -- could not even collect the
+# suite. Found by tracing the imports, not by reading a CI log.
+fastapi>=0.115

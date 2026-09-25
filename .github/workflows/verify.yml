@@ -18,10 +18,11 @@ jobs:
       - run: python -m unittest discover -s scripts -p "test_release_tools.py" -v
       - run: python -m unittest discover -s scripts -p "test_manifest.py" -v
       - run: python -m unittest discover -s scripts -p "test_run_local.py" -v
+      - run: python -m unittest discover -s scripts -p "test_import_catalog.py" -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test apps/runner/test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs apps/ui/lib/shop-client.test.mjs
+      - run: node --test apps/runner/test.js apps/runner/windows-baseline.test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs apps/ui/lib/shop-client.test.mjs apps/ui/lib/conversation-client.test.mjs
   http:
     runs-on: ubuntu-latest
     steps:
@@ -36,6 +37,8 @@ jobs:
         env:
           ENV: test
           PIPELINE_MODE: platform
+      # Real API + worker, fake model and Bot API on loopback: webhook to reply.
+      - run: python scripts/e2e_smoke.py
   ui:
     runs-on: ubuntu-latest
     steps:

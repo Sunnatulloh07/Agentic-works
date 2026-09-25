@@ -28,7 +28,7 @@ CHAT = 'chat-555'
 OPERATOR = 'olga'
 # The channels runtime_authority verifies a membership on; everything else is a
 # provider stream whose sender is not a workspace member.
-MEMBER_CHANNELS = {'web', 'cron', 'approval', 'agent'}
+from app.runtime_authority import MEMBER_CHANNELS
 
 
 class OperatorReplyTests(unittest.TestCase):
@@ -167,11 +167,22 @@ class OperatorReplyTests(unittest.TestCase):
         self.assertEqual([], self.sent)
 
     def test_a_web_event_is_not_a_customer_conversation(self):
-        """Only channels with a verified inbound stream can be replied to."""
+        """Only channels with a verified inbound stream can be replied to at all."""
         self.e.accept_event(T, 'web', 'w1', {'text': 'x', 'sender': OPERATOR, 'conversation_id': OPERATOR})
-        for channel in ('web', 'whatsapp', 'cron', OPERATOR_CHANNEL, ''):
+        for channel in ('web', 'cron', OPERATOR_CHANNEL, ''):
             with self.subTest(channel=channel), self.assertRaises(ValueError):
                 self.reply(channel=channel, chat=OPERATOR)
+
+    def test_whatsapp_now_owns_a_stream_so_the_refusal_is_the_unknown_chat(self):
+        """whatsapp joined OUTBOUND_CHANNELS when app/whatsapp_api.py gave it a
+        verified webhook; a reply to a chat that never wrote is NotFound, the same
+        refusal telegram gives an unknown chat -- not 'the channel cannot carry it'.
+        """
+        self.e.accept_event(T, 'web', 'w1', {'text': 'x', 'sender': OPERATOR, 'conversation_id': OPERATOR})
+        with self.assertRaises(NotFound):
+            self.reply(channel='whatsapp', chat='998901112233')
+        self.assertEqual([], self.e.list_tasks(T))
+        self.assertEqual([], self.sent)
 
     def test_viewer_and_integrator_are_refused(self):
         self.inbound()
@@ -284,7 +295,8 @@ class OperatorReplyTests(unittest.TestCase):
         self.assertFalse(self.e.tick(T))
         task = self.task(tid)
         self.assertEqual('failed', task['status'])
-        self.assertEqual('approver_revoked', task['steps'][0]['error'])
+        # The creator (the same operator) is re-checked first at claim.
+        self.assertEqual('authority_revoked', task['steps'][0]['error'])
         self.assertEqual([], self.sent)
 
     def test_conversation_gone_between_submit_and_claim_is_not_sent(self):
@@ -366,6 +378,63 @@ class OperatorReplyTests(unittest.TestCase):
         self.assertTrue(settle_operator_replies(self.e, T))
         self.assertEqual([], self.rows('SELECT 1 FROM p_conversation_history WHERE tenant=?', 'other'))
         self.assertEqual(1, len(self.rows('SELECT 1 FROM p_conversation_history WHERE tenant=?', T)))
+
+    # --- the conversation index must be total over p_events ---------------------------
+
+    def raw_event(self, key, payload, channel='telegram'):
+        with self.e.tx() as c:
+            c.execute('INSERT INTO p_events(tenant,channel,event_key,fingerprint,payload) VALUES(?,?,?,?,?)',
+                      (T, channel, key, 'fp', payload))
+
+    def test_a_malformed_event_payload_can_still_be_stored(self):
+        """The index expression runs on every INSERT; a non-JSON row must not make it raise."""
+        self.raw_event('bad1', 'not json')
+        self.raw_event('bad2', '["a","list"]')
+        self.assertEqual(2, len(self.rows('SELECT 1 FROM p_events WHERE tenant=?', T)))
+
+    def test_the_lookup_tolerates_malformed_rows_beside_the_real_conversation(self):
+        self.raw_event('bad1', 'not json')
+        self.inbound()
+        self.raw_event('bad2', '{"conversation_id":')
+        tid = self.reply()
+        self.assertTrue(self.e.tick(T))
+        self.assertEqual('succeeded', self.task(tid)['status'])
+        with self.assertRaises(NotFound):
+            self.reply(chat='not json', key='k2')
+
+    def test_an_engine_opens_a_database_that_already_holds_a_malformed_payload(self):
+        """An older database has no index yet; building it over a bad row must not fail startup."""
+        path = Path(self.tmp.name) / 'o.db'
+        with self.e.tx() as c:
+            c.execute('DROP INDEX p_events_conversation_id')
+        self.raw_event('bad1', 'not json')
+        self.inbound()
+        with self.e.tx() as c:
+            c.execute('PRAGMA user_version=0')  # the schema is re-applied on the next open
+        reopened = Engine(path, self.registry, self.e.policy, clock=lambda: self.now,
+                          authority=self.e.authority)
+        with reopened.read() as c:
+            self.assertTrue(c.execute("SELECT 1 FROM sqlite_master WHERE name='p_events_conversation_id'").fetchone())
+        tid = reopened.operator_reply(T, 'telegram', CHAT, 'Salom', actor=OPERATOR, role='operator',
+                                      key='k-reopen', agent='bot')
+        self.assertTrue(reopened.tick(T))
+        self.assertEqual('succeeded', reopened.get(T, tid)['status'])
+
+    def test_the_conversation_lookup_uses_the_index(self):
+        from platform_runtime.engine import EVENT_CONVERSATION_ID
+        with self.e.read() as c:
+            plan = ' '.join(row['detail'] for row in c.execute(
+                'EXPLAIN QUERY PLAN SELECT 1 FROM p_events WHERE tenant=? AND channel=? AND '
+                + EVENT_CONVERSATION_ID + '=? LIMIT 1', (T, 'telegram', CHAT)))
+        self.assertIn('p_events_conversation_id', plan)
+
+
+class WorkerWiringTests(unittest.TestCase):
+    def test_the_worker_settles_operator_replies_after_the_engine_tick(self):
+        """A reply the engine just delivered joins the history in the same pass."""
+        source = (Path(__file__).resolve().parents[1] / 'app' / 'worker.py').read_text(encoding='utf-8')
+        self.assertIn('settle_operator_replies(e,t)', source)
+        self.assertLess(source.index("('engine',"), source.index("('operator_reply',"))
 
 
 if __name__ == '__main__':

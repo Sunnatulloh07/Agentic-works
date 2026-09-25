@@ -7,6 +7,12 @@ from pydantic import BaseModel, Field
 PHONE_RE = re.compile(r"^\+998\d{9}$")
 
 
+# The order quantity range: ONE fact. app/pipeline.py imports these for its early
+# /buy parse instead of writing a third literal 1..99.
+MIN_QUANTITY = 1
+MAX_QUANTITY = 99
+
+
 class Order(BaseModel):
     id: str = ""
     tenant: str = Field(max_length=64)
@@ -14,7 +20,7 @@ class Order(BaseModel):
     customer: str = Field(default="mijoz", max_length=200)
     phone: str = Field(max_length=20)
     product_id: str = Field(max_length=64)
-    qty: int = Field(ge=1, le=99)
+    qty: int = Field(ge=MIN_QUANTITY, le=MAX_QUANTITY)
     branch_id: str = Field(max_length=64)
     note: str = Field(default="", max_length=500)
     status: str = "new"
@@ -30,7 +36,7 @@ def validate_order_payload(payload: dict, pack) -> None:
     if str(payload.get("branch_id", "")).lower() not in bids:
         raise ValueError("filial topilmadi")
     qty = payload.get("qty", 0)
-    if not isinstance(qty, int) or not (1 <= qty <= 99):
+    if not isinstance(qty, int) or not (MIN_QUANTITY <= qty <= MAX_QUANTITY):
         raise ValueError("son noto'g'ri")
     if not PHONE_RE.match(str(payload.get("phone", ""))):
         raise ValueError("telefon noto'g'ri")

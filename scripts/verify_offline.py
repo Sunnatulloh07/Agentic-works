@@ -147,7 +147,7 @@ def run(root: Path, output: Path) -> dict:
         node = shutil.which('node')
         if node:
             jobs += [
-                ('node_runner', [node, '--test', 'apps/runner/test.js'], root),
+                ('node_runner', [node, '--test', 'apps/runner/test.js', 'apps/runner/windows-baseline.test.js'], root),
                 ('browser_session_client', [node, '--test', 'apps/ui/lib/session-client.test.mjs'], root),
                 ('browser_oauth_client', [node, '--test', 'apps/ui/lib/oauth-client.test.mjs'], root),
                 ('browser_google_data_client', [node, '--test', 'apps/ui/lib/google-data-client.test.mjs'], root),

@@ -75,37 +75,43 @@ test('strict task validator accepts only supported envelope',()=>{
 const {closeAction,tokenExpiry,MAX_AUTH_REJECTIONS}=require('./runner');
 const jwt=claims=>'h.'+Buffer.from(JSON.stringify(claims)).toString('base64url')+'.s';
 const NOW=1_800_000_000_000;
-test('4403 after an authenticated session is transient: reconnect, counter reset',()=>{
-  const out=closeAction({code:4403,authenticated:true,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:2});
-  assert.equal(out.action,'retry');assert.equal(out.rejections,0);
+test('4403 means revoked or rotated: exit at once with a re-enroll message, even mid-session',()=>{
+  for(const authenticated of [true,false]){
+    const out=closeAction({code:4403,authenticated,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:0});
+    assert.equal(out.action,'exit');assert.match(out.message,/revoked or rotated/);assert.match(out.message,/re-enroll/);
+  }
 });
-test('4403 before any server message with a live token is retried, then exits as revoked',()=>{
+test('4401 with a live token is retried, then exits as a refused token',()=>{
   let state=0,out;
   for(let i=1;i<MAX_AUTH_REJECTIONS;i++){
-    out=closeAction({code:4403,authenticated:false,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:state});
+    out=closeAction({code:4401,authenticated:false,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:state});
     assert.equal(out.action,'retry');state=out.rejections;assert.equal(state,i);
   }
-  out=closeAction({code:4403,authenticated:false,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:state});
-  assert.equal(out.action,'exit');assert.match(out.message,/revoked or rotated/);assert.match(out.message,/re-enroll/);
+  out=closeAction({code:4401,authenticated:false,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,rejections:state});
+  assert.equal(out.action,'exit');assert.match(out.message,/refused/);
 });
-test('an expired token from a file waits for rotation instead of exiting',()=>{
-  const out=closeAction({code:4403,authenticated:false,expiresAt:NOW-1,now:NOW,tokenFromFile:true,rejections:0});
+test('4401 with an expired token from a file waits for rotation instead of exiting',()=>{
+  const out=closeAction({code:4401,authenticated:false,expiresAt:NOW-1,now:NOW,tokenFromFile:true,rejections:0});
   assert.equal(out.action,'retry');assert.match(out.message,/expired/);assert.match(out.message,/RUNNER_TOKEN_FILE/);
   assert.equal(out.rejections,0);
 });
-test('an expired token from the environment exits with a clear message',()=>{
-  const out=closeAction({code:4403,authenticated:false,expiresAt:NOW-1,now:NOW,tokenFromFile:false,rejections:0});
+test('4401 with an expired token from the environment exits with a clear message',()=>{
+  const out=closeAction({code:4401,authenticated:false,expiresAt:NOW-1,now:NOW,tokenFromFile:false,rejections:0});
   assert.equal(out.action,'exit');assert.match(out.message,/expired/);
 });
-test('other close codes keep the ordinary backoff and the rejection count',()=>{
-  const out=closeAction({code:1006,authenticated:false,expiresAt:null,now:NOW,tokenFromFile:false,rejections:1});
-  assert.deepEqual({action:out.action,rejections:out.rejections},{action:'retry',rejections:1});
+test('protocol, server and network closes reconnect with backoff',()=>{
+  for(const code of [4400,1011,1006,1001]){
+    const out=closeAction({code,authenticated:false,expiresAt:null,now:NOW,tokenFromFile:false,rejections:1});
+    assert.deepEqual({action:out.action,rejections:out.rejections},{action:'retry',rejections:1});
+  }
+  const out=closeAction({code:1011,authenticated:true,expiresAt:null,now:NOW,tokenFromFile:false,rejections:2});
+  assert.equal(out.rejections,0);
 });
 test('close messages never carry the token',()=>{
   const token=jwt({exp:NOW/1000-5,sub:'device-secret-value'});
   for(const fromFile of [true,false])for(const expiresAt of [tokenExpiry(token),NOW+1]){
-    const out=closeAction({code:4403,authenticated:false,expiresAt,now:NOW,tokenFromFile:fromFile,rejections:MAX_AUTH_REJECTIONS});
-    assert.ok(!String(out.message).includes(token));assert.ok(!String(out.message).includes('device-secret-value'));
+    for(const code of [4401,4403]){const out=closeAction({code,authenticated:false,expiresAt,now:NOW,tokenFromFile:fromFile,rejections:MAX_AUTH_REJECTIONS});
+    assert.ok(!String(out.message).includes(token));assert.ok(!String(out.message).includes('device-secret-value'));}
   }
 });
 test('token expiry is read for the reconnect decision only, and fails soft',()=>{

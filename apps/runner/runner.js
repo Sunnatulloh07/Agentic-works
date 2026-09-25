@@ -150,13 +150,14 @@ function validateTask(task,now=Date.now()) {
   return task;
 }
 
-// Server close 4403 is NOT only "device revoked": platform_api.runner closes with it
-// for every exception -- expired or invalid JWT, revoked/rotated device, a receive
-// timeout, a stale claim, an unknown message, a database error. So one 4403 must not
-// end the runner. A 4403 that arrives before the server ever answered on that
-// connection is a refusal of this token; only MAX_AUTH_REJECTIONS of those in a row,
-// with a token that has not expired, are read as revocation.
+// Server close codes (api-python/app/platform_api.py RUNNER_CLOSE_*), one meaning each:
+//   4403 device revoked or its token rotated out -> stop; the device must be re-enrolled
+//   4401 device token invalid or expired         -> a new token is needed
+//   4400 protocol, 1011 server, 100x network      -> reconnect with backoff
+// A 4401 with a token that has not expired can still be a clock skew or a server
+// restart with a new key, so it is retried MAX_AUTH_REJECTIONS times before exiting.
 const MAX_AUTH_REJECTIONS=3;
+const CLOSE_AUTH=4401,CLOSE_REVOKED=4403;
 
 function tokenExpiry(token) {
   // Unverified read of `exp`, used ONLY to choose between waiting and exiting.
@@ -172,17 +173,19 @@ function tokenExpiry(token) {
 function closeAction({code,authenticated,expiresAt,now=Date.now(),tokenFromFile,rejections=0}) {
   // An authenticated session proves the token was accepted moments ago.
   if(authenticated)rejections=0;
-  if(code!==4403 || authenticated)return {action:'retry',rejections,message:''};
+  if(code===CLOSE_REVOKED)return {action:'exit',rejections,
+    message:'Device revoked or rotated by the server; re-enroll the device in the UI'};
+  if(code!==CLOSE_AUTH)return {action:'retry',rejections,message:''};
   if(expiresAt!==null && expiresAt<=now) {
-    // Expired, not revoked: the fix is a new token, and a token FILE can be
-    // rotated in place, so keep reconnecting (each attempt re-reads it).
+    // Expired, not revoked: a token FILE can be rotated in place, so keep
+    // reconnecting (each attempt re-reads it).
     if(tokenFromFile)return {action:'retry',rejections,message:'Device token expired; waiting for a rotated token in RUNNER_TOKEN_FILE'};
     return {action:'exit',rejections,message:'Device token expired; issue a new device token in the UI and restart the runner'};
   }
   rejections+=1;
   if(rejections>=MAX_AUTH_REJECTIONS)return {action:'exit',rejections,
-    message:`Device revoked or rotated: the server refused this token ${rejections} times in a row; re-enroll the device in the UI`};
-  return {action:'retry',rejections,message:'Server refused the device token (4403); retrying in case it was transient'};
+    message:`The server refused this device token ${rejections} times in a row; issue a new device token in the UI`};
+  return {action:'retry',rejections,message:'Server refused the device token (4401); retrying in case it was transient'};
 }
 
 function main() {

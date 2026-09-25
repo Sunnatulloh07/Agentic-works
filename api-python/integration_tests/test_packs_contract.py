@@ -325,3 +325,25 @@ def test_order_and_notify_values_are_typed_and_bounded(tmp_path, monkeypatch, bl
     write(tmp_path, monkeypatch, "probe", order_pack(block))
     with pytest.raises(PackError):
         load_pack("probe")
+
+
+def test_demo_retail_grounds_shop_answers_and_captures_orders():
+    from app.platform_api import policy
+    sales = policy("demo-retail", "sales.responder")
+    assert {"products.search", "shop.info", "orders.draft"} <= set(sales["tools"])
+    assert sales["conversation"]["order_agent"] == "sales.order_taker"
+    assert "records.create" in policy("demo-retail", "sales.order_taker")["tools"]
+    persona = load_pack("demo-retail").agents[0].prompt
+    assert "shop.info" in persona and "orders.draft" in persona
+
+
+def test_takeover_minutes_defaults_to_30_and_is_bounded(tmp_path, monkeypatch):
+    write(tmp_path, monkeypatch, "probe", order_pack("{enabled: true}"))
+    assert load_pack("probe").agents[0].conversation.takeover_minutes == 30
+    for bad in ("0", "1441", "'30'", "true"):
+        (tmp_path / "probe" / "pack.yaml").write_text(order_pack("{takeover_minutes: " + bad + "}"),
+                                                      encoding="utf-8")
+        with pytest.raises(PackError):
+            load_pack("probe")
+    (tmp_path / "probe" / "pack.yaml").write_text(order_pack("{takeover_minutes: 1440}"), encoding="utf-8")
+    assert load_pack("probe").agents[0].conversation.takeover_minutes == 1440

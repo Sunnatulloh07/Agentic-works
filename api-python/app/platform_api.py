@@ -10,6 +10,7 @@ from platform_runtime.tools import build_registry
 from platform_runtime.llm import Planner
 from .packs import load_pack
 from .auth import verify_claims, issue_token
+from .version import VERSION
 
 router=APIRouter(prefix='/platform',tags=['platform'])
 
@@ -216,7 +217,7 @@ def get_catalog(tenant:str,request:Request):
     e=engine()
     pack_agents=agents(tenant)
     assigned={name for agent in pack_agents for name in agent['tools']}
-    return {'agents':pack_agents,'tools':e.registry.describe(assigned),'version':'0.3.8-development-preview'}
+    return {'agents':pack_agents,'tools':e.registry.describe(assigned),'version':VERSION}
 
 
 @router.post('/{tenant}/tasks')
@@ -346,24 +347,47 @@ def event(tenant:str,req:EventRequest,request:Request):
     return call(engine().accept_event,tenant,'web',req.key,{'text':req.text,'sender':who['sub'],'conversation_id':who['sub']})
 
 
+# Runner WebSocket close codes. Each has ONE meaning so apps/runner can act on it
+# (it used to be 4403 for everything, which left the runner guessing).
+RUNNER_CLOSE_PROTOCOL=4400  # unknown/malformed message, stale claim, timeout: reconnect
+RUNNER_CLOSE_AUTH=4401      # device token invalid or expired: refresh the token
+RUNNER_CLOSE_REVOKED=4403   # device revoked or its token rotated out: re-enroll
+RUNNER_CLOSE_SERVER=1011    # server-side failure: reconnect with backoff
+
+
+class _RunnerClose(Exception):
+    def __init__(self,code):super().__init__(code);self.code=code
+
+
+def _device_claims(token):
+    import jwt
+    try:claims=verify_claims(token)
+    except (jwt.PyJWTError,ValueError,TypeError):raise _RunnerClose(RUNNER_CLOSE_AUTH) from None
+    if claims.get('token_type')!='device' or not claims.get('tenant_id') or not claims.get('device_id'):
+        raise _RunnerClose(RUNNER_CLOSE_AUTH)
+    return claims
+
+
 @router.websocket('/runner/ws')
 async def runner(ws:WebSocket):
     import asyncio
     await ws.accept()
     try:
-        hello=await asyncio.wait_for(ws.receive_json(),10)
-        token=str(hello.get('token',''))
-        claims=verify_claims(token)
-        if claims.get('token_type')!='device':raise ValueError('Device token required')
+        try:hello=await asyncio.wait_for(ws.receive_json(),10)
+        except (asyncio.TimeoutError,ValueError,KeyError):raise _RunnerClose(RUNNER_CLOSE_PROTOCOL) from None
+        token=str(hello.get('token','')) if isinstance(hello,dict) else ''
+        claims=_device_claims(token)
         tenant,device=claims['tenant_id'],claims['device_id']
         e=engine()
         while True:
             # Token expiry and device rotation checked for EVERY message, not only hello.
-            msg=await asyncio.wait_for(ws.receive_json(),65)
-            claims=verify_claims(token)
+            try:msg=await asyncio.wait_for(ws.receive_json(),65)
+            except (asyncio.TimeoutError,ValueError,KeyError):raise _RunnerClose(RUNNER_CLOSE_PROTOCOL) from None
+            if not isinstance(msg,dict):raise _RunnerClose(RUNNER_CLOSE_PROTOCOL)
+            claims=_device_claims(token)
             with e.tx() as c:
                 d=c.execute('SELECT * FROM p_devices WHERE tenant=? AND id=?',(tenant,device)).fetchone()
-                if not d or d['revoked'] or d['generation']!=claims['generation']:raise Forbidden('Device revoked')
+                if not d or d['revoked'] or d['generation']!=claims.get('generation'):raise _RunnerClose(RUNNER_CLOSE_REVOKED)
                 c.execute('UPDATE p_devices SET seen=? WHERE tenant=? AND id=?',(time.time(),tenant,device))
                 stop=c.execute('SELECT stopped FROM p_freeze WHERE tenant=?',(tenant,)).fetchone()
             if msg.get('type')=='heartbeat':
@@ -374,14 +398,17 @@ async def runner(ws:WebSocket):
                 sid=str(msg.get('id',''));claim=str(msg.get('claim',''))
                 with e.read() as c:
                     owned=c.execute('SELECT 1 FROM p_steps WHERE tenant=? AND id=? AND device=? AND claim=?',(tenant,sid,device,claim)).fetchone()
-                if not owned:raise Forbidden('Unowned step')
+                if not owned:raise _RunnerClose(RUNNER_CLOSE_PROTOCOL)
                 outcome='uncertain' if msg.get('uncertain') else ('succeeded' if msg.get('ok') is True else 'failed')
                 e.finish(tenant,sid,claim,msg.get('result',{}),outcome,'' if msg.get('ok') else 'runner_failed_or_uncertain')
                 await ws.send_json({'type':'result_ack','id':sid})
-            else:raise ValueError('Unknown message')
+            else:raise _RunnerClose(RUNNER_CLOSE_PROTOCOL)
     except WebSocketDisconnect:pass
+    except _RunnerClose as closing:
+        await ws.close(code=closing.code)
     except Exception:
-        await ws.close(code=4403)
+        # No detail on the wire: an exception message may carry internals.
+        await ws.close(code=RUNNER_CLOSE_SERVER)
 
 
 
