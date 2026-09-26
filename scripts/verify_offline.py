@@ -151,9 +151,11 @@ def run(root: Path, output: Path) -> dict:
                 ('browser_session_client', [node, '--test', 'apps/ui/lib/session-client.test.mjs'], root),
                 ('browser_oauth_client', [node, '--test', 'apps/ui/lib/oauth-client.test.mjs'], root),
                 ('browser_google_data_client', [node, '--test', 'apps/ui/lib/google-data-client.test.mjs'], root),
+                ('browser_tools_client', [node, '--test', 'apps/ui/lib/tools-client.test.mjs'], root),
             ]
         else:
-            for name in ['node_runner', 'browser_session_client', 'browser_oauth_client', 'browser_google_data_client']:
+            for name in ['node_runner', 'browser_session_client', 'browser_oauth_client',
+                         'browser_google_data_client', 'browser_tools_client']:
                 results.append({'name': name, 'status': 'BLOCKED', 'reason': 'Node unavailable'})
         bun = shutil.which('bun')
         if bun:

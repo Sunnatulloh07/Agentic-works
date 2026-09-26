@@ -62,7 +62,8 @@ class DeclaredBoundTests(unittest.TestCase):
         self.assertEqual(main.NO_STORE_PREFIXES, ('/identity/', '/platform/'))
 
     def test_no_inline_literal_survives(self):
-        source = open(main.__file__, encoding='utf-8').read()
+        with open(main.__file__, encoding='utf-8') as handle:
+            source = handle.read()
         for literal in ("DEFAULT_CORS_ORIGIN = 'http://localhost:3000'",
                         'MAX_TENANT_CHARS = 64',
                         "LEGACY_RUNNER_PREFIX = '/runner/'"):

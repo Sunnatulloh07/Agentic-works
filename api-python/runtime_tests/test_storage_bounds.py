@@ -48,7 +48,8 @@ class DeclaredBoundTests(StorageTestCase):
         self.assertEqual(storage.MAX_DELIVERY_ERROR_CHARS, 500)
 
     def test_no_inline_literal_survives(self):
-        source = open(storage.__file__, encoding='utf-8').read()
+        with open(storage.__file__, encoding='utf-8') as handle:
+            source = handle.read()
         self.assertIn('CONNECT_TIMEOUT_SECONDS = 30.0', source)
         self.assertIn('DELIVERY_LEASE_SECONDS = 60', source)
         self.assertIn('MAX_DELIVERY_ERROR_CHARS = 500', source)

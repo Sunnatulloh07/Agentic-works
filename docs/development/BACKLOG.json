@@ -233,6 +233,21 @@
       "id": "whatsapp_reachability",
       "status": "LOCAL_CONTRACT_TESTED",
       "remaining": "The first real step against the reachability gap: packs/turkish-baby now declares a second conversation agent, sales.wa_assistant (trigger source whatsapp, human_assisted, tools whatsapp.send/window/templates + the shop trio), with a grounded persona (packs/turkish-baby/prompts/sales/whatsapp.md) that names the window rule. Measured 2026-09-25: registry 88 tools, reachable 17 (was 12), unreachable LOC 10 758 of 19 182 = 56% -- the old 81% figure used a different method (core modules excluded) and the two are not comparable, which the docs now say. whatsapp.verify/webhook stay unreachable on purpose: they are the ingest/operator surface, not a conversation agent's. Open: live Meta acceptance, and the remaining 71 tools' packs."
+    },
+    {
+      "id": "ui_tool_surface",
+      "status": "LOCAL_TESTED",
+      "remaining": "The last UI gap named in this inventory (§10): workforce.* and friends are tools, not HTTP routes, so the dashboard needed a way to CALL one. The raw JSON steps textarea existed; a schema-driven surface now sits next to it (kept, not replaced). apps/ui/lib/tools-client.mjs turns a tool's JSON schema into form fields (text/integer/boolean/string-list/JSON, enum as a select), refuses required gaps and out-of-bound integers before the round trip, and builds the one-step body POST /platform/{tenant}/tasks expects. Choices come from the agent's own policy in /catalog, never a hardcoded list. 8 node tests (apps/ui/lib/tools-client.test.mjs), added to .github/workflows/verify.yml and scripts/verify_offline.py. The Python side pins the vocabulary the builder can render in runtime_tests/test_schema_vocabulary.py (8 tests): five property types, enum only on strings, no negative integer minimum, every bound an int, object fields naming their properties. Open: no browser E2E; the surface is typechecked and unit-tested, not clicked."
+    },
+    {
+      "id": "erp_api_bounds",
+      "status": "LOCAL_TESTED",
+      "remaining": "The ERP posting surface carried three inline numbers (page limit, evidence ceiling, external-id ceiling) and two inline role tuples. Named POSTING_LIMIT=100, MAX_EVIDENCE_CHARS=1000, MAX_EXTERNAL_ID_CHARS=128; runtime_tests/test_erp_api_bounds.py (11 tests) pins them literally, exercises the request model directly (no server: empty/oversized evidence, oversized external id, closed outcome set, extra fields forbidden) and pins the two authority shapes (read = owner/operator, reconcile = owner-only) by their call site. scripts/probes/audit_erp_api_bounds.py: 6 mutations, 6 RED, restore verified. Found while writing the guard: the module docstring restated 'LIMIT 100', so the source check is scoped to the code, not the prose -- a docstring may repeat a number, code may not."
+    },
+    {
+      "id": "shop_api_bounds",
+      "status": "LOCAL_TESTED",
+      "remaining": "The shop read surfaces had named constants that nothing pinned and one inline literal that naming had missed: pack.products[:1000] is now MAX_PRODUCTS (found by the source guard, not a review). runtime_tests/test_shop_api_bounds.py (13 tests) pins MAX_SHOP_ROWS/MAX_MESSAGE_CHARS/MAX_PRODUCTS, the channel list with its config-block map, both role tuples and the credential-name shape, and exercises the three pure helpers: _text (truncation boundary + non-string -> empty), _json (type mismatch falls back rather than leaking), _credential_refs (only *_env keys by default, a scoped token map as the documented exception, values that are not name-shaped never returned). scripts/probes/audit_shop_api_bounds.py: 9 mutations, 9 RED, restore verified. HTTP behaviour stays integration_tests/test_shop_api.py's."
     }
   ],
   "next_source_block": "telephony_live_acceptance (P14 open: dialer, budget wiring, live quality)",

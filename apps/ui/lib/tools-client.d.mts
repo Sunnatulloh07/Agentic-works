@@ -1,0 +1,9 @@
+export type ToolSpec={name:string;risk:string;schema:unknown;runner?:boolean};
+export type AgentLike={id:string;tools:string[]};
+export type FieldKind='text'|'integer'|'boolean'|'list'|'json'|'choice';
+export type ArgumentField={name:string;required:boolean;hint:string;kind:FieldKind;min?:number;max?:number;maxLength?:number;choices?:string[]};
+export function submitPath(tenant:string):string;
+export function toolChoices(tools:ToolSpec[],agent:AgentLike|undefined):ToolSpec[];
+export function argumentFields(schema:unknown):ArgumentField[];
+export function buildArguments(fields:ArgumentField[],values?:Record<string,string>):Record<string,unknown>;
+export function toolCallBody(call:{agent:string;tool:string;args:unknown;key:string}):{agent:string;key:string;steps:{tool:string;args:unknown}[]};

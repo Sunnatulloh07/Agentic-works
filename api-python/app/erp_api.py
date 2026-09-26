@@ -48,6 +48,11 @@ POSTING_STATUSES = Literal['uncertain', 'unconfirmed', 'posting', 'failed', 'pos
 POSTING_COLUMNS = ('id', 'document', 'driver', 'kind', 'supplier', 'number', 'currency',
                    'total_minor', 'external_id', 'status', 'created', 'settled')
 
+# Declared bounds; pinned literally in runtime_tests/test_erp_api_bounds.py.
+POSTING_LIMIT = 100
+MAX_EVIDENCE_CHARS = 1000
+MAX_EXTERNAL_ID_CHARS = 128
+
 
 @router.get('/{tenant}/erp/postings')
 def erp_postings(tenant: str, request: Request, status: POSTING_STATUSES):
@@ -57,15 +62,15 @@ def erp_postings(tenant: str, request: Request, status: POSTING_STATUSES):
     with e.read() as c:
         rows = [dict(row) for row in c.execute(
             f'''SELECT {",".join(POSTING_COLUMNS)} FROM p_erp_postings
-                WHERE tenant=? AND status=? ORDER BY created DESC LIMIT 100''',
+                WHERE tenant=? AND status=? ORDER BY created DESC LIMIT {POSTING_LIMIT}''',
             (tenant, status)).fetchall()]
     return {'postings': rows}
 
 
 class ErpReconcile(api.StrictRequest):
     outcome: Literal['posted', 'failed']
-    evidence: str = Field(min_length=api.MIN_NON_EMPTY, max_length=1000)
-    external_id: str = Field(default='', max_length=128)
+    evidence: str = Field(min_length=api.MIN_NON_EMPTY, max_length=MAX_EVIDENCE_CHARS)
+    external_id: str = Field(default='', max_length=MAX_EXTERNAL_ID_CHARS)
 
 
 @router.post('/{tenant}/erp/postings/{posting_id}/reconcile')

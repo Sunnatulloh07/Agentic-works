@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test apps/runner/test.js apps/runner/windows-baseline.test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs apps/ui/lib/shop-client.test.mjs apps/ui/lib/conversation-client.test.mjs
+      - run: node --test apps/runner/test.js apps/runner/windows-baseline.test.js apps/ui/lib/session-client.test.mjs apps/ui/lib/oauth-client.test.mjs apps/ui/lib/google-data-client.test.mjs apps/ui/lib/shop-client.test.mjs apps/ui/lib/conversation-client.test.mjs apps/ui/lib/tools-client.test.mjs
   http:
     runs-on: ubuntu-latest
     steps:

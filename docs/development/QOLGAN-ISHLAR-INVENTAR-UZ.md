@@ -25,7 +25,7 @@
 | **Yetib bo'lmaydigan `platform_runtime` LOC** | **56%** — 15 modul, 10 758 / 19 182 satr (2026-09-25) | eski **81%** boshqa metodika bilan o'lchangan (yadro modullari hisobdan chiqarilgan), shuning uchun raqamlar **solishtirilmaydi** |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
 | `app/` modullari | **41** fayl (`whatsapp_api.py` qo‘shildi) | `api-python/app/` |
-| Offline testlar | **3 569** | `Ran 3569 tests in 180.3s` (2026-09-25) |
+| Offline testlar | **3 601** | `Ran 3601 tests` (2026-09-25) |
 | Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`); 13 bloklangan test `test_platform_baseline.py` da sabab bilan qadalgan |
 | Windows uchun **bloklangan** sinovlar | **13** (12 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
 | Ultra-audit fazalari | **§125–§157** — 33 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
@@ -333,10 +333,12 @@ tekshiruv butun oraliqda o'tkazib yuborilgan.
 | Tenant panellari (qayta aloqa, brifing, eskalatsiya, supervisor, jadval, metrika) | **bor** — `OperationsPanels.tsx` |
 | Mijoz resurslari va reconcile boshqaruvi | **bor** — `CustomerResourcesPanel`, `ReconcileControl` |
 | OAuth / Google / agent-run yuzalari | **bor** |
-| **Xodimlar (`workforce`)** | **yo'q** — bu HTTP route emas, **tool** (`workforce.workload`), shuning uchun tool chaqiruvchi umumiy yuza kerak |
+| **Xodimlar (`workforce`)** | **bor** — tool sifatida (`workforce.workload`) va endi UI’da **tool chaqirish yuzasi** orqali: agent siyosatidagi tool’lar katalogdan sxemasi bilan forma bo‘lib chiqadi (`apps/ui/lib/tools-client.mjs`; «Yangi vazifa» paneli) |
 | **Windows desktop** | **yo'q** — POSIX shartnomasi to'sqinlik qiladi (`O_NOFOLLOW`), §154 |
 
-Ya'ni qolgan UI ishi — bitta **tool chaqirish yuzasi**, alohida panel emas.
+Ya'ni §10 dagi oxirgi UI bo'shlig'i — **tool chaqirish yuzasi** — 2026-09-25 da
+yopildi: raw JSON o'rniga katalog sxemasidan qurilgan forma (8 node testi;
+`runtime_tests/test_schema_vocabulary.py` lug'atni Python tomonda qadaydi).
 
 **Eng muhim xulosa:** backend **yadrosi** va agenting yozilgan va testlangan, lekin
 `production_release: NO_GO`. Ikki sabab, ikkalasi ham kod sifati emas:

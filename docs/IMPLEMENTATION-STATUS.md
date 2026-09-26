@@ -10,7 +10,7 @@ faqat pastga ko‘chirildi.
 |---|---|
 | API bu mashinada ishga tushirilganmi? | **Yo‘q.** `api-python/.env` yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori bor. |
 | Biror provider `live_verified`mi? | **Yo‘q.** Eng yuqori daraja — `LOCAL_CONTRACT_TESTED`. |
-| `runtime_tests` | **3 569 sinov** (2026-09-25); Windows’da `failures=1, errors=12` — **13 tasi Windows-only** sabab bilan va ro‘yxat `test_platform_baseline.py` da qadalgan. |
+| `runtime_tests` | **3 601 sinov** (2026-09-25); Windows’da `failures=1, errors=12` — **13 tasi Windows-only** sabab bilan va ro‘yxat `test_platform_baseline.py` da qadalgan. |
 | `integration_tests` | **351/351 PASS** (2026-09-25; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`; birinchi ikkitasini `conftest.py` o‘zi qo‘yadi; `cryptography` o‘rnatilgan bo‘lishi shart). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi. |
 | `api-python/tests/` (legacy) | **Nafaqaga chiqarildi (2026-09-22).** U 33 qizil / 172 pass edi va hech bir gate uni yurgizmasdi. Sabablar: `api-python/integration_tests/LEGACY-RETIRED.md`. |
 | CI `http` job | endi **yig‘iladi** — `integration_tests/conftest.py` ordering bog‘liqligini yo‘q qildi. |

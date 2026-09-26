@@ -7,7 +7,7 @@ mahsulotning o‘zi emas, faqat kirish kanallaridan biri.
 
 | Ko‘rsatkich | Holat (2026-09-22 da o‘lchangan) |
 |---|---|
-| `runtime_tests` (Windows, `cryptography` o‘rnatilgan) | **3 569 sinov**, `failures=1, errors=12` — **13 tasi Windows-only** va ro‘yxat `runtime_tests/test_platform_baseline.py` da sabab bilan qadalgan (2026-09-25 o‘lchovi) |
+| `runtime_tests` (Windows, `cryptography` o‘rnatilgan) | **3 601 sinov**, `failures=1, errors=12` — **13 tasi Windows-only** va ro‘yxat `runtime_tests/test_platform_baseline.py` da sabab bilan qadalgan (2026-09-25 o‘lchovi) |
 | `integration_tests` | **351/351 PASS** (2026-09-25; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`, `cryptography` o‘rnatilgan). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi |
 | `api-python/tests/` (legacy) | **nafaqaga chiqarildi (2026-09-22)** — 33 qizil / 172 pass edi va hech bir gate uni yurgizmasdi; qarang `api-python/integration_tests/LEGACY-RETIRED.md` |
 | CI `http` job | endi **yig‘iladi** (`integration_tests/conftest.py` qo‘shilgani uchun) |

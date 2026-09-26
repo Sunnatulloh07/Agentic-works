@@ -10,6 +10,7 @@ import AdminPanel from '../../components/AdminPanel';
 import {ApprovalsPanel,CatalogPanel,ChannelsPanel,InboxPanel,OrdersPanel} from '../../components/ShopPanels';
 import {ConversationsPanel,HandoffsPanel,type ThreadRef} from '../../components/ConversationPanels';
 import {draftSummary} from '../../lib/shop-client.mjs';
+import {argumentFields,buildArguments,toolCallBody,submitPath,toolChoices} from '../../lib/tools-client.mjs';
 import {type SessionClient,type Workspace} from '../../lib/session-client.mjs';
 type Tool={name:string;risk:string;schema:unknown;runner:boolean};
 type Agent={id:string;name:string;department:string;tools:string[];ladder:string};
@@ -37,6 +38,7 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
   const [selected,setSelected]=useState<Detail|null>(null);const [customers,setCustomers]=useState<Customer[]>([]);const [selectedCustomer,setSelectedCustomer]=useState<Customer|null>(null);const [customerName,setCustomerName]=useState('');const [agent,setAgent]=useState('ops.assistant');
   const [steps,setSteps]=useState(example);const [text,setText]=useState('/report');const [tab,setTab]=useState('tasks');
   const [thread,setThread]=useState<ThreadRef|null>(null);
+  const [tool,setTool]=useState('');const [toolValues,setToolValues]=useState<Record<string,string>>({});
   const [deviceId,setDeviceId]=useState('office-1');const [deviceToken,setDeviceToken]=useState('');
   async function req<T>(path:string,body?:unknown):Promise<T>{
     return client.request<T>(`/platform/${encodeURIComponent(tenant)}${path}`,body);
@@ -53,6 +55,12 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
   const key=()=>crypto.randomUUID();
   const canWrite=['owner','operator'].includes(role) && !frozen;
   const isOwner=role==='owner';
+  // The schema-driven tool surface: choices come from the agent's own policy in the
+  // catalogue, so an operator can call workforce.workload and friends without a
+  // hand-written plan. The engine re-validates; this is a pre-flight, not a gate.
+  const agentTools=toolChoices(tools,agents.find(a=>a.id===agent));
+  const chosen=agentTools.find(t=>t.name===tool) || agentTools[0];
+  const fields=chosen?argumentFields(chosen.schema):[];
   return <main style={{fontFamily:'system-ui,sans-serif',background:'#0b1220',color:'#e2e8f0',minHeight:'100vh',padding:'28px',maxWidth:1500,margin:'auto'}}>
     <header style={{display:'flex',justifyContent:'space-between',gap:20,flexWrap:'wrap'}}>
       <div><h1 style={{margin:0}}>Agent Platform</h1><p style={{color:'#94a3b8'}}>AI xodimlar boshqaruvi · Kanalga bog‘lanmagan runtime</p></div>
@@ -100,11 +108,30 @@ function PlatformDashboard({client,workspace,exit}:{client:SessionClient;workspa
       </div>}
       {tab==='tasks' && <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:20}}>
         <section style={panel}><h2>Yangi vazifa</h2>
-          <label>Agent <select style={input} value={agent} onChange={e=>setAgent(e.target.value)}>{agents.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+          <label>Agent <select style={input} value={agent} onChange={e=>{setAgent(e.target.value);setTool('');setToolValues({});}}>{agents.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
           <p>Typed plan, tool ruxsatlari serverda qayta tekshiriladi.</p>
-          <textarea aria-label="JSON reja" value={steps} onChange={e=>setSteps(e.target.value)} rows={9} style={{...input,width:'100%',boxSizing:'border-box',fontFamily:'monospace'}}/>
-          <button disabled={busy || !canWrite} style={button} onClick={()=>run(async()=>{const r=await req<{task_id:string}>('/tasks',{agent,key:key(),steps:JSON.parse(steps)});await refresh();await open(r.task_id);})}>Vazifani yaratish</button>
-          <details><summary>Ruxsat etilgan tool sxemalari</summary><pre style={pre}>{JSON.stringify(tools.filter(t=>agents.find(a=>a.id===agent)?.tools.includes(t.name)),null,2)}</pre></details>
+          <h3>Tool chaqirish</h3>
+          {!chosen && <p>Bu agentning siyosatida chaqiriladigan tool yo‘q.</p>}
+          {chosen && <>
+            <label>Tool <select aria-label="Tool" style={input} value={chosen.name} onChange={e=>{setTool(e.target.value);setToolValues({});}}>{agentTools.map(t=><option key={t.name} value={t.name}>{t.name} · {t.risk}</option>)}</select></label>
+            {chosen.risk!=='read' && <p style={{fontSize:12,color:'#fde68a'}}>Yozuv tool’i: tasdiq navbatiga tushadi.</p>}
+            {fields.map(f=><label key={f.name} style={{display:'block',margin:'6px 0'}}>{f.name}{f.required?' *':''}
+              {f.hint && <small style={{color:'#94a3b8'}}> ({f.hint})</small>}
+              {f.kind==='choice'
+                ? <select aria-label={f.name} style={input} value={toolValues[f.name]||''} onChange={e=>setToolValues(v=>({...v,[f.name]:e.target.value}))}><option value="">—</option>{(f.choices||[]).map(c=><option key={c} value={c}>{c}</option>)}</select>
+                : <input aria-label={f.name} style={input} value={toolValues[f.name]||''} onChange={e=>setToolValues(v=>({...v,[f.name]:e.target.value}))}/>}
+            </label>)}
+            <button style={button} disabled={busy || !canWrite} onClick={()=>run(async()=>{
+              const body=toolCallBody({agent,tool:chosen.name,args:buildArguments(fields,toolValues),key:key()});
+              const r=await client.request<{task_id:string}>(submitPath(tenant),body);
+              await refresh();await open(r.task_id);
+            })}>Tool’ni chaqirish</button>
+          </>}
+          <details><summary>Kengaytirilgan: JSON reja</summary>
+            <textarea aria-label="JSON reja" value={steps} onChange={e=>setSteps(e.target.value)} rows={9} style={{...input,width:'100%',boxSizing:'border-box',fontFamily:'monospace'}}/>
+            <button disabled={busy || !canWrite} style={button} onClick={()=>run(async()=>{const r=await req<{task_id:string}>('/tasks',{agent,key:key(),steps:JSON.parse(steps)});await refresh();await open(r.task_id);})}>Vazifani yaratish</button>
+            <details><summary>Ruxsat etilgan tool sxemalari</summary><pre style={pre}>{JSON.stringify(tools.filter(t=>agents.find(a=>a.id===agent)?.tools.includes(t.name)),null,2)}</pre></details>
+          </details>
           <h3>Matnli topshiriq</h3><p style={{fontSize:13}}>Erkin matn uchun LLM kaliti kerak. <code>/report</code> deterministik demo.</p>
           <textarea aria-label="Matnli topshiriq" value={text} onChange={e=>setText(e.target.value)} style={{...input,width:'100%',boxSizing:'border-box'}}/>
           <button style={button} disabled={busy || !canWrite} onClick={()=>run(async()=>{await req('/events',{key:key(),text});setTab('inbox');})}>Inboxga yuborish</button>

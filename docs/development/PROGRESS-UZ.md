@@ -2544,4 +2544,60 @@ hisobdan chiqarilgan) — raqamlar solishtirilmasligi hujjatlarda yozib qo'yildi
   `sheets`, `database`, `agent.*`, `voice.tts`, ...) — har biri pack qatori + konfiguratsiya.
 - Live acceptance hamon yo'q; `production_release: NO_GO`.
 
+## §160 — Oxirgi UI bo'shlig'i va yangi API yuzalari (2026-09-25, uchinchi o'tirish)
+
+### 1. Tool chaqirish yuzasi — §10 dagi **oxirgi UI bo'shlig'i** yopildi
+
+Inventar shunday derdi: `workforce.workload` kabi tool'lar HTTP route emas, shuning uchun
+umumiy tool chaqiruvchi yuza kerak. Raw JSON reja maydoni bor edi — **qoldirildi**
+(ishlaydigan yo'lni o'chirish OCP emas), endi uning yonida **katalog sxemasidan qurilgan
+forma** bor:
+
+- `apps/ui/lib/tools-client.mjs` — sxemadan maydonlar (`text` / `integer` / `boolean` /
+  string-ro'yxat / JSON; `enum` → select), majburiy maydon va chegara tekshiruvi
+  **tarmoqdan oldin**, va `POST /platform/{tenant}/tasks` kutgan bir qadamli body.
+- Tanlov agentning **o'z siyosatidan** (`/catalog`) keladi — qattiq yozilgan ro'yxat yo'q;
+  yozuv tool'i tanlansa UI "tasdiq navbatiga tushadi" deb aytadi.
+- 8 node testi (`tools-client.test.mjs`); `verify.yml` va `verify_offline.py`ga ulandi.
+- Python tomoni lug'atni qadaydi: `runtime_tests/test_schema_vocabulary.py` (8 test) —
+  besh tur, `enum` faqat stringda, **manfiy integer minimum yo'q** (shu sababli forma
+  minus belgisini xato deb rad etadi), har chegara `int`, object maydonlar o'z
+  `properties`ini nomlaydi. Yangi shakl qo'shilsa, test builder'ni o'rgatishni talab qiladi.
+
+### 2. `app/erp_api.py` — 11 test, probe **6/6 RED**
+
+`POSTING_LIMIT=100`, `MAX_EVIDENCE_CHARS=1000`, `MAX_EXTERNAL_ID_CHARS=128` nomlandi.
+`test_erp_api_bounds.py` so'rov modelini **serversiz** sinaydi (bo'sh/haddan uzun evidence,
+haddan uzun external_id, yopiq outcome to'plami, ortiqcha maydon rad etiladi) va ikki
+vakolat shaklini chaqiruv joyida qadaydi: o'qish — owner/operator, reconcile — faqat owner.
+
+Guard yozayotganda topilgan nuqson: modul **docstring'i** `LIMIT 100` ni takrorlagani uchun
+manba tekshiruvi **kod qismiga** cheklandi (docstring raqamni takrorlashi mumkin, kod — yo'q).
+
+### 3. `app/shop_api.py` — 13 test, probe **9/9 RED**, bitta haqiqiy inline literal
+
+Konstantalar (satr/matn chegaralari, kanal ro'yxati va config-blok xaritasi, ikki rol
+to'plami, credential nom shakli) hech qayerda qadalmagan edi. **Manba guard'i
+`pack.products[:1000]` ni topdi** — endi `MAX_PRODUCTS` (katalog sahifasi va xabar satri
+boshqa savolga javob beradi, shuning uchun `MAX_SHOP_ROWS` emas, o'z chegarasi).
+
+Uch sof helper xulqi qadaldi: `_text` (qirqish chegarasi; string bo'lmagan → bo'sh),
+`_json` (tur mos kelmasa default — oqib ketmaydi), `_credential_refs` (faqat `*_env`
+kalitlari; scoped token xaritasi — hujjatlashtirilgan istisno; **nom shakliga mos kelmagan
+qiymat hech qachon qaytmaydi**).
+
+### Yakuniy o'lchov (2026-09-25)
+
+| To'plam | Natija |
+|---|---|
+| `runtime_tests` | **3 601 test**, `failures=1, errors=12, skipped=1` — 13 bloklangan aynan baseline ro'yxati |
+| `integration_tests` | **354/354 PASS** |
+| UI | typecheck **PASS**, build **PASS**, `npm audit` 0 |
+| Yangi probelar | erp 6/6, shop 9/9 — RED, restore YES |
+
+### Ochiq qolgan
+
+- Tool yuzasi **brauzerda bosilmagan** (typecheck + unit test bor, E2E yo'q).
+- Reachability: 71 tool hamon pack'siz; live acceptance yo'q; `production_release: NO_GO`.
+
 

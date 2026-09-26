@@ -27,6 +27,10 @@ router = APIRouter(prefix='/platform', tags=['shop'])
 
 MAX_SHOP_ROWS = 100
 MAX_MESSAGE_CHARS = 1000
+# The product list is capped by its own ceiling, not by MAX_SHOP_ROWS: a catalogue
+# page and a message line answer different questions, and 100 products would be a
+# truncated shop rather than a bounded one.
+MAX_PRODUCTS = 1000
 CHANNELS = ('telegram', 'instagram', 'whatsapp')
 # Integration blocks that belong to each channel in config(tenant).
 CHANNEL_BLOCKS = {'telegram': ('telegram',), 'instagram': ('instagram',),
@@ -98,7 +102,7 @@ def shop_products(tenant: str, request: Request):
         pack = load_pack(tenant)
     except PackError:
         raise HTTPException(404, 'Pack not found')
-    return {'products': [p.model_dump() for p in pack.products[:1000]]}
+    return {'products': [p.model_dump() for p in pack.products[:MAX_PRODUCTS]]}
 
 
 @router.get('/{tenant}/orders')
