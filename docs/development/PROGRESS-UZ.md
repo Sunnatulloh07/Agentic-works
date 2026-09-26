@@ -3086,6 +3086,43 @@ Route sonlari §0 jadvalida o'lchovga **aynan** mos keldi: `platform_api.py` **5
 jami **115**. Bu jadvaldagi har bir son noto'g'ri degani emas — lekin tekshirilmagan son
 bilan tekshirilgan son bir xil ko'rinadi, farqi faqat qayta o'lchaganda bilinadi.
 
+### 6. Negative test ikki xatoni ushladi
+
+Probe'ning "hollow claim" tarmog'ini tekshirish uchun `known_tool_names()` sun'iy
+ravishda ikki nomga kamaytirildi. Natija kutilgan exit 1 emas, **traceback** bo'ldi —
+va bu ikkita haqiqiy narsani ochdi.
+
+**Birinchisi: `hollow_claims` tarmog'i amalda o'lik edi.** `app/packs.py` dagi
+`load_pack` allaqachon `unknown_tools()` orqali tekshiradi va `PackError` ko'taradi:
+
+```python
+missing = unknown_tools(agent.tools)
+if missing:
+    raise PackError(f"agent {agent.id!r} uchun runtime adapter yo'q ({name}): "
+                    + ", ".join(missing))
+```
+
+Ya'ni hollow claim pack **yuklanishida** ushlanadi — probe uni hech qachon ko'rmaydi.
+Lekin probe `PackError`ni tutmasdi, shuning uchun gate chiroyli xabar o'rniga stack
+trace olardi. Endi tutadi, va har bir xato pack, agent va tool nomini aytadi. Shu bilan
+birga probe `load_pack` qila **olmaydigan** tekshiruvni qo'shdi: e'lon qilingan nom
+**engine registry**da bormi. `load_pack` to'liq katalog-shartli to'plamga solishtiradi,
+probe esa host haqiqatan quradigan registry'ga.
+
+**Ikkinchisi: tuzatishning o'zi yangi xato kiritdi.** Yuklanmagan pack
+`declared_per_pack`da qolmadi, `report()` esa barcha pack kataloglarini aylanib
+`KeyError` berdi. Negative test bo'lmaganda bu hech qachon ko'rinmasdi, chunki barcha
+pack'lar sog'lom — ya'ni xato faqat himoya ishga tushishi kerak bo'lgan paytda paydo
+bo'lardi, aynan eng yomon vaqtda.
+
+Shuningdek `--json` rejimida stdout'da JSON'dan **keyin** "OK" qatori bor edi, ya'ni
+natijani quvur orqali o'qib bo'lmasdi. Verdikt endi stderr'ga ketadi: stdout toza
+hujjat, stderr inson uchun.
+
+Bu §162 ning "yangi qizil = FAIL" qoidasining teskari tomoni: **yangi yashil ham
+tekshirilishi kerak.** Negative holatni yurgizmasdan qo'shilgan himoya — himoya emas,
+faqat niyat.
+
 ### Xulosa: usul raqamdan muhimroq
 
 §161 "metod tuzatildi" deb yozgandi va raqamni yangiladi — lekin metodni **kodga**

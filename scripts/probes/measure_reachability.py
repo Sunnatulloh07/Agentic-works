@@ -32,7 +32,15 @@ Denominator   ``build_registry(catalog, shop_data)``: the registry
 Reachable     the union of every ``agent.tools`` entry across every directory
               under ``packs/``, intersected with the registry above.
 Hollow        a declared name absent from ``known_tool_names()``, i.e. the pack
-              promises a tool no adapter provides. Must stay empty.
+              promises a tool no adapter provides. Must stay empty. In practice
+              ``load_pack`` refuses such a pack first, so this probe meets the
+              defect as a ``PackError`` and reports it instead of dying on a
+              traceback; either way the exit code is 1 and the message names the
+              pack, the agent and the tool.
+Registry gap  a declared name absent from the ENGINE registry. This is the check
+              ``load_pack`` structurally cannot make: it validates against the
+              full catalog-conditional name set, while this compares against the
+              registry the host actually builds.
 Attribution   ``spec.handler.__module__``. ``fs.list`` and ``fs.read_text`` are
               runner-executed and carry no in-process handler, so they are
               attributed to ``platform_runtime.tools``, which registers them.
@@ -123,7 +131,7 @@ def measure():
     """Return every figure this probe publishes, as plain data."""
     prepare_environment()
     sys.path.insert(0, str(API))
-    from app.packs import PACKS_DIR, load_pack
+    from app.packs import PACKS_DIR, PackError, load_pack
     from app.platform_api import catalog, shop_data
     from platform_runtime.tools import build_registry, known_tool_names
 
@@ -134,9 +142,20 @@ def measure():
     registered = set(registry.items)
 
     pack_names = sorted(p.name for p in PACKS_DIR.iterdir() if p.is_dir())
-    declared, per_pack = set(), {}
+    declared, per_pack, load_failures = set(), {}, []
     for pack_name in pack_names:
-        tools = {tool for agent in load_pack(pack_name).agents for tool in agent.tools}
+        try:
+            pack = load_pack(pack_name)
+        except PackError as exc:
+            # ``load_pack`` is the FIRST defence against a hollow claim: it refuses a
+            # pack whose agent declares a tool no adapter provides, so a pack that
+            # gets past it cannot declare an unknown tool. Catching here keeps this
+            # probe's failure actionable -- the gate then reports a message instead of
+            # a traceback, which is the difference between a red you act on and a red
+            # you have to go and read a stack trace to understand.
+            load_failures.append({'pack': pack_name, 'error': str(exc)})
+            continue
+        tools = {tool for agent in pack.agents for tool in agent.tools}
         per_pack[pack_name] = sorted(tools)
         declared |= tools
 
@@ -191,6 +210,14 @@ def measure():
         'reachable_tools': len(reachable),
         'reachable': sorted(reachable),
         'hollow_claims': sorted(declared - known),
+        # Distinct from hollow_claims, and the check ``load_pack`` cannot make: it
+        # validates against ``known_tool_names()``, the full catalog-conditional set,
+        # while this compares against the registry the engine actually builds. The two
+        # coincide today because both hold 91 names, but a host that stopped injecting
+        # its catalog or shop reader would separate them -- the pack would still load
+        # and the tool would simply not be there at runtime.
+        'not_in_engine_registry': sorted(declared - registered),
+        'load_failures': load_failures,
         'declared_per_pack': per_pack,
         'loc': {'tool_modules': block(*top), 'package': block(*allpy)},
         'reachable_tool_modules': [module_of(p) for p in top[0]],
@@ -214,14 +241,27 @@ def report(result):
     print('shipped packs: %s' % ', '.join(result['packs']))
     print()
     for pack_name in result['packs']:
-        print('  %-14s declares %2d tools' % (pack_name, len(result['declared_per_pack'][pack_name])))
+        # A pack that refused to load has no entry, and saying so here is the point:
+        # the alternative is a KeyError that hides the real message behind a stack.
+        declared_tools = result['declared_per_pack'].get(pack_name)
+        if declared_tools is None:
+            print('  %-14s REFUSED TO LOAD (see failures below)' % pack_name)
+        else:
+            print('  %-14s declares %2d tools' % (pack_name, len(declared_tools)))
     print()
     print('REACHABLE: %d / %d' % (result['reachable_tools'], result['registry_tools']))
     print('  %s' % ', '.join(result['reachable']))
     print()
+    print('PACK LOAD FAILURES: %d' % len(result['load_failures']))
+    for failure in result['load_failures']:
+        print('  %s: %s' % (failure['pack'], failure['error']))
     print('HOLLOW CLAIMS (declared by a pack, implemented by nothing): %d'
           % len(result['hollow_claims']))
     for name in result['hollow_claims']:
+        print('  %s' % name)
+    print('DECLARED BUT ABSENT FROM THE ENGINE REGISTRY: %d'
+          % len(result['not_in_engine_registry']))
+    for name in result['not_in_engine_registry']:
         print('  %s' % name)
     print()
     print('=== unreachable LOC, among modules that own a registry tool ===')
@@ -245,7 +285,6 @@ def report(result):
     print('unreachable tool modules (%d):' % loc['tool_modules']['unreachable_modules'])
     for module in result['unreachable_tool_modules']:
         print('  %s' % module)
-    return result['hollow_claims']
 
 
 def main():
@@ -256,13 +295,27 @@ def main():
     result = measure()
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        hollow = result['hollow_claims']
     else:
-        hollow = report(result)
-    if hollow:
-        print('FAILED: %d declared tool(s) have no adapter' % len(hollow))
+        report(result)
+    # Three distinct defects, each actionable. None of them is a coverage
+    # percentage: a low number is an honest measurement, not a failure.
+    failures = list(result['load_failures'])
+    failures += [{'pack': 'all packs',
+                  'error': 'declared, no adapter provides it: %s' % name}
+                 for name in result['hollow_claims']]
+    failures += [{'pack': 'all packs',
+                  'error': 'declared, absent from the engine registry: %s' % name}
+                 for name in result['not_in_engine_registry']]
+    # In --json mode stdout carries the measurement and nothing else, so a caller can
+    # pipe it straight into a parser. The verdict goes to stderr instead: it still
+    # reads for a human, and it cannot corrupt the document.
+    sink = sys.stderr if args.json else sys.stdout
+    if failures:
+        for failure in failures:
+            print('FAILED: %s -- %s' % (failure['pack'], failure['error']), file=sink)
         return 1
-    print('OK: every tool a shipped pack declares is implemented')
+    print('OK: every tool a shipped pack declares is implemented and in the engine registry',
+          file=sink)
     return 0
 
 
