@@ -43,6 +43,7 @@ import secrets
 import tempfile
 import time
 import unittest
+from importlib import reload
 from pathlib import Path
 from typing import get_args
 from unittest.mock import patch
@@ -340,6 +341,47 @@ class ClientThrottleTests(unittest.TestCase):
         """
         self.assertNotEqual(store.THROTTLE_LIMIT, api.CLIENT_THROTTLE_LIMIT)
         self.assertGreater(api.CLIENT_THROTTLE_LIMIT, store.THROTTLE_LIMIT)
+
+    def test_the_ratio_is_a_named_multiple_not_two_literals_that_agree(self):
+        """The comment promised 'three times'; until now nothing in the code said so.
+
+        ``CLIENT_THROTTLE_LIMIT`` was 60 and the store's ``THROTTLE_LIMIT`` was 20, so the
+        sentence was true -- by coincidence.  Lowering the store's budget to 10 would have
+        left this at 60 and made it six times, which the ``assertGreater`` above cannot
+        see at all; raising it past 60 would have inverted the ordering the shared-address
+        guarantee depends on.  Naming the multiple makes the ratio a single fact with one
+        source instead of an emergent property of two numbers in two files.
+        """
+        self.assertEqual(api.CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT,
+                         api.CLIENT_THROTTLE_LIMIT)
+        self.assertGreater(api.CLIENT_THROTTLE_MULTIPLIER, 1,
+                           'a multiple of one collapses the two budgets back together')
+
+    def test_the_budget_moves_when_the_stores_budget_moves(self):
+        """Prove the derivation is wiring, not a value that happens to match today.
+
+        Asserting ``60 == 3 * 20`` passes just as happily against a restated literal, and
+        "happens to agree" is precisely the defect this file exists to close.  Re-executing
+        the module under a moved store budget is the only check that can tell the two
+        apart: a literal survives the reload unchanged, a derived value does not.
+        """
+        moved = 7
+        self.assertNotEqual(moved, store.THROTTLE_LIMIT)
+        self.addCleanup(reload, api)      # runs after the patch is undone, restoring 60
+        with patch.object(store, 'THROTTLE_LIMIT', moved):
+            reload(api)
+            self.assertEqual(api.CLIENT_THROTTLE_MULTIPLIER * moved,
+                             api.CLIENT_THROTTLE_LIMIT)
+            self.assertNotEqual(60, api.CLIENT_THROTTLE_LIMIT,
+                                'a literal would have survived the reload')
+        reload(api)
+        self.assertEqual(60, api.CLIENT_THROTTLE_LIMIT)
+
+    def test_the_budget_is_derived_in_the_source_not_restated(self):
+        """A future edit could put the literal back and every test above would still pass."""
+        code = code_only(SOURCE)
+        self.assertNotIn('CLIENT_THROTTLE_LIMIT = 60', code)
+        self.assertIn('CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT', code)
 
     def test_retry_after_is_the_stores_window(self):
         """A Retry-After that disagreed with the real window sends the client into

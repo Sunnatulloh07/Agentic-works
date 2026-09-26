@@ -29,11 +29,19 @@ MIN_EMAIL_CHARS = 3
 MIN_USER_ID_CHARS = 1
 MAX_USER_ID_CHARS = 128
 # The per-client login budget.  store.throttle's third argument is the LIMIT, not the
-# window: this bucket allows three times the per-account budget (THROTTLE_LIMIT) inside
-# the same THROTTLE_WINDOW_SECONDS, so one account cannot lock out its neighbours behind
-# a shared NAT, and changing address cannot unlock an account.  It was a bare positional
-# 60 at the call site, which read as a window and no offline test could address.
-CLIENT_THROTTLE_LIMIT = 60
+# window: this bucket allows a fixed multiple of the per-account budget (THROTTLE_LIMIT)
+# inside the same THROTTLE_WINDOW_SECONDS, so one account cannot lock out its neighbours
+# behind a shared NAT, and changing address cannot unlock an account.  It was a bare
+# positional 60 at the call site, which read as a window and no offline test could
+# address.  Naming it was not enough: 60 here and the store's 20 are two independent
+# literals, so 'three times' was a coincidence that held only while neither moved.  The
+# relationship had no source in code at all -- the comment was the only place it lived.
+# Deriving it makes that sentence true by construction, and keeps this bucket above the
+# per-account one for any positive multiplier, which is what the shared-address guarantee
+# actually requires.  A restated number would let the store tighten or loosen its own
+# budget and silently invert the ordering this comment promises.
+CLIENT_THROTTLE_MULTIPLIER = 3
+CLIENT_THROTTLE_LIMIT = CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT
 # A configured admin token shorter than this is a configuration mistake rather than a
 # secret: refuse to provision with it instead of accepting a guessable one.
 MIN_ADMIN_TOKEN_CHARS = 32

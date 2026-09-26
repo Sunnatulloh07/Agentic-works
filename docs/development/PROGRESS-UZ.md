@@ -2872,3 +2872,117 @@ dizaynidagi real kamchilik edi va u o'z-o'zini qizartirib topildi.
 
 
 
+
+## §164 — Izoh bor, manba yo'q: throttle nisbati (2026-09-26)
+
+§163 ikki marta skan qildi: birinchi tur `identity_api.py`ni, ikkinchisi `identity_store.py`ni.
+Bu uchinchi tur **butun `app/` yuzasiga** qaradi: avval ikki sinf repo miqyosida yopilganini
+o'lchadi, keyin uchinchi sinfni topdi.
+
+### Avval ikki sinf yopilganini o'lchash
+
+| Sinf | Skaner natijasi |
+|---|---|
+| E'lon qilingan, lekin hech qayerda o'qilmagan numeric bound | **0 / 170** |
+| Nomsiz literal shift (funksiyaga nomlangan konstanta o'rniga yalang'och son) | **0** (yagona "hit" — `re.compile` ichidagi regex raqamlari, false positive) |
+
+Demak `MIN_WORKSPACE_ID_CHARS` sinfi (§163 chuqur auditi topgan oxirgi nuqson) va
+`_name(plan,'plan',64)` sinfi repo miqyosida tugagan. Uchinchisi qoldi.
+
+### Topilgan uchinchi sinf: munosabatning manbasi yo'q edi
+
+`identity_api.py` izohi aniq bir gapni aytardi:
+
+> this bucket allows **three times** the per-account budget (`THROTTLE_LIMIT`)
+
+Va `CLIENT_THROTTLE_LIMIT = 60`, `store.THROTTLE_LIMIT = 20` — nisbat **aynan 3.0**. Lekin bu
+**tasodif** edi: ikki alohida fayldagi ikki mustaqil literal. Munosabatning **kodda bitta ham
+manbasi yo'q** edi — u faqat izohda yashardi.
+
+§163 bu konstantani nomlagandi va **tartib**ni pinlagandi
+(`assertGreater(CLIENT_THROTTLE_LIMIT, THROTTLE_LIMIT)`) — NAT kafolati uchun bu yetarli.
+Lekin **nisbat** pinlanmagandi, va `assertGreater` ko'ra olmaydigan yo'nalish bor: store o'z
+byudjetini 10 ga tushirsa, per-client byudjet 60 da qolib **olti barobar**ga aylanardi — dizayn
+izohi yolg'on gapirardi, va **hech bir test qizarmasdi**.
+
+Bu §163 topgan `MIN_TOKEN_CHARS` vs `SESSION_TOKEN_BYTES` bilan **aynan bir sinf**: konstantalararo
+munosabat faqat prose bilan ushlanadi. Farqi — bu safar munosabat wiring emas, **kommentariya** edi.
+
+### Tuzatish: munosabatni hosila qilish
+
+```python
+CLIENT_THROTTLE_MULTIPLIER = 3
+CLIENT_THROTTLE_LIMIT = CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT
+```
+
+Qiymat o'zgarmadi (3 × 20 = 60) — sof refactor, xatti-harakat bir xil. Lekin endi izoh
+**konstruksiya bo'yicha** to'g'ri: store byudjeti qayerga siljimasin nisbat saqlanadi, va
+per-client byudjet har qanday musbat karrali uchun per-account'dan yuqori qoladi — aynan
+sharfangan kafolat talab qiladigan narsa.
+
+### Testlar: qiymatni emas, ulanishni o'lchash
+
+Uchta test qo'shildi (47 → 50). Eng muhimi:
+
+```python
+with patch.object(store, 'THROTTLE_LIMIT', 7):
+    reload(api)                     # modulni qayta bajarish
+    self.assertEqual(api.CLIENT_THROTTLE_MULTIPLIER * 7, api.CLIENT_THROTTLE_LIMIT)
+    self.assertNotEqual(60, api.CLIENT_THROTTLE_LIMIT)
+```
+
+`assertEqual(60, 3 * 20)` **qayta yozilgan literalni ham** o'tkazib yuborardi — bu aynan shu
+fayl yopmoqchi bo'lgan defekt. Modulni siljitilgan store byudjeti ostida **qayta bajarish**
+derivatsiyani tasodifdan ajrata oladigan yagona tekshiruv: literal reload'dan o'zgarmay o'tadi,
+hosila qiymat — yo'q.
+
+### Mutatsiya isboti: matritsadagi eng o'tkir probe
+
+Matritsaga ikkita mutatsiya qo'shildi (18 → 20). Birinchisi butun matritsadagi **eng o'tkir**
+proba, chunki u **bugungi qiymatni saqlab qoladi**:
+
+```
+('restate the derived per-client budget as a literal', API,
+ 'CLIENT_THROTTLE_LIMIT = CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT',
+ 'CLIENT_THROTTLE_LIMIT = 60')
+```
+
+Shuning uchun har bir qiymat-asosli va xatti-harakatli assert **o'tib ketardi**. Uni faqat
+ikkita yangi test ushladi:
+
+```
+CAUGHT restate the derived per-client budget as a literal
+         FAIL: test_the_budget_is_derived_in_the_source_not_restated
+         FAIL: test_the_budget_moves_when_the_stores_budget_moves
+```
+
+Bu reload testining "tishi" borligini **empirik** isbotlaydi — nazariy da'vo emas.
+
+Shu bilan birga §163'dan qolgan #6 mutatsiya anchor'i eskirgandi (`CLIENT_THROTTLE_LIMIT = 60`
+endi mavjud emas) va yangilandi — harness `--list` buni "anchor not found (harness is stale)"
+deb ko'rsatardi, ya'ni eskirish jim o'tib ketmasdi.
+
+### Halollik qaydlari
+
+**Bir soxta signal, empirik tekshirilgan.** `identity_api`dagi `store.INVITATION_TTL_SECONDS`ni
+ko'rib, men `identity_store`da **ham** `INVITATION_TOKEN_TTL_SECONDS` bor deb gumon qildim —
+"ikki nom, bir fakt, ajralib ketadi" sinfi. **Yo'q edi.** Haqiqiy konstantalar
+`INVITATION_TTL_SECONDS` / `MIN_` / `MAX_`, va ular ikkala joyda ham o'qiladi. Men xotiradan
+noto'g'ri eslagandim va **harakat qilishdan oldin tekshirdim**. §163'dagi
+`LoginRequest.password` soxta signali bilan bir xil intizom: gumon — topilma emas.
+
+**Qamrovni oshirib yubormaslik.** §163 tartib invariantini allaqachon pinlagandi; men buni
+"hammasi pinlanmagan" deb ko'rsatmadim. Pinlanmagan narsa aniq va tor: **nisbat** va
+**derivatsiya**.
+
+### O'lchov
+
+| Yuza | Natija |
+|---|---|
+| `runtime_tests.test_identity_api_bounds` | **50/50 OK** (47 edi) |
+| identity to'plamlari offline hook ostida | **135/135 OK** (`test_client_ip` qo'shildi) |
+| `integration_tests/test_identity_http.py` | **14/14 PASS** — xatti-harakat o'zgarmadi |
+| Mutatsiya matritsasi | **20/20 ushlandi** (har bir index alohida tekshirildi) |
+| E'lon qilingan-lekin-o'qilmagan bound (butun `app/`) | **0 / 170** |
+| Nomsiz literal shift (butun `app/`) | **0** |
+

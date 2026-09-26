@@ -56,7 +56,8 @@ MUTATIONS = [
     ('drop the access-token floor back to 1', API,
      'if ttl<MIN_TOKEN_TTL_SECONDS:', 'if ttl<1:'),
     ('equalise the per-client budget with the per-account one', API,
-     'CLIENT_THROTTLE_LIMIT = 60', 'CLIENT_THROTTLE_LIMIT = 20'),
+     'CLIENT_THROTTLE_LIMIT = CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT',
+     'CLIENT_THROTTLE_LIMIT = store.THROTTLE_LIMIT'),
     ('hardcode Retry-After instead of deriving it', API,
      "headers={'Retry-After':str(store.THROTTLE_WINDOW_SECONDS)}",
      "headers={'Retry-After':'900'}"),
@@ -87,6 +88,15 @@ MUTATIONS = [
      "_name(plan,'plan',64), _name(region,'region',32)"),
     ('prune the throttle window by a literal', STORE,
      'window-THROTTLE_RETENTION_WINDOWS', 'window-2'),
+    # The ratio mutations.  The first is the sharpest probe in the whole matrix: it
+    # restates the *same value* the derivation produces today, so every value-based and
+    # behavioural assertion still passes -- only re-executing the module under a moved
+    # store budget can tell a derivation from a literal that happens to agree.
+    ('restate the derived per-client budget as a literal', API,
+     'CLIENT_THROTTLE_LIMIT = CLIENT_THROTTLE_MULTIPLIER * store.THROTTLE_LIMIT',
+     'CLIENT_THROTTLE_LIMIT = 60'),
+    ('collapse the throttle multiplier to one', API,
+     'CLIENT_THROTTLE_MULTIPLIER = 3', 'CLIENT_THROTTLE_MULTIPLIER = 1'),
 ]
 
 
