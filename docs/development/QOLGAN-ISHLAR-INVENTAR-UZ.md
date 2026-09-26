@@ -19,18 +19,18 @@
 
 | Ko'rsatkich | Qiymat | Manba |
 |---|---|---|
-| Runtime modullari | **43** fayl (retry.py qo'shildi) | `api-python/platform_runtime/` |
+| Runtime modullari | **46** fayl (`platform_runtime/*.py`); subpaketlar bilan **69** | `api-python/platform_runtime/` |
 | Registry tool'lari | **91** (engine registry: bare 88 + 3 shop tool; `known_tool_names()` ham 91) | `build_registry(catalog, shop_data)` |
-| **Pack'dan yetib boradigan tool'lar** | **20** — 91 dan (2026-09-25) | yetkazilgan pack'lar: `demo-retail`, `marketing`, `turkish-baby`, `_template`; `agent.*` endi `turkish-baby`da. **Metod tuzatildi:** ilgarigi 12/89 va 17/88 **bare** `build_registry()` bilan o'lchangan va 3 shop tool'ini hisobga olmagan |
-| **Yetib bo'lmaydigan `platform_runtime` LOC** | **54%** — **14** modul, 10 447 / 19 182 satr (2026-09-25) | eski **81%** boshqa metodika bilan o'lchangan (yadro modullari hisobdan chiqarilgan), shuning uchun raqamlar **solishtirilmaydi** |
+| **Pack'dan yetib boradigan tool'lar** | **20** — 91 dan (2026-09-26) | `scripts/probes/measure_reachability.py` qayta hisoblaydi. yetkazilgan pack'lar: `demo-retail`, `marketing`, `turkish-baby`, `_template`; `agent.*` endi `turkish-baby`da. **Hollow claim: 0** — hech bir pack implementatsiyasi bo'lmagan tool'ni da'vo qilmaydi. **Metod tuzatildi:** ilgarigi 12/89 va 17/88 **bare** `build_registry()` bilan o'lchangan va 3 shop tool'ini hisobga olmagan |
+| **Yetib bo'lmaydigan `platform_runtime` LOC** | **83.8%** — 11 283 / 13 460 satr, **17 / 22** tool-owning modul (2026-09-26) | `scripts/probes/measure_reachability.py` qayta hisoblaydi. Butun paket bo'ylab **84.5%** (11 828 / 14 005, 19 / 24). Yetib bo'ladigan tool'ga ega modul atigi **5** ta: `knowledge`, `oversight`, `shop_tools`, `tools`, `whatsapp`. **Ilgarigi "54%, 14 modul, 10 447 / 19 182" takrorlanmaydi:** 19 182 haqiqiy (`platform_runtime/*.py` satrlarining aniq soni), lekin suratchini hech qanday bayon qilingan qoida qaytara olmaydi — u qo'lda terilgan modul ro'yxatidan yig'ilgan, ya'ni §161 tuzatayotgan xato turining o'zi (`oversight` ro'yxatdan chiqqani). Eski **81%** ham boshqa metodika, shuning uchun uchalasi **solishtirilmaydi**. Yadro modullari (`engine.py`, `llm.py`) maxrajga **kirmaydi**: ular tool'ga ega emas, lekin route/webhook orqali yetib boriladi — ularni hisoblasa 88.7% chiqadi va engine o'lik kod deb e'lon qilinadi |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
-| `app/` modullari | **41** fayl (`whatsapp_api.py` qo‘shildi) | `api-python/app/` |
-| Offline testlar | **3 601** | `Ran 3601 tests` (2026-09-25) |
+| `app/` modullari | **46** fayl (`app/*.py`); subpaketlar bilan **48** | `api-python/app/` |
+| Offline testlar | **3 651** | `Ran 3651 tests` (2026-09-26, `scripts/verify_offline.py`) |
 | Test signature | `failures=1, errors=12, skipped=1` | **boshqariladigan venv bilan** (`cryptography` + `tzdata`); 13 bloklangan test `test_platform_baseline.py` da sabab bilan qadalgan |
 | Windows uchun **bloklangan** sinovlar | **13** (12 error + 1 failure) | `runtime_tests/test_platform_baseline.py` |
 | Ultra-audit fazalari | **§125–§157** — 33 ta raqamlangan, uzluksiz | `ULTRA-AUDIT-ASCII-CELL-UZ.md` |
 | UI gate'lari | typecheck **PASS** (2026-09-25), build **PASS**, `npm audit` **0 vulnerabilities** (`next@16.3.6`, `react@19.3.0`) | `apps/ui` |
-| `MANIFEST.sha256` | **PASS** — 543 fayl, 0 xato (2026-09-25); **toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py` |
+| `MANIFEST.sha256` | **PASS** — 573 fayl, 0 xato (2026-09-26); **toza LF eksportda ham PASS** (§155.12) | `scripts/verify_manifest.py`; `verify_offline.py` endi uni `manifest_integrity` job'i sifatida **birinchi** qadamda chaqiradi |
 | **API bu mashinada ishga tushirilganmi** | **YO'Q** | `.env` yo'q, `config/integrations.json` yo'q, `data/app.db` da faqat migratsiya qatori |
 | **README first-run yo'li** | **O'LIK edi, tuzatildi** | `setup_local.py` → `owner_login.py` = 410 + 403; yagona yo'l `provision_identity.py` |
 | `production_release` | **NO_GO** | `BACKLOG.json` |
@@ -372,7 +372,7 @@ ham yopiq turgan.
 | CI `ui_dependency_security` job | **hamon FAIL** — `next@14.2.35` da 1 critical + 1 high; Next 15 + React 19 kerak |
 | POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
 | **Node runner** (`apps/runner/test.js`) | **11 / 31 qizil** Windows'da (2026-09-25 o'lchovi; ilgari 11/24 deb yozilgan edi, to'plam o'sgan). Uch sabab: `execute()` Linux'da bo'lmaganda rad etadi (5), `symlink` EPERM (2), POSIX ruxsat bitlari (4). **Endi qadalgan**: `apps/runner/windows-baseline.test.js` har bir sababni **yurgizib** tasdiqlaydi va 11 ta nomni `test.js`da qidiradi |
-| `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` endi **`PASS_WITH_RECORDED_BLOCKED`** — qizil to'plam qayd etilgan platforma yuzasi bilan solishtiriladi (`test_platform_baseline.BLOCKED`, `windows-baseline.test.js`), **yangi qizil = FAIL** (§162) |
+| `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` endi **`PASS_WITH_RECORDED_BLOCKED`** — qizil to'plam qayd etilgan platforma yuzasi bilan solishtiriladi (`test_platform_baseline.BLOCKED`, `windows-baseline.test.js`), **yangi qizil = FAIL** (§162). **§165 da ikki job qo'shildi:** `manifest_integrity` — **birinchi** qadam, haqiqiy `MANIFEST.sha256`ni tekshiradi (ilgari faqat manifest *tooling*'ining unit testlari yurardi, shuning uchun manifest eskirgan bo'lsa ham darvoza yashil edi) va `measure_reachability` — headline coverage raqamini har yurishda qayta hisoblaydi |
 | `test_customer360_bounds.py` (§157) | **72 sinov** (77 subtest), yashil; `scripts/probes/audit_customer360_bounds.py` — **ikki yurishli** matritsa (52 o'z moduli + 8 mustaqil iste'molchi), **60/60 RED** |
 | Umumiy baseline fixture (deyarli 3 daqiqalik to'plam uchun) | **hali yo'q** |
 

@@ -299,12 +299,44 @@ def run(root: Path, output: Path) -> dict:
                 'Child output:\n' + child_text.strip()[-800:])
         output.mkdir(parents=True, exist_ok=False)
         jobs = [
+            # FIRST, and the position is load-bearing.  This job states that
+            # MANIFEST.sha256 describes THIS tree, and the run is about to write into
+            # that tree: every job drops a <name>.log here and the run ends by writing
+            # summary.json and python_syntax.json.  ``*.log`` is ignored so the logs are
+            # not release files, but those two JSON summaries are.  Checking before any
+            # of it exists means the job measures the committed tree rather than this
+            # run's own output -- otherwise the gate could never pass, because merely
+            # finishing it would be what made the manifest stale.
+            #
+            # This is NOT what ``manifest_tools`` below measures, and the two names
+            # being nearly identical is exactly how the drift went unnoticed: that job
+            # runs the manifest TOOL's unit tests, which exercise the digest and
+            # enumeration logic against fixtures and stay green while the real manifest
+            # is eleven errors out of date.  Nothing ran the real checker, so
+            # MANIFEST.sha256 became a false statement about the release while every
+            # gate reported PASS -- the §162 failure mode again, where the gate measured
+            # something true and its name implied something else.
+            ('manifest_integrity', [sys.executable, 'scripts/verify_manifest.py'], root),
             ('python_runtime', [sys.executable, '-m', 'unittest', 'discover', '-s', 'runtime_tests', '-v'], root / 'api-python'),
             ('release_tools', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_release_tools.py', '-v'], root),
             ('manifest_tools', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_manifest.py', '-v'], root),
             ('sqlite_demo', [sys.executable, 'scripts/demo_runtime.py'], root),
             ('managed_database_demo', [sys.executable, 'scripts/demo_managed_database.py'], root),
         ]
+        # The coverage figure README and the inventory lead with: 91 tools in the
+        # registry, 20 of them reachable from a delivered pack. It used to be measured
+        # by hand inside a session and then published, and §161 found two earlier
+        # versions of it had been computed against the WRONG registry -- bare
+        # ``build_registry()``, which omits the three host-injected shop tools, so
+        # both the numerator and the denominator were wrong. A headline number nobody
+        # can recompute is an assertion wearing a number's clothes, so the gate
+        # recomputes it every run. The probe is read-only, needs no network and sets
+        # its own non-production ENV, so it is safe here; it fails only on a hollow
+        # claim, i.e. a pack declaring a tool no adapter implements. A coverage
+        # PERCENTAGE is never a gate condition -- that would make the gate red for an
+        # honest measurement rather than a defect.
+        jobs.append(('measure_reachability', [sys.executable, str(root / 'scripts' /
+                     'probes' / 'measure_reachability.py'), '--json'], root))
         node = shutil.which('node')
         if node:
             jobs += [
@@ -360,6 +392,13 @@ def run(root: Path, output: Path) -> dict:
             count = re.search(r'Ran (\d+) tests?', text) or re.search(r'(?:ℹ|#) tests (\d+)', text)
             if count:
                 row['tests'] = int(count.group(1))
+            if row['status'] == 'FAIL' and name == 'manifest_integrity':
+                # A red here is never a platform limitation, so it gets no recorded
+                # surface and no PASS_WITH_RECORDED_BLOCKED.  It is a stale release
+                # statement with a one-command fix, and saying so in the summary is the
+                # difference between a red you act on and a red you learn to ignore.
+                row['note'] = ('MANIFEST.sha256 does not describe this tree. Regenerate it '
+                               'and re-run: python scripts/generate_manifest.py')
             results.append(row)
             print(json.dumps(row, ensure_ascii=False))
 
@@ -399,7 +438,7 @@ def main():
     summary = run(root, output.resolve())
     print('Evidence:', output)
     print('Production: NO-GO. Read summary.json for blocked and unperformed checks.')
-    required = {'python_runtime', 'release_tools', 'manifest_tools', 'sqlite_demo', 'managed_database_demo', 'node_runner', 'browser_session_client', 'browser_oauth_client', 'browser_google_data_client', 'python_syntax'}
+    required = {'manifest_integrity', 'measure_reachability', 'python_runtime', 'release_tools', 'manifest_tools', 'sqlite_demo', 'managed_database_demo', 'node_runner', 'browser_session_client', 'browser_oauth_client', 'browser_google_data_client', 'python_syntax'}
     failed = any(row['status'] == 'FAIL'
                  or (row['name'] in required and row['status'] not in ACCEPTED_STATUSES)
                  for row in summary['results'])

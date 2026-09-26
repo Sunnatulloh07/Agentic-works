@@ -132,14 +132,31 @@ qadami kabi engine siyosatidan, dispatch paytidagi qabul qiluvchi qayta tekshiru
 
 Registry’da **91** tool bor va ulardan **20 tasi** yetkazib berilayotgan pack’lardan
 (`demo-retail`, `marketing`, `turkish-baby`, `_template`) chaqirilishi mumkin
-(2026-09-25 o‘lchovi; `whatsapp.*` va `agent.*` endi `turkish-baby`da). Qolgan 14 modulning
-**10 447 satri** (19 182 dan, 54%) hamon chaqirilmaydi.
+(2026-09-26 o‘lchovi; `whatsapp.*` va `agent.*` endi `turkish-baby`da). Bu sonni
+`python scripts/probes/measure_reachability.py` qayta hisoblaydi; hech bir pack
+implementatsiyasi bo‘lmagan tool’ni da’vo qilmaydi (**hollow claim: 0**).
 
-Quyidagi modullarni ishlatadigan **birorta pack yo‘q**:
+Tool’ga ega **22** yuqori darajali moduldan **17 tasi** hech bir pack’dan
+chaqirilmaydi: **11 283 satr** (13 460 dan, **83.8%**). Butun `platform_runtime`
+paketi bo‘ylab **84.5%** (11 828 / 14 005). Yetib bo‘ladigan tool’ga ega modul
+atigi **5** ta: `knowledge`, `oversight`, `shop_tools`, `tools`, `whatsapp`.
 
-`erp` · `documents` · `inventory` · `business_graph` ·
-`telephony` · `assets` · `vision` · `manufacturing` · `oee` · `workforce` · `supervisor` ·
-`reengagement` · `escalation` · `briefing`
+Quyidagi **17** modulni ishlatadigan **birorta pack yo‘q**:
+
+`assets` · `business_graph` · `connectors` · `documents` · `erp` · `escalation` ·
+`google_adapters` · `inventory` · `manufacturing` · `oee` · `sheets` · `speech` ·
+`supervisor` · `telephony` · `vision` · `whatsapp_inbound` · `workforce`
+
+Yadro modullari (`engine.py`, `llm.py`, `conversation.py`) bu ro‘yxatga **kirmaydi**:
+ular tool’ga ega emas, lekin route, webhook va agent loop orqali yetib boriladi.
+Ularni hisoblasa 88.7% chiqadi va engine o‘lik kod deb e’lon qilinadi — bu noto‘g‘ri.
+
+> **Tuzatilgan sonlar.** Bu bo‘lim ilgari "qolgan 14 modulning 10 447 satri
+> (19 182 dan, 54%)" deb yozilgan edi va ro‘yxatda `reengagement` bilan `briefing`
+> bor, `connectors`, `google_adapters`, `sheets`, `speech` va `whatsapp_inbound`
+> esa **yo‘q** edi. 19 182 haqiqiy son (`platform_runtime/*.py` satrlari), lekin
+> 10 447 ni hech qanday bayon qilingan qoida qaytara olmaydi. Yuqoridagi raqamlar
+> skript bilan qayta hisoblanadi.
 
 WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`: handshake + imzolangan
 inbound, 19 HTTP testi bilan) va `whatsapp.*` tool’lari `turkish-baby` pack’ida e’lon

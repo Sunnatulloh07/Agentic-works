@@ -2986,3 +2986,111 @@ noto'g'ri eslagandim va **harakat qilishdan oldin tekshirdim**. §163'dagi
 | E'lon qilingan-lekin-o'qilmagan bound (butun `app/`) | **0 / 170** |
 | Nomsiz literal shift (butun `app/`) | **0** |
 
+
+## §165 — Yashil darvoza yolg'oni va qayta hisoblanmaydigan headline raqam (2026-09-26)
+
+Bu o'tirish ikki xil "yashil"ni tekshirdi. Biri **darvoza** edi: yashil, lekin
+tekshirishi kerak bo'lgan narsani tekshirmasdi. Ikkinchisi **raqam** edi: chop etilgan,
+lekin hech kim uni qayta hisoblay olmasdi.
+
+### 1. `manifest_integrity`: darvoza manifest tooling'ini tekshirardi, manifestni emas
+
+`scripts/verify_offline.py` `manifest_tools` unit testlarini ishga tushirardi — ya'ni
+`generate_manifest.py` va `verify_manifest.py` **kodini**. Repo'dagi haqiqiy
+`MANIFEST.sha256` faylini esa hech qachon tekshirmasdi. Natija: manifest **eskirgan va
+qizil** edi, darvoza **yashil**.
+
+Bu §163 topgan `MIN_TOKEN_CHARS` sinfidan farq qiladi: u yerda konstanta izohdan
+ajralib qolgandi, bu yerda **tekshiruv o'z obyektidan** ajralib qolgandi. Ikkalasi ham
+yashil edi, ikkalasi ham hech narsani kafolatlamasdi.
+
+Tuzatish: `manifest_integrity` job'i qo'shildi va **birinchi** qadamga qo'yildi —
+darvoza o'z natija fayllarini yozishidan **oldin** commit qilingan daraxtni tekshirishi
+kerak. Majburiy job to'plamiga kiritildi. Qizil bo'lsa bir buyruqli yo'l ko'rsatiladi:
+
+> MANIFEST.sha256 does not describe this tree. Regenerate it and re-run:
+> python scripts/generate_manifest.py
+
+O'lchov: qayta yaratilgach `verify_manifest.py` **PASS**, **573** fayl, 0 xato.
+
+### 2. Reachability: headline raqam qayta hisoblanmaydigan edi
+
+README va inventar **91 tool, 20 tasiga yetib boriladi** deb boshlanadi. §161 bu raqamni
+tuzatgandi (12/89 va 17/88 → 20/91), chunki avvalgi ikkisi **yalang'och**
+`build_registry()` bilan o'lchangan va host inject qiladigan 3 shop tool'ini tashlab
+yuborgandi. Lekin tuzatish **prose** bo'lib qoldi — metod sessiya bilan ketdi.
+
+`scripts/probes/measure_reachability.py` qo'shildi. U engine quradigan registry'ni
+ishlatadi (`build_registry(catalog, shop_data)`), har bir pack'ni o'qiydi:
+
+| O'lchov | Qiymat |
+|---|---|
+| Registry (engine registry) | **91** |
+| `known_tool_names()` | **91** |
+| Yetib boriladigan | **20 / 91** |
+| **Hollow claim** (pack da'vo qiladi, adapter yo'q) | **0** |
+
+Probe `verify_offline.py`ga `measure_reachability` job'i sifatida ulandi — headline
+raqam endi **har verify'da** qayta hisoblanadi. Coverage **foizi** hech qachon gate sharti
+emas: aks holda darvoza halol o'lchov uchun qizarardi. Gate faqat hollow claim uchun qizaradi.
+
+### 3. LOC raqami takrorlanmadi: 54% emas, 83.8%
+
+§161 "yetib bo'lmaydigan LOC: **54%**, 14 modul, 10 447 / 19 182" deb yozgandi. Probe
+qayta hisoblaganda uchta metod uchta xil javob berdi:
+
+| Metod | Natija |
+|---|---|
+| Tool'ga ega yuqori darajali modullar (**to'g'ri**) | **11 283 / 13 460 = 83.8%** (17 / 22) |
+| Butun paket bo'ylab, shu qoida bilan | 11 828 / 14 005 = 84.5% (19 / 24) |
+| Barcha yuqori darajali modullar (**noto'g'ri**) | 17 005 / 19 182 = 88.7% (41 / 46) |
+
+19 182 **haqiqiy** — bu `platform_runtime/*.py` satrlarining aniq soni. Lekin 10 447 ni
+**hech qanday bayon qilingan qoida** qaytara olmaydi; u qo'lda terilgan modul ro'yxatidan
+yig'ilgan — ya'ni §161 ning o'zi tuzatayotgan xato turi (`oversight` ro'yxatdan chiqqani).
+
+Uchinchi qator — **tuzoq**, va u probe'da ataylab ko'rinadigan qilingan. Tool'ga ega
+bo'lmagan modulni "yetib bo'lmaydigan" deb sanash `engine.py`, `llm.py` va
+`conversation.py`ni o'lik kod deb e'lon qiladi: ular tool'ga ega emas, lekin route,
+webhook va agent loop orqali yetib boriladi — ya'ni tizimdagi **eng ko'p ishlatiladigan**
+kod. Shu sababli maxraj faqat tool-owning modullardan iborat.
+
+Yetib bo'ladigan tool'ga ega modul atigi **5** ta: `knowledge`, `oversight`,
+`shop_tools`, `tools`, `whatsapp`.
+
+### 4. README ro'yxati 5 modulni tashlab yuborgan edi
+
+README "birorta pack ishlatmaydigan modullar"ni **14** ta deb sanardi. O'lchangan ro'yxat
+**17** ta, va farq ikki tomonlama:
+
+| | Modullar |
+|---|---|
+| Ro'yxatda bor, lekin tool'ga ega **emas** | `reengagement`, `briefing` |
+| Tool'ga ega, lekin ro'yxatda **yo'q** | `connectors`, `google_adapters`, `sheets`, `speech`, `whatsapp_inbound` |
+
+Ya'ni README ham noto'g'ri sinfni kiritgan, ham **5 ta** muzlatilgan modulni yashirgan.
+Ikkalasi ham tuzatildi.
+
+### 5. Eskirgan sonlar
+
+| Da'vo | Eski | O'lchangan |
+|---|---|---|
+| Runtime modullari | 43 | **46** (`platform_runtime/*.py`); subpaketlar bilan **69** |
+| `app/` modullari | 41 | **46**; subpaketlar bilan **48** |
+| `MANIFEST.sha256` | 543 fayl | **573** fayl |
+| Backend route'lari | 54 + 13 + 7 + 4 | **o'zgarmadi** — o'lchov tasdiqladi ✓ |
+| Yetib bo'lmaydigan LOC | 54% | **83.8%** |
+
+Route sonlari §0 jadvalida o'lchovga **aynan** mos keldi: `platform_api.py` **54**,
+`identity_api.py` **13**, `oauth_api.py` **7**, `google_data_api.py` **4**; `app/` bo'ylab
+jami **115**. Bu jadvaldagi har bir son noto'g'ri degani emas — lekin tekshirilmagan son
+bilan tekshirilgan son bir xil ko'rinadi, farqi faqat qayta o'lchaganda bilinadi.
+
+### Xulosa: usul raqamdan muhimroq
+
+§161 "metod tuzatildi" deb yozgandi va raqamni yangiladi — lekin metodni **kodga**
+aylantirmadi. Shu sababli bu o'tirish uni qayta topdi, va qayta topganda raqam **yana**
+o'zgardi (54% → 83.8%). Qoida: **qayta hisoblanmaydigan raqam — bu raqam kiyinib olgan
+da'vo.** Endi ikkala headline raqam ham skript bilan hisoblanadi va darvoza har yurishda
+uni qayta tekshiradi.
+
