@@ -327,8 +327,9 @@ bot javob bera olmagan xabarlar.
 
 - **Live provider integratsiyasi** — hech biri `live_verified` emas. Telegram, Instagram,
   Sheets, Google, MoySklad, 1C: eng yuqorisi `LOCAL_CONTRACT_TESTED`.
-- **Mahsulot funksiyalarining to‘liq to‘plami** — registry’dagi 88 tool’dan **17 tasi**
-  yetkazilgan pack’lardan chaqiriladi (2026-09-25; `whatsapp.*` endi `turkish-baby`da).
+- **Mahsulot funksiyalarining to‘liq to‘plami** — registry’dagi 91 tool’dan **20 tasi**
+  yetkazilgan pack’lardan chaqiriladi (2026-09-25; `whatsapp.*` va `agent.*` endi
+  `turkish-baby`da).
   ERP, hujjatlar, ombor, telefoniya,
   vision, ishlab chiqarish, OEE, xodimlar, supervisor, brifing, eskalatsiya va boshqa
   modullar **muzlatilgan preview** — birorta pack ularni ishlatmaydi. WhatsApp inbound

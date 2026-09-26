@@ -20,9 +20,9 @@
 | Ko'rsatkich | Qiymat | Manba |
 |---|---|---|
 | Runtime modullari | **43** fayl (retry.py qo'shildi) | `api-python/platform_runtime/` |
-| Registry tool'lari | **88** (known **89**) | `build_registry()` |
-| **Pack'dan yetib boradigan tool'lar** | **17** — 88 dan (2026-09-25) | yetkazilgan pack'lar: `demo-retail`, `marketing`, `turkish-baby`, `_template`; `whatsapp.*` endi `turkish-baby`da e'lon qilingan |
-| **Yetib bo'lmaydigan `platform_runtime` LOC** | **56%** — 15 modul, 10 758 / 19 182 satr (2026-09-25) | eski **81%** boshqa metodika bilan o'lchangan (yadro modullari hisobdan chiqarilgan), shuning uchun raqamlar **solishtirilmaydi** |
+| Registry tool'lari | **91** (engine registry: bare 88 + 3 shop tool; `known_tool_names()` ham 91) | `build_registry(catalog, shop_data)` |
+| **Pack'dan yetib boradigan tool'lar** | **20** — 91 dan (2026-09-25) | yetkazilgan pack'lar: `demo-retail`, `marketing`, `turkish-baby`, `_template`; `agent.*` endi `turkish-baby`da. **Metod tuzatildi:** ilgarigi 12/89 va 17/88 **bare** `build_registry()` bilan o'lchangan va 3 shop tool'ini hisobga olmagan |
+| **Yetib bo'lmaydigan `platform_runtime` LOC** | **54%** — **14** modul, 10 447 / 19 182 satr (2026-09-25) | eski **81%** boshqa metodika bilan o'lchangan (yadro modullari hisobdan chiqarilgan), shuning uchun raqamlar **solishtirilmaydi** |
 | Backend API route'lari | **54** (platform) + **13** (identity) + **7** (oauth) + **4** (google) | `grep -c '^@router\.'` |
 | `app/` modullari | **41** fayl (`whatsapp_api.py` qo‘shildi) | `api-python/app/` |
 | Offline testlar | **3 601** | `Ran 3601 tests` (2026-09-25) |
@@ -38,15 +38,14 @@
 **Muhim:** `production_release: NO_GO` — bu **ataylab**. Tizim hozir
 "mijozga topshiriladigan mahsulot" emas, "tekshirilgan platforma yadrosi".
 
-**Ikkinchi muhim gap — yetib borish.** Registry'dagi 88 tool'dan **17 tasi**
-yetkazib berilayotgan pack'lardan chaqirilishi mumkin (2026-09-25; `whatsapp.*`
-`turkish-baby`da e'lon qilindi). Quyidagi modullarni
+**Ikkinchi muhim gap — yetib borish.** Registry'dagi 91 tool'dan **20 tasi**
+yetkazib berilayotgan pack'lardan chaqirilishi mumkin (2026-09-25; `whatsapp.*` va
+`agent.*` endi `turkish-baby`da). Quyidagi modullarni
 ishlatadigan **birorta pack yo'q**: `erp`, `documents`, `inventory`,
 `business_graph`, `telephony`, `assets`, `vision`,
 `manufacturing`, `oee`, `workforce`, `supervisor`, `reengagement`, `escalation`,
-`briefing`, `oversight`. WhatsApp inbound HTTP route **2026-09-25 da yozildi**
-(`app/whatsapp_api.py`), lekin birorta pack `whatsapp.*` tool'ini e'lon qilmagani uchun
-modul amalda hamon yetib bo'lmaydi.
+`briefing`. WhatsApp inbound HTTP route ham **bor** (`app/whatsapp_api.py`, 19 HTTP testi)
+va `whatsapp.*` tool'lari `turkish-baby`da e'lon qilingan — live Meta acceptance hamon yo'q.
 
 Bular **muzlatilgan (frozen) preview modullar** — mahsulot funksiyasi emas. Ular test
 va chegara auditi bilan qoplangan, lekin hech bir mijoz konfiguratsiyasi ularga yetib
@@ -344,8 +343,8 @@ yopildi: raw JSON o'rniga katalog sxemasidan qurilgan forma (8 node testi;
 `production_release: NO_GO`. Ikki sabab, ikkalasi ham kod sifati emas:
 
 1. **Operatsion qattiqlashtirish yo'q** — HA, observability, DR, live acceptance.
-2. **Yetib borish bo'shlig'i** — 88 tool'dan 17 tasi (2026-09-25), `platform_runtime`
-   kodining 56%i (15 modul) hamon yetkazilgan pack'lardan chaqirilmaydi. Ular
+2. **Yetib borish bo'shlig'i** — 91 tool'dan 20 tasi (2026-09-25), `platform_runtime`
+   kodining 54%i (14 modul) hamon yetkazilgan pack'lardan chaqirilmaydi. Ular
    **muzlatilgan preview**, mahsulot funksiyasi emas (§0).
 
 Bunga qo'shimcha, **birinchi ishga tushirish yo'li o'lik edi**: README'dagi

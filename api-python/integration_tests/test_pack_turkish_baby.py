@@ -15,6 +15,7 @@ from app.packs import PACKS_DIR, PackError, load_pack
 from app.planning import conversation_agent, route
 from app.platform_api import agents, catalog, policy, shop_data
 from platform_runtime.conversation import ungrounded_numbers
+from platform_runtime.oversight import MAX_EVENTS, MAX_WINDOW_SECONDS, OVERSIGHT_TOOLS
 from platform_runtime.shop_tools import order_draft, shop_info
 from platform_runtime.tools import build_registry, unknown_tools
 
@@ -117,6 +118,25 @@ def test_filling_notify_recipient_without_allowlisting_it_is_refused(tmp_path, m
                     .replace("allowed_recipients: []", 'allowed_recipients: ["-1001234567890"]'),
                     encoding="utf-8")
     assert load_pack(T).agents[0].conversation.notify_recipient == "-1001234567890"
+
+
+def test_the_ops_assistant_holds_the_read_only_oversight_surface():
+    """agent.* needs no connection, so a shipped pack can actually use it."""
+    p = policy(T, "ops.assistant")
+    assert set(OVERSIGHT_TOOLS) <= set(p["tools"])
+    registry = build_registry()
+    assert {registry.get(name).risk for name in OVERSIGHT_TOOLS} == {"read"}
+    # The bounds a caller fills in the dashboard form are the module's own.
+    activity = registry.get("agent.activity").schema["properties"]
+    assert activity["limit"]["maximum"] == MAX_EVENTS
+    assert activity["since_seconds"]["maximum"] == MAX_WINDOW_SECONDS
+
+
+def test_the_pack_carries_no_write_path_into_oversight(pack):
+    """An agent able to edit its own ladder would break the audit chain."""
+    ops = next(a for a in pack.agents if a.id == "ops.assistant")
+    assert set(OVERSIGHT_TOOLS) & set(ops.tools) == set(OVERSIGHT_TOOLS)
+    assert ops.ladder == "human_assisted"
 
 
 def test_persona_is_present_uzbek_and_grounded(pack):

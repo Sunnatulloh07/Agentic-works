@@ -170,7 +170,15 @@ def engine():
     from .storage import _path, db
     from .runtime_authority import runtime_authority
     db()  # Ensure directory migrations before the engine opens its independent connections.
-    return Engine(_path(),build_registry(catalog,shop_data),policy,authority=runtime_authority)
+    e=Engine(_path(),build_registry(catalog,shop_data),policy,authority=runtime_authority)
+    # The pack listing is the catalog the runtime's oversight validates against (P9).
+    # Without this hook oversight can only check the id's SHAPE, so an operator's typo
+    # would come back as a report of zeros instead of a refusal -- the module documents
+    # the refusal, and its integration contract caught that nothing in app/ provided
+    # the hook. A pack that fails to load still yields None inside the runtime, which
+    # is the documented "cannot enumerate" fallback rather than a crash.
+    e.agent_catalog=agents
+    return e
 
 
 def identity(request,tenant,roles=('owner','operator','integrator','viewer')):

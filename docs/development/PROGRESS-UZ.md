@@ -2600,4 +2600,58 @@ qiymat hech qachon qaytmaydi**).
 - Tool yuzasi **brauzerda bosilmagan** (typecheck + unit test bor, E2E yo'q).
 - Reachability: 71 tool hamon pack'siz; live acceptance yo'q; `production_release: NO_GO`.
 
+## §161 — `agent.*` reachable + oversight catalog hook (2026-09-25, to'rtinchi o'tirish)
+
+### 1. `agent.*` endi yetib boriladi
+
+`turkish-baby`ning `ops.assistant`iga platformaning **o'z read-only oversight**'i qo'shildi:
+`agent.activity`, `agent.cost`, `agent.health`. Boshqa frozen modullardan farqli o'laroq bu
+modul **hech qanday konfiguratsiya talab qilmaydi** (connection va register yo'q — platforma
+o'zi yozgan jadvallarni o'qiydi), shuning uchun pack e'loni hollow claim emas:
+`integration_tests/test_tool_surface_contract.py` haqiqiy HTTP orqali read'ni uchi-uchiga
+yurgizadi (`engine.tick` → step `succeeded`, `result['agent'] == 'sales.assistant'`), va
+`agent.activity` chegaralari server tomonda sinaladi (chegarada 200, chegaradan oshsa 422).
+
+### 2. Yo'l-yo'lakay **haqiqiy nuqson**: oversight'ning "noma'lum agent" himoyasi o'lik edi
+
+Modul hujjati aytadi: *"an unknown agent is a 404-style refusal rather than an empty
+activity list"*. Ammo `_known` buni faqat `engine.agent_catalog` hook'i mavjud bo'lganda
+qiladi (aks holda "cannot enumerate" fallback — faqat id **shakli** tekshiriladi), va
+**`app/`dagi hech narsa bu hook'ni o'rnatmagan**: `api.engine()` qo'ymasdi, ya'ni
+productionda har bir noma'lum agent **nol ko'rsatkichli hisobot** bo'lib qaytardi.
+Runtime testlari esa o'z Engine'lariga hook'ni **qo'lda qo'yib**, himoyani "bor" deb
+ko'rsatardi — guard'ning o'zi hech qachon o'tkazib yuborilmagan edi.
+
+Tuzatish: `api.engine()` endi `e.agent_catalog = agents` (pack ro'yxati) qo'yadi; pack
+yuklanmasa runtime ichidagi `None` fallback ishlaydi (crash emas). **Qadash:**
+`test_the_shipped_engine_wires_the_oversight_catalog` **haqiqiy** `api.engine()`ni chaqirib
+hook va ro'yxatni tekshiradi; `test_an_unknown_target_agent_is_refused_by_the_read_itself`
+typo uchun step `failed`/`Forbidden` bo'lishini talab qiladi (engine xabarni emas, istisno
+**sinfini** yozadi — bu ham testda izohlangan).
+
+### 3. O'lchov metodidagi xato tuzatildi: **12/89 va 17/88 noto'g'ri edi**
+
+Yetib borish raqamlari **bare** `build_registry()` bilan o'lchangan edi — u esa xost bergan
+3 shop tool'ini (`products.search`, `shop.info`, `orders.draft`) ro'yxatga olmaydi, ya'ni
+ular **reachable bo'la turib** hisobga olinmagan va **maxraj ham xato** edi. To'g'ri metod —
+engine o'zi ishlatadigan registry: `build_registry(catalog, shop_data)` = **91** tool
+(`known_tool_names()` ham 91). Shu bilan (2026-09-25):
+
+- **reachable: 20 / 91**
+- yetib bo'lmaydigan LOC: **10 447 / 19 182 = 54%**, **14** modul (`oversight` ro'yxatdan chiqdi)
+
+### Yakuniy o'lchov
+
+| To'plam | Natija |
+|---|---|
+| `runtime_tests` | **3 601** — app qatlamidagi hook tahriri runtime to'plamiga tegmadi |
+| `integration_tests` | **362/362 PASS** (354 + 8 yangi) |
+
+### Ochiq qolgan
+
+- Qolgan frozen modullar hamon **konfiguratsiya talab qiladi** (`inventory` ikki qavatli:
+  graph + connection; `crm`/`sheets`/`database` connection; `telephony`/`workforce`/`oee`
+  register) — ularni pack'ga qo'yish "e'lon bor, konfiguratsiya yo'q" holatini beradi.
+- Live acceptance yo'q; `production_release: NO_GO`.
+
 

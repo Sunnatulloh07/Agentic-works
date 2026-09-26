@@ -130,16 +130,16 @@ qadami kabi engine siyosatidan, dispatch paytidagi qabul qiluvchi qayta tekshiru
 
 ## Qamrov: nima haqiqatan yetib boradi
 
-Registry’da **88** tool bor va ulardan **17 tasi** yetkazib berilayotgan pack’lardan
+Registry’da **91** tool bor va ulardan **20 tasi** yetkazib berilayotgan pack’lardan
 (`demo-retail`, `marketing`, `turkish-baby`, `_template`) chaqirilishi mumkin
-(2026-09-25 o‘lchovi; `whatsapp.*` endi `turkish-baby`da). Qolgan 15 modulning
-**10 758 satri** (19 182 dan, 56%) hamon chaqirilmaydi.
+(2026-09-25 o‘lchovi; `whatsapp.*` va `agent.*` endi `turkish-baby`da). Qolgan 14 modulning
+**10 447 satri** (19 182 dan, 54%) hamon chaqirilmaydi.
 
 Quyidagi modullarni ishlatadigan **birorta pack yo‘q**:
 
 `erp` · `documents` · `inventory` · `business_graph` ·
 `telephony` · `assets` · `vision` · `manufacturing` · `oee` · `workforce` · `supervisor` ·
-`reengagement` · `escalation` · `briefing` · `oversight`
+`reengagement` · `escalation` · `briefing`
 
 WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`: handshake + imzolangan
 inbound, 19 HTTP testi bilan) va `whatsapp.*` tool’lari `turkish-baby` pack’ida e’lon

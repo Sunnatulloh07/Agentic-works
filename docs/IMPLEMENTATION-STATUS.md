@@ -19,16 +19,16 @@ faqat pastga ko‘chirildi.
 
 ## Qamrov: registry va pack’lar orasidagi bo‘shliq
 
-Registry’da **88** tool bor. Yetkazib berilayotgan pack’lardan (`demo-retail`, `marketing`,
-`turkish-baby`, `_template`) **17 tasi** chaqirilishi mumkin (2026-09-25 o‘lchovi;
-`whatsapp.*` endi `turkish-baby`da). Qolgan 15 modulning **10 758 satri**
-(19 182 dan, 56%) hamon chaqirilmaydi.
+Registry’da **91** tool bor. Yetkazib berilayotgan pack’lardan (`demo-retail`, `marketing`,
+`turkish-baby`, `_template`) **20 tasi** chaqirilishi mumkin (2026-09-25 o‘lchovi;
+`whatsapp.*` va `agent.*` endi `turkish-baby`da). Qolgan 14 modulning **10 447 satri**
+(19 182 dan, 54%) hamon chaqirilmaydi.
 
 Quyidagi modullarni ishlatadigan **birorta pack yo‘q**:
 
 `erp` · `documents` · `inventory` · `business_graph` ·
 `telephony` · `assets` · `vision` · `manufacturing` · `oee` · `workforce` · `supervisor` ·
-`reengagement` · `escalation` · `briefing` · `oversight`
+`reengagement` · `escalation` · `briefing`
 
 WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`; 19 HTTP testi
 `integration_tests/test_whatsapp_webhook_http.py`) va `whatsapp.*` tool’lari

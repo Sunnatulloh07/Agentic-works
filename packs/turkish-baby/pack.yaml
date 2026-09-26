@@ -84,7 +84,12 @@ agents:
   - id: ops.assistant
     name: "Operatsion yordamchi"
     department: operations
-    tools: [reports.summary, records.list, memory.search]
+    # agent.* is the platform's own read-only oversight (activity, cost, health).
+    # It reads the tables the platform already keeps, needs no connection or
+    # register, and the module has no write path at all -- which is why an ops
+    # assistant may hold it and an agent's own ladder/tools stay out of its reach.
+    tools: [reports.summary, records.list, memory.search,
+            agent.activity, agent.cost, agent.health]
     ladder: human_assisted
 branches:
   - id: markaz
