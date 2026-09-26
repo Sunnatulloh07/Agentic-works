@@ -2707,4 +2707,168 @@ ikki unittest shakli va node sarlavhasi, child muhiti (`PYTHONIOENCODING`, `APPD
 
 Ya'ni: **yangi qizil = FAIL**, qayd etilgan platforma yuzasi = PASS.
 
+## §163 — Identity HTTP yuzasi: **ikki manba emas, bitta manba** (2026-09-26)
+
+§155 `app/` qatlamining **nomlanmagan** chegaralarini nomladi. §163 boshqa sinfdagi nuqsonni
+topdi: `app/identity_api.py` chegaralari nomsiz emas edi — ular **ikki marta nomlangan** edi.
+
+HTTP modellari `identity_store`ning **yetti** sonini o'z pydantic cheklovlari sifatida
+qayta yozgan: e-mail 320, parol 1/256, token 20/256, ism 1/256, workspace 2/64, taklif
+TTL 300/604800. **Ikkala nusxa ham to'g'ri edi — muammo aynan shunda.** Mos kelib turgan
+nusxa pin'dan farq qilmaydi, toki biror taraf ko'tarilmaguncha: `MAX_EMAIL_CHARS`ni
+store'da oshirish HTTP qatlamini 320'da rad etishda qoldirardi, **ikki tarafda ham hech
+qanday test qizarmasdi**, va ikki fayl production'da kelishmovchi bo'lib qolardi — har biri
+o'ziga nisbatan izchil ko'ringan holda.
+
+Shuning uchun asosiy tuzatish **test emas, tuzilma** edi: modellar endi egasining
+konstantalarini **o'qiydi**. "Ikki qatlam mos keladimi?" degan savol endi test eslab
+turishi kerak bo'lgan savol emas — u **mavjud emas**.
+
+### Shu bilan birga yopilgan yana to'rtta "ikki manba"
+
+| Joy | Nima edi | Nima bo'ldi |
+|---|---|---|
+| `identity_api.rate()` | pozitsion `60` (`throttle`ning **limiti**, oynaga o'xshab o'qilardi) | `CLIENT_THROTTLE_LIMIT` |
+| `identity_api.invoke()` | `Retry-After: '900'` — `THROTTLE_WINDOW_SECONDS=900` yonida | egasidan o'qiladi |
+| `identity_api.tokens()` | `min(900, …)` va `ttl<1` | `SESSION_TOKEN_TTL_SECONDS` / `MIN_TOKEN_TTL_SECONDS` |
+| `identity_api.claims()` | `'Bearer '` tekshiriladi, `auth[7:]` kesiladi | `BEARER_PREFIX` + `len(BEARER_PREFIX)` |
+| `identity_api.admin()` | `len(required)<32` | `MIN_ADMIN_TOKEN_CHARS` |
+| `identity_store._name` / `_workspace_id` | `maximum=256`, `_name(…, 64)` | `MAX_NAME_CHARS` / `MAX_WORKSPACE_ID_CHARS` |
+| `identity_store._password_ok` | `n=16384, r=8, p=1, dklen=32` — **konstantalar allaqachon bor edi, chaqiruv ularni e'tiborsiz qoldirgan** | `SCRYPT_N/R/P/DKLEN` |
+| `identity_store.throttle` | `str(key)[:512]` | `MAX_THROTTLE_KEY_CHARS` |
+
+`_password_ok` qatori alohida diqqatga loyiq: `SCRYPT_N` §155'da nomlangan edi, lekin
+**chaqiruv joyi uni o'qimasdi** — ya'ni nom bor, foyda yo'q.
+
+### Halollik qaydlari (kuchsizroq asbob — va shunday deb yozilgan)
+
+1. **`MIN_TOKEN_TTL_SECONDS = 1`**, shuning uchun `ttl<MIN_TOKEN_TTL_SECONDS` eski `ttl<1`
+   bilan **bugun aynan bir xil**. Bu xatti-harakat o'zgarishi **emas**; qiymati istiqbolli:
+   agar `auth` bu polni ko'tarsa, marshrut ergashadi, aks holda `issue_token` rad etadigan
+   umrni uzatib, bu yerda 401 o'rniga **500** bo'lib chiqardi. Mutatsiya harness buni
+   **isbotladi**: polni qaytarish to'plamni **yashil** qoldirdi (qolgan 10 ta qaytarish
+   ushlandi) — shuning uchun bu chegara **manba bo'yicha** pinlanadi, kuchsizroq asbob.
+2. **E-mail va workspace pollari** `identity_store` regexlarining shakli. §155 regexni
+   f-string'dan qurishni **qasddan rad etgan**; oqibatda bu pollar **ikki manba** — birinchisiga
+   mos kelishi **tekshiriladi**, hosil qilinmaydi.
+3. **`InviteRequest.role`** `Literal`i `store.ROLES - {'owner'}`dan **qurib bo'lmaydi**:
+   pydantic OpenAPI `enum`ini literal a'zolardan yasaydi. U ham test bilan mos kelishga pinlandi.
+
+### Yangi o'lchov
+
+`api-python/runtime_tests/test_identity_api_bounds.py` — **47 test**. Eng muhimi
+`NoRestatedBoundTests`: bu **manba skaneri**, chunki u oldini oladigan nosozlikning
+xatti-harakati yo'q — egasining soniga **tasodifan teng** bo'lgan literal har bir
+funksional testdan o'tib turib, ikkinchi manba bo'lib qolaveradi.
+**Lekin "literal yo'q" va "to'g'ri egadan o'qilgan" — ikki xil da'vo.** Ikkinchisini
+`OwnerAttributionTests` pinlaydi: har bir maydon qaysi konstantani o'qishi **manba
+bo'yicha** jadvalga yozilgan. Sabab audittan olingan va halollik bilan yozilgan —
+qisqartirilgan diff'ni o'qib, parol shifti `MAX_PASSWORD_CHARS` o'rniga
+`MAX_TOKEN_CHARS`ga ulangan bo'lib **ko'rindi**. U ulanmagan edi. Ammo hech bir test buni
+ayta olmasdi, chunki **ikkalasi ham 256**: xatti-harakat testi, OpenAPI sxemasi va
+mutatsiya harness — hammasi yashil qolardi. `MAX_TOKEN_CHARS` ko'tarilsa parollar ham
+kengayardi; `MAX_PASSWORD_CHARS` ko'tarilsa register kengayib, login **qolmasdi** va ikki
+endpoint kelishmasdi. Qiymat tengligi buni **ko'ra olmaydi** — shuning uchun atributsiya
+nom bo'yicha pinlanadi. Mutatsiya harness buni tasdiqladi: "parol shiftini token
+konstantasiga qayta ulash" endi **ushlanadi**.
+
+
+
+**Mutatsiya harness** — `scripts/probes/mutation_check_identity_api.py`: §163 yopgan
+nosozliklarning **har biri** qayta kiritiladi va to'plam qizarishi kerak. Natija
+**18/18 ushlandi** (birinchi yurishda 10/11 — pol yuqoridagi 1-qayd sababli).
+
+**Harness mustahkamlandi — va bu sessiyada jonli sinovdan o'tdi.** Uch xususiyat qo'shildi,
+har biri qattiq yo'l bilan o'rgangan:
+
+1. **U kill'dan omon qolishi kerak.** `finally` bloki jarayon o'ldirilsa **ishlamaydi**.
+   Endi har bir mutatsiyadan **oldin** pristine nusxa `scripts/probes/.mutation_backups/`ga
+   yoziladi va **keyingi** yurish uni birinchi bo'lib tiklaydi (`heal()`). Bu
+   o'z-o'zini tuzatish, o'z-o'zini intizom emas. **Isbot:** 18 ta mutatsiya 30 soniyalik
+   byudjetdan uzun, shuning uchun birinchi yurish **o'rtada o'ldirildi** — va
+   `identity_api.py` haqiqatan ham mutatsiyalangan holda qoldi:
+   `len(required)<MIN_ADMIN_TOKEN_CHARS` → `len(required)<0`, ya'ni **admin-token poli
+   butunlay o'chirilgan** holatda working tree'da turgan. `heal()` uni tikladi. Backup
+   bo'lmaganda bu jim commit qilingan bo'lardi — `auth.py` incidenti **takrorlangan**
+   bo'lardi, bu safar xavfsizlik chegarasini o'chirib.
+2. **U ish katalogiga bog'liq bo'lmasligi kerak.** `TARGET = Path('app/identity_api.py')`
+   faqat `api-python/`dan yechilardi. Endi yo'llar `__file__`dan olinadi.
+3. **U anchor'ning qanchasini mutatsiya qilganini aytishi kerak.**
+   `max_length=store.MAX_WORKSPACE_ID_CHARS)` **uch marta** uchraydi, `replace(..., 1)`
+   bittasini teginadi. Endi `[3 sites, 1 mutated]` bosib chiqariladi — qisman qamrov
+   to'liq qamrov bo'lib **ko'rinmaydi**.
+
+To'liq matritsa byudjetdan uzun, shuning uchun `--start`/`--count` uni batch'larga bo'ladi
+(uch batch: 6/6, 6/6, 6/6). O'ldirilgan batch ham tuzaladi, chunki backup mutatsiyadan
+**oldin** yoziladi va faqat tiklashdan **keyin** o'chiriladi — butun mexanizm shu tartibda.
+
+`scripts/probes/run_runtime_tests_offline.py` — `verify_offline.py`ning audit hookini
+(`socket.connect/getaddrinfo/sendto`) takrorlaydi va `runtime_tests`ni shu hook ostida
+yurgizadi. To'liq gate 30 soniyalik byudjetdan uzun; bu **faqat Python yarmi**. Natija:
+identity to'plamlari **96/96 OK** hook ostida — yangi modul **socket'siz va event loop'siz**
+(Windows'da event loop'ning o'zi socket: self-pipe `socket.socketpair()`dan quriladi).
+**Operatsion xavf — bu sessiyada sodir bo'ldi.** Uchala asbob ham (bu harness,
+`audit_app_layer_bounds.py`, `audit_vault_bounds.py`) manba fayllariga **vaqtincha yozadi**.
+Ular **hech qachon parallel yurgizilmasin** va **noma'lum flag bilan chaqirilmasin**:
+`audit_app_layer_bounds.py` faqat `--check`ni taniydi; noma'lum flag uni **to'liq** (uzoq)
+matritsaga tushiradi va uzilgan matritsa **tiklanmagan mutatsiyani** qoldiradi. Aynan shu
+sodir bo'ldi: `app/auth.py`da `SESSION_TOKEN_TTL_SECONDS` `900`dan **`9000`**ga o'zgarib
+qoldi — sessiya umri 15 daqiqadan **2.5 soatgacha**, xavfsizlikka tegishli. Uni faqat
+yakuniy tekshiruv ushladi: `test_app_layer_bounds` qizardi (`9000 != 900`) va
+`git diff --stat` **men teginmagan** faylni ko'rsatdi; `git restore` bilan tiklandi.
+**Qoida:** ish boshida va oxirida `git diff --stat`ni solishtirish — siz teginmagan fayl
+diff'da paydo bo'lsa, bu prober qoldig'i va u **commitga kirishi mumkin edi**.
+
+
+
+### Chuqur audit: §163 yopmagan to'rtta nuqson — bir qavat pastda
+
+§163 dastlabki turi `identity_api.py`ga qaramdi va "qolgan yalang'och sonlar: 0" deb
+yozdi. Chuqur audit shuni ko'rsatdiki, da'vo `identity_api.py` uchun **to'g'ri** (qolgan
+sonlar faqat HTTP status kodlari — 401/403/422/429, ular chegara emas), lekin audit
+**qo'shni faylga** qaramagandi. `identity_store.py`da yana to'rttasi bor edi:
+
+| Joy | Nima edi | Nima bo'ldi | Nega muhim |
+|---|---|---|---|
+| `_workspace_id` | `MIN_WORKSPACE_ID_CHARS` **e'lon qilingan, lekin o'z modulida hech qachon o'qilmagan** (butun repo'da 1 marta uchraydi — o'z e'lonida) | pol endi `_workspace_id`da tekshiriladi | `_password_ok`/`SCRYPT_*` bilan **aynan bir sinf**: nom bor, foyda yo'q. Grepping topgan odam uni "kuchga ega" deb o'qiydi |
+| `create_invitation` / `_new_session` | `secrets.token_urlsafe(32)` va `token_urlsafe(48)` — **entropiya nomsiz va pinlanmagan** | `INVITATION_TOKEN_BYTES` / `SESSION_TOKEN_BYTES` | `MIN_TOKEN_CHARS` modul **qabul qiladigan** token poli; entropiya modul **beradigan** token. **Ikki xil fakt.** 48→4 ga tushirish har bir refresh tokenni taxmin qilinadigan qilardi, `MIN_TOKEN_CHARS` hali 20 deb o'qib turganda va har bir test yashil qolganda |
+| `create_workspace` | `_name(plan,'plan',64), _name(region,'region',32)` — yalang'och 64/32 | `MAX_PLAN_CHARS` / `MAX_REGION_CHARS` | `_name`ning **default'i** nomlangan `MAX_NAME_CHARS`, lekin uni override qilgan ikki chaqiruv literal bilan qilgan |
+| `throttle` | `window-2` — SQL argumenti ichidagi nomsiz gorizont | `THROTTLE_RETENTION_WINDOWS` | adreslanmaydigan chegara `THROTTLE_WINDOW_SECONDS` bilan solishtirilmaydi |
+
+**Eng jiddiysi — entropiya va qabul poli orasidagi pinlanmagan invariant.** `_token_hash`
+`MIN_TOKEN_CHARS`dan qisqa har qanday tokenni rad etadi va u store **hozirgina mint
+qilgan** tokenni hashlaydi. Demak `SESSION_TOKEN_BYTES`ni **15 baytdan** pastga tushirish
+har bir `create_session`da `AuthenticationError('Invalid token')` ko'taradi — hech kim
+login, register, refresh yoki taklif qabul qila olmaydi, va xabar **token**ni ayblaydi,
+ya'ni operatorni o'zi tushirgan konstanta o'rniga **mijozga** qaratadi. To'plam buning
+hammasida yashil edi. Entropiyaning boshqa simptomi yo'q: qolgan yagona signal —
+taxmin qilish ishlay boshlagani bo'lardi.
+
+Endi `MintedTokenEntropyTests` buni ikki yo'l bilan pinlaydi: invariant o'zi
+(`len(token_urlsafe(N)) >= MIN_TOKEN_CHARS`) va **wiring** — konstantani 16 ga
+`patch` qilish mint qilingan token uzunligini o'zgartirishi kerak. 16 tanlangan, chunki u
+hali ham poldan o'tadigan **eng kichik** proba (22 belgi): 8 bayt mint'ni buzardi va
+wiring'ni emas, nosozlikni o'lchardi.
+
+**Yana bir halollik qaydi:** birinchi loyihadagi manba skaneri `token_urlsafe(48)`ni
+`identity_store`ning **o'z izohida** topib, qizardi — izoh aynan "bu literal nega yo'q"
+deb tushuntirardi. Izohni o'qimaydigan skaner **prose'ni** topadi. `code_only()` qo'shildi;
+`NoRestatedBoundTests` izoh qatorlarini allaqachon o'tkazib yuborardi. Bu asbob
+dizaynidagi real kamchilik edi va u o'z-o'zini qizartirib topildi.
+
+
+
+### O'lchov
+
+| Yuza | Natija |
+|---|---|
+| `runtime_tests.test_identity_api_bounds` (yangi) | **47/47 OK** |
+| identity to'plamlari offline hook ostida | **116/116 OK** |
+| `integration_tests/test_identity_http.py` | **14/14 PASS** — xatti-harakat o'zgarmadi |
+| Mutatsiya harness | **18/18 ushlandi** (3 batch: 6/6, 6/6, 6/6) |
+| `identity_api.py`dagi qolgan yalang'och **chegara** sonlari | **0** (qolganlari HTTP status kodlari) |
+| `identity_store.py`dagi audit topgan nomsiz chegaralar | **4 → 0** |
+| Mutatsiya qoldig'i (kill'dan keyin) | **0** — `heal()` tikladi, `git diff --stat` toza |
+
+
 

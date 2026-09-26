@@ -21,3 +21,7 @@ apps/runner/allow.json
 apps/runner/journal/
 *.local.txt
 .workbuddy-ai/
+# Pristine copies written by mutation probes before they edit a source file.  A probe
+# that is killed leaves one behind and heals from it on the next run; it must never be
+# committed, because it is a copy of a file that may currently be mutated.
+scripts/probes/.mutation_backups/

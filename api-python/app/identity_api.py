@@ -5,9 +5,42 @@ import time
 from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
-from .auth import issue_token, verify_claims
+from .auth import MIN_TOKEN_TTL_SECONDS, SESSION_TOKEN_TTL_SECONDS, issue_token, verify_claims
 from . import client_ip
 from . import identity_store as store
+
+# Declared bounds (§163).  Every ceiling this surface enforces is either read from the
+# module that owns it -- the e-mail, password, token, name and workspace numbers belong
+# to identity_store, the access-token lifetime and floor to auth -- or named here.  Until now the
+# models restated seven of identity_store's numbers as their own literals: raising
+# MAX_EMAIL_CHARS there left this file refusing at 320, and neither half noticed.  A
+# restated bound is not a second pin, it is a second source.
+#
+# The two floors below are the shapes identity_store's regexes accept ("a@b", and a
+# two-character slug).  They are named here and pinned to agree with those patterns by
+# runtime_tests.test_identity_api_bounds rather than constructed from them, because §155
+# deliberately declined to build a regex out of an f-string.  That is a test, not a
+# construction, and it is the weaker of the two.
+MIN_EMAIL_CHARS = 3
+# identity_store mints ids as 'usr_' + uuid4().hex == 36 characters.  These are not
+# that shape -- they bound what an admin may POST in WorkspaceRequest.user_id, which
+# the store then has to look up.  128 is a sanity ceiling on a client-chosen string,
+# not a claim about the store's own id format; nothing may read it as one.
+MIN_USER_ID_CHARS = 1
+MAX_USER_ID_CHARS = 128
+# The per-client login budget.  store.throttle's third argument is the LIMIT, not the
+# window: this bucket allows three times the per-account budget (THROTTLE_LIMIT) inside
+# the same THROTTLE_WINDOW_SECONDS, so one account cannot lock out its neighbours behind
+# a shared NAT, and changing address cannot unlock an account.  It was a bare positional
+# 60 at the call site, which read as a window and no offline test could address.
+CLIENT_THROTTLE_LIMIT = 60
+# A configured admin token shorter than this is a configuration mistake rather than a
+# secret: refuse to provision with it instead of accepting a guessable one.
+MIN_ADMIN_TOKEN_CHARS = 32
+# The Authorization scheme this surface accepts.  The prefix test and the slice that
+# removed it were two sources for one fact ('Bearer ' and a bare 7): renaming the
+# scheme would have left the slice cutting seven characters off something else.
+BEARER_PREFIX = 'Bearer '
 
 router=APIRouter(prefix='/identity',tags=['identity'])
 
@@ -17,48 +50,65 @@ class StrictModel(BaseModel):
 
 
 class Credentials(StrictModel):
-    email:str=Field(min_length=3,max_length=320)
-    password:SecretStr=Field(min_length=1,max_length=256)
+    email:str=Field(min_length=MIN_EMAIL_CHARS,max_length=store.MAX_EMAIL_CHARS)
+    password:SecretStr=Field(min_length=store.MIN_CANDIDATE_PASSWORD_CHARS,
+                             max_length=store.MAX_PASSWORD_CHARS)
 
 
 class RegisterRequest(Credentials):
-    display_name:str=Field(min_length=1,max_length=256)
-    invitation_token:SecretStr=Field(min_length=20,max_length=256)
+    display_name:str=Field(min_length=store.MIN_NAME_CHARS,max_length=store.MAX_NAME_CHARS)
+    invitation_token:SecretStr=Field(min_length=store.MIN_TOKEN_CHARS,
+                                     max_length=store.MAX_TOKEN_CHARS)
 
 
 class BootstrapRequest(Credentials):
-    display_name:str=Field(min_length=1,max_length=256)
-    workspace_id:str=Field(min_length=2,max_length=64)
-    workspace_name:str=Field(min_length=1,max_length=256)
+    display_name:str=Field(min_length=store.MIN_NAME_CHARS,max_length=store.MAX_NAME_CHARS)
+    workspace_id:str=Field(min_length=store.MIN_WORKSPACE_ID_CHARS,
+                           max_length=store.MAX_WORKSPACE_ID_CHARS)
+    workspace_name:str=Field(min_length=store.MIN_NAME_CHARS,max_length=store.MAX_NAME_CHARS)
 
 
 class LoginRequest(Credentials):
-    workspace_id:str|None=Field(default=None,min_length=2,max_length=64)
+    workspace_id:str|None=Field(default=None,min_length=store.MIN_WORKSPACE_ID_CHARS,
+                                max_length=store.MAX_WORKSPACE_ID_CHARS)
 
 
 class RefreshRequest(StrictModel):
-    refresh_token:SecretStr=Field(min_length=20,max_length=256)
+    refresh_token:SecretStr=Field(min_length=store.MIN_TOKEN_CHARS,
+                                  max_length=store.MAX_TOKEN_CHARS)
 
 
 class WorkspaceRequest(StrictModel):
-    user_id:str=Field(min_length=1,max_length=128)
-    workspace_id:str=Field(min_length=2,max_length=64)
-    name:str=Field(min_length=1,max_length=256)
+    user_id:str=Field(min_length=MIN_USER_ID_CHARS,max_length=MAX_USER_ID_CHARS)
+    workspace_id:str=Field(min_length=store.MIN_WORKSPACE_ID_CHARS,
+                           max_length=store.MAX_WORKSPACE_ID_CHARS)
+    name:str=Field(min_length=store.MIN_NAME_CHARS,max_length=store.MAX_NAME_CHARS)
 
 
 class InviteRequest(StrictModel):
-    email:str=Field(min_length=3,max_length=320)
+    email:str=Field(min_length=MIN_EMAIL_CHARS,max_length=store.MAX_EMAIL_CHARS)
+    # The set identity_store.create_invitation accepts (ROLES minus 'owner').  A
+    # Literal has to carry its members literally -- pydantic builds the OpenAPI enum
+    # from them -- so this one cannot be constructed from the set the way the numbers
+    # above are.  It is pinned to agree with that set by test instead, which is the
+    # weaker instrument and is labelled as such in the test that does it.
     role:Literal['operator','integrator','viewer']
-    ttl_seconds:int=Field(default=86400,ge=300,le=604800,strict=True)
+    ttl_seconds:int=Field(default=store.INVITATION_TTL_SECONDS,
+                          ge=store.MIN_INVITATION_TTL_SECONDS,
+                          le=store.MAX_INVITATION_TTL_SECONDS,strict=True)
 
 
 class AcceptInviteRequest(StrictModel):
-    token:SecretStr=Field(min_length=20,max_length=256)
+    token:SecretStr=Field(min_length=store.MIN_TOKEN_CHARS,max_length=store.MAX_TOKEN_CHARS)
 
 
 def invoke(fn,*args,**kwargs):
     try:return fn(*args,**kwargs)
-    except store.AuthRateLimited as exc:raise HTTPException(429,'Try again later',headers={'Retry-After':'900'}) from exc
+    except store.AuthRateLimited as exc:
+        # The window the client has to wait out is the store's, not a second number: a
+        # Retry-After that disagreed would send the client straight into another 429.
+        raise HTTPException(429,'Try again later',
+                            headers={'Retry-After':str(store.THROTTLE_WINDOW_SECONDS)}) from exc
     except store.AuthenticationError as exc:raise HTTPException(401,'Identity or permission invalid') from exc
     except store.IdentityError as exc:raise HTTPException(422,str(exc)) from exc
 
@@ -67,13 +117,13 @@ def rate(request,kind):
     # Per-client key: X-Forwarded-For is read only when the peer is a TRUSTED_PROXIES
     # entry, and then only its right-most untrusted hop (app/client_ip.py). The
     # per-account half of login throttling lives in identity_store.authenticate.
-    invoke(store.throttle,'http-'+kind,client_ip.request_client(request),60)
+    invoke(store.throttle,'http-'+kind,client_ip.request_client(request),CLIENT_THROTTLE_LIMIT)
 
 
 def claims(request):
     auth=request.headers.get('Authorization','')
-    if not auth.startswith('Bearer '):raise HTTPException(401,'Bearer required')
-    try:who=verify_claims(auth[7:])
+    if not auth.startswith(BEARER_PREFIX):raise HTTPException(401,'Bearer required')
+    try:who=verify_claims(auth[len(BEARER_PREFIX):])
     except Exception as exc:raise HTTPException(401,'Invalid session') from exc
     if who.get('token_type') not in {'user','account'} or not who.get('sid'):raise HTTPException(401,'Identity session required')
     return who
@@ -82,7 +132,7 @@ def claims(request):
 def admin(request):
     required=os.getenv('ADMIN_TOKEN','')
     supplied=request.headers.get('X-Admin-Token','')
-    if len(required)<32 or not supplied or not hmac.compare_digest(required.encode(),supplied.encode()):
+    if len(required)<MIN_ADMIN_TOKEN_CHARS or not supplied or not hmac.compare_digest(required.encode(),supplied.encode()):
         raise HTTPException(403,'Admin provisioning required')
 
 
@@ -94,8 +144,15 @@ def provisioned_pack(workspace_id):
 
 
 def tokens(raw,m):
-    ttl=min(900,int(m['session_expires']-time.time()))
-    if ttl<1:raise HTTPException(401,'Session expired')
+    # auth's session lifetime and auth's floor, not second copies of either.
+    #
+    # The cap is a real fix: the literal 900 could drift from SESSION_TOKEN_TTL_SECONDS
+    # and nothing would notice.  The floor is NOT a behaviour change -- MIN_TOKEN_TTL_SECONDS
+    # is 1, so this reads exactly as `ttl<1` did.  Its value is prospective: if auth ever
+    # raises that floor, this route follows instead of handing issue_token a lifetime it
+    # rejects with a ValueError, which here would surface as a 500 rather than a 401.
+    ttl=min(SESSION_TOKEN_TTL_SECONDS,int(m['session_expires']-time.time()))
+    if ttl<MIN_TOKEN_TTL_SECONDS:raise HTTPException(401,'Session expired')
     return {'access_token':issue_token(m['workspace_id'],subject=m['user_id'],role=m['role'],
               token_type='account' if m['workspace_id']==store.ACCOUNT else 'user',session_id=m['session_id'],ttl_seconds=ttl),
             'refresh_token':raw,'token_type':'bearer','expires_in':ttl,

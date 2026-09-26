@@ -40,6 +40,38 @@ MIN_CANDIDATE_PASSWORD_CHARS = 1
 MIN_TOKEN_CHARS = 20
 MAX_TOKEN_CHARS = 256
 
+# Name and workspace ceilings (§163).  ``_name``'s default and ``_workspace_id``'s
+# explicit maximum were bare numbers here, and app/identity_api.py restated both as
+# its own pydantic bounds -- one fact in three places, each free to move.  The HTTP
+# surface now reads these, so "do the two layers agree" is a question that no longer
+# exists rather than one a test has to remember to ask.
+MIN_NAME_CHARS = 1
+MAX_NAME_CHARS = 256
+MIN_WORKSPACE_ID_CHARS = 2
+MAX_WORKSPACE_ID_CHARS = 64
+# The throttle key is hashed and then discarded, but an attacker chooses its length;
+# this bounds the string that reaches sha256.
+MAX_THROTTLE_KEY_CHARS = 512
+# The throttle prunes everything older than the current window plus this many, so a
+# request landing on a window boundary is still counted beside its neighbour.
+THROTTLE_RETENTION_WINDOWS = 2
+
+# Minting entropy (§163 audit).  ``MIN_TOKEN_CHARS`` bounds what this module *accepts*;
+# these bound what it *issues*, and they are different facts.  Both were bare literals
+# at their mint sites, which is the same defect the scrypt parameters had: dropping
+# ``token_urlsafe(48)`` to ``token_urlsafe(4)`` would have made every refresh token
+# guessable while ``MIN_TOKEN_CHARS`` still read 20, the dummy hash still cost a full
+# scrypt, and every test still passed.  Entropy has no behavioural symptom either --
+# the only signal would have been that guessing started working.
+INVITATION_TOKEN_BYTES = 32
+SESSION_TOKEN_BYTES = 48
+
+# Provisioning text ceilings.  ``create_workspace`` is a trusted admin primitive, so
+# these bind an operator rather than a client -- but an unnamed ceiling is still one
+# nobody can address by value, and both were bare numbers at the call site.
+MAX_PLAN_CHARS = 64
+MAX_REGION_CHARS = 32
+
 # Key-derivation parameters.  These are security bounds, not tunables: lowering
 # the cost factor lowers the cost of attacking every stored password, and
 # nothing used to notice.
@@ -67,15 +99,21 @@ def _email(value):
     return value.strip().casefold()
 
 
-def _name(value, field, maximum=256):
-    if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum:
+def _name(value, field, maximum=MAX_NAME_CHARS):
+    if not isinstance(value, str) or not MIN_NAME_CHARS <= len(value.strip()) <= maximum:
         raise IdentityError('Invalid ' + field)
     return value.strip()
 
 
 def _workspace_id(value):
-    value = _name(value, 'workspace_id', 64)
-    if not SLUG_RE.fullmatch(value): raise IdentityError('Invalid workspace_id')
+    value = _name(value, 'workspace_id', MAX_WORKSPACE_ID_CHARS)
+    # MIN_WORKSPACE_ID_CHARS is declared in this module, so it has to be *read* here.
+    # The §163 audit found it declared and never referenced by its own file -- a name
+    # with no effect, which is the defect the scrypt parameters had.  SLUG_RE already
+    # requires two characters, so this changes no behaviour; it gives the floor an
+    # enforcement site next to its declaration, where an editor will see both.
+    if not MIN_WORKSPACE_ID_CHARS <= len(value) or not SLUG_RE.fullmatch(value):
+        raise IdentityError('Invalid workspace_id')
     return value
 
 
@@ -97,7 +135,8 @@ def _password_ok(password, encoded):
         if ((algo, n, r, p) != ('scrypt', str(SCRYPT_N), str(SCRYPT_R), str(SCRYPT_P))
                 or len(salt) != SALT_BYTES * 2 or len(expected) != SCRYPT_DKLEN * 2):
             return False
-        value = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32)
+        value = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt),
+                               n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=SCRYPT_DKLEN)
         return hmac.compare_digest(value.hex(), expected)
     except (ValueError, TypeError): return False
 
@@ -116,10 +155,11 @@ def audit(c, workspace, actor, action, target=''):
 
 def throttle(namespace, key, limit=THROTTLE_LIMIT, window_seconds=THROTTLE_WINDOW_SECONDS):
     """Durable fixed-window throttle, must run before expensive password verification."""
-    bucket = hashlib.sha256((namespace + ':' + str(key)[:512]).encode()).hexdigest()
+    bucket = hashlib.sha256(
+        (namespace + ':' + str(key)[:MAX_THROTTLE_KEY_CHARS]).encode()).hexdigest()
     window = int(time.time() // window_seconds)
     with tx() as c:
-        c.execute('DELETE FROM p_auth_limits WHERE window<?', (window-2,))
+        c.execute('DELETE FROM p_auth_limits WHERE window<?', (window-THROTTLE_RETENTION_WINDOWS,))
         c.execute('INSERT INTO p_auth_limits VALUES(?,?,1) ON CONFLICT(bucket,window) DO UPDATE SET count=count+1', (bucket,window))
         count = c.execute('SELECT count FROM p_auth_limits WHERE bucket=? AND window=?', (bucket,window)).fetchone()[0]
     if count > limit: raise AuthRateLimited('Try again later')
@@ -174,7 +214,7 @@ def _workspace(c, uid, wid, name, plan, region):
 def create_workspace(user_id, workspace_id, name, *, plan='starter', region='uz'):
     """Trusted admin provisioning primitive; HTTP users cannot claim pack names or plans."""
     wid = _workspace_id(workspace_id); name = _name(name, 'name')
-    plan, region = _name(plan,'plan',64), _name(region,'region',32)
+    plan, region = _name(plan,'plan',MAX_PLAN_CHARS), _name(region,'region',MAX_REGION_CHARS)
     with tx() as c: return _workspace(c,user_id,wid,name,plan,region)
 
 
@@ -219,7 +259,7 @@ def create_invitation(actor_id, workspace_id, email, role, ttl_seconds=INVITATIO
     wid = _workspace_id(workspace_id); email = _email(email)
     if role not in ROLES-{'owner'}: raise IdentityError('Invalid invitation role')
     if type(ttl_seconds) is not int or not MIN_INVITATION_TTL_SECONDS<=ttl_seconds<=MAX_INVITATION_TTL_SECONDS: raise IdentityError('Invalid expiry')
-    raw=secrets.token_urlsafe(32); iid='inv_'+uuid.uuid4().hex; now=time.time()
+    raw=secrets.token_urlsafe(INVITATION_TOKEN_BYTES); iid='inv_'+uuid.uuid4().hex; now=time.time()
     with tx() as c:
         _owner(c,actor_id,wid)
         c.execute('INSERT INTO p_invitations VALUES(?,?,?,?,?,?,?,?,?,?)',
@@ -289,7 +329,7 @@ def _session_identity(c, uid, wid):
 
 
 def _new_session(c, uid, wid, expires, *, family=None, previous=''):
-    m=_session_identity(c,uid,wid); sid='ses_'+uuid.uuid4().hex; raw=secrets.token_urlsafe(48)
+    m=_session_identity(c,uid,wid); sid='ses_'+uuid.uuid4().hex; raw=secrets.token_urlsafe(SESSION_TOKEN_BYTES)
     c.execute('''INSERT INTO p_sessions(id,user_id,workspace_id,refresh_hash,expires,revoked_at,
       rotated_from,created,family_id,membership_version) VALUES(?,?,?,?,?,0,?,?,?,?)''',
               (sid,uid,wid,_token_hash(raw),expires,previous,time.time(),family or sid,m['version']))
