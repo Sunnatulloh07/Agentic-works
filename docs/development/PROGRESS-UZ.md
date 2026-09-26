@@ -2654,4 +2654,57 @@ engine o'zi ishlatadigan registry: `build_registry(catalog, shop_data)` = **91**
   register) — ularni pack'ga qo'yish "e'lon bor, konfiguratsiya yo'q" holatini beradi.
 - Live acceptance yo'q; `production_release: NO_GO`.
 
+## §162 — Offline gate: "qizil" emas, **qayd etilgan platforma yuzasi** (2026-09-25, beshinchi o'tirish)
+
+`verify_offline.py` Windows'da **har safar** FAIL berardi: `python_runtime` va `node_runner`
+platforma sababli qizil, gate esa faqat `exit 0` ni biladi. **Har doim qizil gate hech qanday
+signal bermaydi.** Endi bar — **qayd etilgan yuza**: daraxtda allaqachon ikki rekord bor
+(`test_platform_baseline.BLOCKED` — 13 test sababi bilan; `windows-baseline.test.js` — 11),
+gate ularni **o'qiydi** (nusxa saqlamaydi) va qizil to'plam rekord ichida bo'lsa
+`PASS_WITH_RECORDED_BLOCKED` deb yozadi; ro'yxatdan tashqari **har qanday yangi qizil = FAIL**.
+Bloklangan testning o'tib ketishi mumkin (rekordning o'z qo'riqchisi sabablarni qayta o'lchaydi).
+
+### Yo'l-yo'lakay topilgan **uchta haqiqiy nuqson** — uchtasi ham "gate o'zini o'lchamayapti" sinfidan
+
+1. **Rad etish (refusal) noto'g'ri muhitni o'lchagan.** Parent `find_spec` bilan
+   `fastapi/pydantic/yaml/jwt/cryptography` bor deb tasdiqlardi, izolyatsiyalangan child esa
+   ularning **hech birini ko'rmasdi** — bu hostda paketlar **user site**'da (`%APPDATA%`),
+   gate esa `APPDATA`ni child'ga uzatmasdi. Natija: `python_runtime` 3601 o'rniga **3339 test,
+   errors=172** — import xatolari **test qizilligi** sifatida dalilga yozilardi. Tuzatish:
+   `APPDATA` passthrough, `PYTHONIOENCODING=utf-8` va **`child_imports` probe** — rad etish
+   endi ishlar yuguradigan muhitda o'lchanadi va dalil papkasi yaratilishidan **oldin**.
+2. **Node logi mojibake edi.** Parent cp1251 bilan dekodlagani uchun Node'ning ✖ belgisi
+   `вњ–` bo'lib yozilardi → yuza tekshiruvi uni ko'rmasdi. Tuzatish: child UTF-8 yozadi,
+   parent `encoding='utf-8'` bilan o'qiydi.
+3. **Ikki parser nuqsoni**: (a) bir qatorli `ERROR: short (to'liq.id)` shakli o'qilmasdi
+   (faqat ko'chirilgan qator o'qilardi); (b) `✖ failing tests:` **sarlavhasi** test nomi
+   deb o'qilardi. (c) qo'shimcha: ish `discover -s runtime_tests` bilan yurgani uchun id'lar
+   `runtime_tests.` prefiksisiz keladi, rekord esa prefiks bilan — taqqoslash normallashtirildi
+   (`without_package_prefix`).
+
+**Muhim halollik qaydi:** birinchi yurish loglari (`local-20260926T060200214320Z`,
+`local-20260926T060743536197Z`) **saqlanadi** — ular nuqsonlarni topgan yurishlar. Gate
+o'sha loglarga nisbatan **FAIL** berishda davom etadi (tekshirildi): 172 import xatosi
+rekorddan tashqarida.
+
+### Yangi testlar
+
+`scripts/test_verify_offline.py` — **22 test**: rekordlar daraxtdan o'qiladi (13/11), qayd
+etilgan yuza qabul qilinadi, yangi qizil / o'qilmaydigan hisobot / yo'q rekord **rad etiladi**,
+ikki unittest shakli va node sarlavhasi, child muhiti (`PYTHONIOENCODING`, `APPDATA`) va
+**child probe** (haqiqiy o'lchov + yo'q modul rad etilishi). CI'ga yangi qadam qo'shildi.
+
+### Natija — dalil: `docs/verification/local-20260926T061554347843Z/`
+
+**`EXIT 0`** — gate bu hostda birinchi marta **o'zi haqidagi da'voni o'lchadi**:
+
+| Job | Natija |
+|---|---|
+| `python_runtime` | **PASS_WITH_RECORDED_BLOCKED** — 3 601 test, **13 qayd etilgan** |
+| `node_runner` | **PASS_WITH_RECORDED_BLOCKED** — 36 test, **11 qayd etilgan** |
+| `release_tools` · `manifest_tools` · `sqlite_demo` · `managed_database_demo` · 4 brauzer klienti · `python_syntax` | **PASS** |
+| `javascript_typescript_syntax` | BLOCKED (bun o'rnatilmagan — ixtiyoriy) |
+
+Ya'ni: **yangi qizil = FAIL**, qayd etilgan platforma yuzasi = PASS.
+
 

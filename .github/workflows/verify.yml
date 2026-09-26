@@ -19,6 +19,7 @@ jobs:
       - run: python -m unittest discover -s scripts -p "test_manifest.py" -v
       - run: python -m unittest discover -s scripts -p "test_run_local.py" -v
       - run: python -m unittest discover -s scripts -p "test_import_catalog.py" -v
+      - run: python -m unittest discover -s scripts -p "test_verify_offline.py" -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

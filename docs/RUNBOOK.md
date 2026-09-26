@@ -77,6 +77,7 @@ O‘lchangan natijalar (2026-09-22, Windows, `cryptography` o‘rnatilgan venv):
 | `runtime_tests` | **3 239 sinov**, `failures=1, errors=12` — **13 tasi Windows-only** (`os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink privilegiyasi, POSIX fayl rejimlari). `test_platform_baseline.py` har bir sababni yurgizib tasdiqlaydi. |
 | `integration_tests` | **95/95 PASS**, yuqoridagi env bilan |
 | `apps/runner` node testlari | Windows’da 31 dan **11 tasi** qizil — sabablar endi `windows-baseline.test.js` da **qadalgan** (5 execute off-Linux, 2 symlink EPERM, 4 POSIX ruxsat bitlari) va har bir sabab haqiqatda yurgizib tasdiqlanadi. Platforma cheklovi, kod nuqsoni emas |
+| `verify_offline.py` (offline gate) | **EXIT 0** — `python_runtime` va `node_runner` **`PASS_WITH_RECORDED_BLOCKED`** (13 + 11 qayd etilgan; yangi qizil = FAIL). Dalil: `docs/verification/local-20260926T061554347843Z/` |
 | `api-python/tests/` (legacy) | **33 qizil / 172 pass**, va **hech bir gate uni yurgizmaydi** |
 
 Tarixiy `api-python/tests/` suite hozir **nafaqaga chiqarilmoqda** (alohida ish). Uning natijasini acceptance sifatida ishlatmang va uning qizilligini yangi regressiya deb hisoblamang.

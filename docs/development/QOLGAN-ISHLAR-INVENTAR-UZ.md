@@ -372,7 +372,7 @@ ham yopiq turgan.
 | CI `ui_dependency_security` job | **hamon FAIL** — `next@14.2.35` da 1 critical + 1 high; Next 15 + React 19 kerak |
 | POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
 | **Node runner** (`apps/runner/test.js`) | **11 / 31 qizil** Windows'da (2026-09-25 o'lchovi; ilgari 11/24 deb yozilgan edi, to'plam o'sgan). Uch sabab: `execute()` Linux'da bo'lmaganda rad etadi (5), `symlink` EPERM (2), POSIX ruxsat bitlari (4). **Endi qadalgan**: `apps/runner/windows-baseline.test.js` har bir sababni **yurgizib** tasdiqlaydi va 11 ta nomni `test.js`da qidiradi |
-| `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` FAIL — **platforma**, kod emas |
+| `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` endi **`PASS_WITH_RECORDED_BLOCKED`** — qizil to'plam qayd etilgan platforma yuzasi bilan solishtiriladi (`test_platform_baseline.BLOCKED`, `windows-baseline.test.js`), **yangi qizil = FAIL** (§162) |
 | `test_customer360_bounds.py` (§157) | **72 sinov** (77 subtest), yashil; `scripts/probes/audit_customer360_bounds.py` — **ikki yurishli** matritsa (52 o'z moduli + 8 mustaqil iste'molchi), **60/60 RED** |
 | Umumiy baseline fixture (deyarli 3 daqiqalik to'plam uchun) | **hali yo'q** |
 

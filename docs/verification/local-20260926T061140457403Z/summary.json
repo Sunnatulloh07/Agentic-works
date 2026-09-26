@@ -1,0 +1,205 @@
+{
+  "kind": "offline_verification_only",
+  "created_at": "2026-09-26T06:14:52.690954+00:00",
+  "python": "3.14.6",
+  "results": [
+    {
+      "name": "javascript_typescript_syntax",
+      "status": "BLOCKED",
+      "reason": "Bun unavailable; optional syntax-only check"
+    },
+    {
+      "name": "python_runtime",
+      "status": "PASS_WITH_RECORDED_BLOCKED",
+      "exit_code": 1,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "runtime_tests",
+        "-v"
+      ],
+      "seconds": 186.973,
+      "log": "python_runtime.log",
+      "blocked": [
+        "runtime_tests.test_foundation_v02.ConnectorTests.test_mount_scope",
+        "runtime_tests.test_macos_bundle.BundleTests.test_all_files_private",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_binary_and_large_files_denied",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_darwin_getpath_contract",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_descriptor_identity_rechecked",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_directory_bounded",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_escape_symlink_denied",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_fifo_does_not_block",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_hardlink_denied",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_list_real_directory",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_read_real_file",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_root_symlink_replacement_denied",
+        "runtime_tests.test_portable_fs.PortableFSTests.test_unsafe_entries_hidden"
+      ],
+      "blocked_source": "runtime_tests/test_platform_baseline.py",
+      "note": "every failing test is on the recorded platform surface; that record owns the reasons and re-measures them",
+      "tests": 3601
+    },
+    {
+      "name": "release_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_release_tools.py",
+        "-v"
+      ],
+      "seconds": 0.379,
+      "log": "release_tools.log",
+      "tests": 12
+    },
+    {
+      "name": "manifest_tools",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_manifest.py",
+        "-v"
+      ],
+      "seconds": 1.272,
+      "log": "manifest_tools.log",
+      "tests": 18
+    },
+    {
+      "name": "sqlite_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "scripts/demo_runtime.py"
+      ],
+      "seconds": 0.281,
+      "log": "sqlite_demo.log"
+    },
+    {
+      "name": "managed_database_demo",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "scripts/demo_managed_database.py"
+      ],
+      "seconds": 0.599,
+      "log": "managed_database_demo.log"
+    },
+    {
+      "name": "node_runner",
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/runner/test.js",
+        "apps/runner/windows-baseline.test.js"
+      ],
+      "seconds": 0.264,
+      "log": "node_runner.log",
+      "tests": 36
+    },
+    {
+      "name": "browser_session_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/session-client.test.mjs"
+      ],
+      "seconds": 0.147,
+      "log": "browser_session_client.log",
+      "tests": 15
+    },
+    {
+      "name": "browser_oauth_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/oauth-client.test.mjs"
+      ],
+      "seconds": 0.142,
+      "log": "browser_oauth_client.log",
+      "tests": 12
+    },
+    {
+      "name": "browser_google_data_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/google-data-client.test.mjs"
+      ],
+      "seconds": 0.146,
+      "log": "browser_google_data_client.log",
+      "tests": 16
+    },
+    {
+      "name": "browser_tools_client",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "apps/ui/lib/tools-client.test.mjs"
+      ],
+      "seconds": 0.147,
+      "log": "browser_tools_client.log",
+      "tests": 8
+    },
+    {
+      "name": "python_syntax",
+      "status": "PASS",
+      "checked": 311,
+      "errors": []
+    }
+  ],
+  "http_dependencies_missing": [
+    "psycopg"
+  ],
+  "optional_database_dependencies_missing": [
+    "psycopg",
+    "pymysql",
+    "pymongo",
+    "pyodbc",
+    "oracledb",
+    "boto3",
+    "cassandra",
+    "neo4j",
+    "elasticsearch"
+  ],
+  "not_performed": [
+    "dependency-backed HTTP tests",
+    "Next/React typecheck",
+    "Next production build",
+    "live providers",
+    "live network databases including SQL Server, Oracle, DynamoDB, Cassandra, Neo4j and Elasticsearch",
+    "native macOS F_GETPATH/LaunchAgent",
+    "local model inference",
+    "UI browser acceptance",
+    "production dependency audit",
+    "deployment"
+  ],
+  "release": "NO_GO"
+}
