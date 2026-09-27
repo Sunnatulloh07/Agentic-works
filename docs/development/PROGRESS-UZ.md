@@ -3131,3 +3131,90 @@ o'zgardi (54% → 83.8%). Qoida: **qayta hisoblanmaydigan raqam — bu raqam kiy
 da'vo.** Endi ikkala headline raqam ham skript bilan hisoblanadi va darvoza har yurishda
 uni qayta tekshiradi.
 
+
+## Adversary audit: probe va darvoza (2026-09-26, davom)
+
+Yuqoridagi tuzatishlar yashil edi. Shundan so'ng probe va darvozaga **qasddan buzish**
+nuqtai nazaridan qayta tekshiruv o'tkazildi — "bu himoya haqiqatan ham qizil bo'la
+oladimi?" savoli bilan. Yetti topilma, barchasi empirik tasdiqlangan.
+
+### 1. `hollow_claims` hech qachon qizil bo'la olmasdi
+
+Probe "HOLLOW CLAIMS: 0" deb chop etardi va bu **tautologiya** edi: `load_pack`
+`unknown_tools()` orqali tekshiradi, `unknown_tools()` esa aynan
+`known_tool_names()`ni ishlatadi. Demak yuklangan har bir pack uchun
+`declared ⊆ known` — to'plam konstruktsiya bo'yicha bo'sh. "0 hollow claim" deb
+yozish **birovning himoyasini o'z hisobiga yozish** edi. Endi u o'zi nima ekanini
+aytadi: `GUARD DIVERGENCE` — noldan farqli qiymat pack buzilganini emas, ikki
+himoyaning **kelishmovchiligini** bildiradi.
+
+### 2. `packs/_template` "shipped pack" deb sanalardi
+
+Kategoriya xatosi: `_template` — nusxalanadigan scaffold, uning YAML'ida "namuna,
+nusxalab o'zgartiring" deb yozilgan, hech bir tenant undan xizmat olmaydi. Hozircha
+zararsiz edi (template-only to'plam bo'sh, chunki uning har bir tool'ini
+`demo-retail` ham e'lon qiladi) — lekin bu **omad, xossa emas**. Endi shipped va
+template alohida: headline faqat shipped pack'lardan, template esa yuklanadi va
+tekshiriladi (scaffold'dagi xato har bir nusxaga tarqaladi), lekin raqamga
+qo'shilmaydi. `TEMPLATE-ONLY TOOLS` alohida chop etiladi. Raqam o'zgarmadi: **20/91**.
+
+Istisno halol qayd etildi: `load_pack("template")` maxsus holat orqali
+`packs/_template`ga tushadi, ya'ni scaffold shu nom bilan **yuklanadi**. Har bir
+chaqiruv joyi tenant identifikatorini uzatadi, shuning uchun bu onboarding yo'li
+emas — lekin bu yagona joy bo'lib, bu istisno bilan bahslashish mumkin, shuning
+uchun u yozib qo'yildi.
+
+### 3. Eng jiddiysi: `--json` tuzatishining ikkinchi versiyasi ham noto'g'ri edi
+
+Birinchisi: stdout'da JSON'dan **keyin** "OK" qatori. Tuzatish uni stderr'ga
+ko'chirdi — va bu **alohida yurgizganda to'g'ri ko'rinadi, lekin noto'g'ri**.
+Darvoza har bir job'ni `stderr=subprocess.STDOUT` bilan ushlaydi: ikki oqim bitta
+`<name>.log`ga birlashadi. Birlashtirish u yerda **yuk ko'taruvchi** — unittest
+FAIL/ERROR qatorlarini stderr'ga yozadi va recorded-blocked taqqoslash ularni
+o'qiydi — shuning uchun toza bo'lish tarafi probe bo'lishi kerak. Lekin pipeda
+stdout blok-bufferlanadi, stderr esa yo'q: verdikt **oldin** yetib boradi va
+`measure_reachability.log` nasr bilan boshlanib, JSON sifatida o'qilmaydi.
+
+Bu almashtirilgan xatodan **yomonroq**: probe PASS deydi, darvoza PASS deydi, va
+ikkalasi ham saqlagan yozuvni o'qiy olmaydi. Buni **faqat haqiqiy darvozani
+yurgizib, u yozgan faylni o'qish** ko'rsatdi — probe'ni alohida yurgizish ham,
+uning testlari ham ko'rsata olmadi. Endi `--json` faqat hujjatni yozadi, verdikt
+esa hujjatning **ichida** `verdict` va `failures` maydonlari sifatida: iste'molchi
+jumla moslab kelmaydi, ma'lumot o'qiydi.
+
+Qoida: **oqimlarni ajratish oqimlarni birlashtiradigan chaqiruvchini tuzatmaydi.**
+Interfeys haqidagi qaror chaqiruvchini o'qimasdan qabul qilinganda, tuzatish o'zi
+yangi xatoga aylanadi.
+
+### 4. `browser_tools_client` required to'plamida yo'q edi
+
+To'rtta browser client'ning uchtasi `required`da, to'rtinchisi yo'q. `required`
+BLOCKED holatini boshqaradi (FAIL har doim darvozani qizaradi). Node o'rnatilganda
+to'rttalasi ham ishlaydi, Node yo'q bo'lganda to'rttalasi ham BLOCKED va darvoza
+boshqa uchtasi uchun allaqachon qizaradi. Shuning uchun bu **hech qanday verdiktni
+o'zgartirmadi** — aynan shu sababli u ko'rib chiqishdan omon qoldi. Qo'shildi:
+kelajakda uchtadan biri yumshatilsa, bu haqiqiy teshikka aylanadi.
+
+### 5. Probe — majburiy darvoza job'i, lekin testi yo'q edi
+
+`KeyError`ni topgan negative yurgizish **ad-hoc** edi va o'chirib yuborildi: uni
+topgan narsa daraxtda qolmadi. Endi `scripts/test_measure_reachability.py` — 23
+test, uch sinf: o'lchov invariantlari (LOC arifmetikasi qayta hisoblanadi, har bir
+fayl aniq bir marta hisobga olinadi), muvaffaqiyatsizlik yo'llari (haqiqiy
+`packs/_template` nusxasi fixture sifatida, qo'lda yozilgan stub emas), va darvoza
+simlari. Va ular darvozaning o'zida `probe_tools` job'i sifatida ishlaydi va
+`required`ga kiritildi — aks holda himoya mavjud, lekin uni hech narsa yurgizmaydi.
+
+**Va testlar mutatsiya bilan tekshirildi** — yashil test himoya emas, agar kod
+buzilganda ham yashil qolsa. Oltita qasddan buzish, oltitasi ham **ushlandi**:
+template shipped deb hisoblash, `report()`ga `KeyError` qaytarish, verdiktni JSON
+stdout'ga qo'yish, `browser_tools_client`ni required'dan olish, verdiktni doim PASS
+qilish, nasr qatorini stderr'ga qaytarish.
+
+### Xulosa
+
+Bu o'tirishning darsi: **yashil natija tekshiruvning oxiri emas, boshlanishi.** Har
+bir topilma "bu qizil bo'la oladimi?" savoliga javob bermaguncha himoya hisoblanmaydi,
+va har bir interfeys qarori chaqiruvchini o'qimasdan qabul qilinmaydi. Ikkala qoida
+ham bu yerda buzilgan edi va ikkalasi ham faqat empirik tekshiruvda ko'rindi.
+

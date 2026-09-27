@@ -320,6 +320,13 @@ def run(root: Path, output: Path) -> dict:
             ('python_runtime', [sys.executable, '-m', 'unittest', 'discover', '-s', 'runtime_tests', '-v'], root / 'api-python'),
             ('release_tools', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_release_tools.py', '-v'], root),
             ('manifest_tools', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_manifest.py', '-v'], root),
+            # The coverage probe's own regressions. Without this job the probe is a
+            # required gate job whose tests nothing runs -- the §162 shape again, a
+            # guarantee that is named but never enforced. Its failure paths cannot be
+            # exercised by a clean tree, only by fixtures: a pack that refuses to load,
+            # a tool absent from the built registry, a scaffold counted as shipped.
+            # Read-only, offline, and it sets its own non-production ENV like the probe.
+            ('probe_tools', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_measure_reachability.py', '-v'], root),
             ('sqlite_demo', [sys.executable, 'scripts/demo_runtime.py'], root),
             ('managed_database_demo', [sys.executable, 'scripts/demo_managed_database.py'], root),
         ]
@@ -331,10 +338,14 @@ def run(root: Path, output: Path) -> dict:
         # both the numerator and the denominator were wrong. A headline number nobody
         # can recompute is an assertion wearing a number's clothes, so the gate
         # recomputes it every run. The probe is read-only, needs no network and sets
-        # its own non-production ENV, so it is safe here; it fails only on a hollow
-        # claim, i.e. a pack declaring a tool no adapter implements. A coverage
-        # PERCENTAGE is never a gate condition -- that would make the gate red for an
-        # honest measurement rather than a defect.
+        # its own non-production ENV, so it is safe here. It fails on three things,
+        # none of them a coverage percentage: a pack that refused to load, a declared
+        # name absent from ``known_tool_names()``, or a declared name absent from the
+        # engine registry the host actually builds -- the last being the check
+        # ``load_pack`` structurally cannot make, since it validates against the full
+        # catalog-conditional name set rather than the registry in front of it. A
+        # coverage PERCENTAGE is never a gate condition -- that would make the gate
+        # red for an honest measurement rather than a defect.
         jobs.append(('measure_reachability', [sys.executable, str(root / 'scripts' /
                      'probes' / 'measure_reachability.py'), '--json'], root))
         node = shutil.which('node')
@@ -438,7 +449,24 @@ def main():
     summary = run(root, output.resolve())
     print('Evidence:', output)
     print('Production: NO-GO. Read summary.json for blocked and unperformed checks.')
-    required = {'manifest_integrity', 'measure_reachability', 'python_runtime', 'release_tools', 'manifest_tools', 'sqlite_demo', 'managed_database_demo', 'node_runner', 'browser_session_client', 'browser_oauth_client', 'browser_google_data_client', 'python_syntax'}
+    # A required job must be ACCEPTED, not merely not-FAIL: BLOCKED on a required job
+    # is a hole in the evidence, and a hole that passes silently is how a gate stops
+    # carrying information. Any job still fails the gate on an outright FAIL -- this
+    # set only governs what a job is allowed to do INSTEAD of running.
+    #
+    # ``browser_tools_client`` belongs here beside the other three browser clients. It
+    # was the only one of the four left out, and the omission was invisible while Node
+    # was installed: with Node present all four run, and with Node absent all four are
+    # recorded BLOCKED and the gate already goes red on the other three. It therefore
+    # changed no verdict, which is exactly why it survived review -- and it becomes a
+    # real hole the day one of the others is relaxed. ``javascript_typescript_syntax``
+    # stays out on purpose and says so where it records itself BLOCKED: syntax-only,
+    # optional by design.
+    required = {'manifest_integrity', 'measure_reachability', 'python_runtime',
+                'release_tools', 'manifest_tools', 'probe_tools', 'sqlite_demo',
+                'managed_database_demo', 'node_runner', 'browser_session_client',
+                'browser_oauth_client', 'browser_google_data_client',
+                'browser_tools_client', 'python_syntax'}
     failed = any(row['status'] == 'FAIL'
                  or (row['name'] in required and row['status'] not in ACCEPTED_STATUSES)
                  for row in summary['results'])
