@@ -184,6 +184,9 @@ def test_channels_report_config_and_env_presence_never_values(tmp_path, monkeypa
         'telegram:\n  token_env: SHOP_TEST_TG_TOKEN\ninstagram:\n  account_id: "1"\n  token_env: SHOP_TEST_IG_TOKEN\n',
         encoding='utf-8')
     monkeypatch.setenv('PACKS_DIR', str(packs))
+    # A pack-local file may name these only because the operator shares them
+    # (platform_runtime/tools.py check_credential_scope).
+    monkeypatch.setenv('PLATFORM_SHARED_SECRET_NAMES', 'SHOP_TEST_TG_TOKEN,SHOP_TEST_IG_TOKEN')
     monkeypatch.setenv('SHOP_TEST_TG_TOKEN', '123:secret-value')
     monkeypatch.delenv('SHOP_TEST_IG_TOKEN', raising=False)
     with TestClient(app) as c:
@@ -197,6 +200,34 @@ def test_channels_report_config_and_env_presence_never_values(tmp_path, monkeypa
     assert ch['instagram']['configured'] is True and ch['instagram']['ready'] is False
     assert ch['instagram']['credentials'] == [{'env': 'SHOP_TEST_IG_TOKEN', 'set': False}]
     assert ch['whatsapp']['configured'] is False and ch['whatsapp']['ready'] is False
+
+
+def test_channels_report_a_disallowed_credential_name_per_channel_not_a_503(tmp_path, monkeypatch):
+    # A pack-local file naming a platform secret: config() refuses the whole file,
+    # so no channel is ready -- and the page says which key, never a value.
+    packs = tmp_path / 'packs'
+    (packs / T).mkdir(parents=True)
+    (packs / T / 'integrations.yaml').write_text(
+        'telegram:\n  token_env: JWT_SECRET\ninstagram:\n  account_id: "1"\n'
+        '  token_env: TENANT_DEMO_RETAIL__IG_TOKEN\n', encoding='utf-8')
+    monkeypatch.setenv('PACKS_DIR', str(packs))
+    monkeypatch.delenv('PLATFORM_SHARED_SECRET_NAMES', raising=False)
+    monkeypatch.setenv('JWT_SECRET', 'jwt-ValueNeverShown-0123456789abcdef')
+    monkeypatch.setenv('TENANT_DEMO_RETAIL__IG_TOKEN', 'ig-ValueNeverShown')
+    with TestClient(app) as c:
+        r = c.get(f'/platform/{T}/channels', headers=auth(role='integrator'))
+    assert r.status_code == 200
+    assert 'ValueNeverShown' not in r.text
+    ch = {x['channel']: x for x in r.json()['channels']}
+    assert ch['telegram']['ready'] is False and ch['telegram']['configured'] is True
+    assert 'not allowed for this tenant' in ch['telegram']['problem']
+    assert 'telegram.token_env' in ch['telegram']['problem']
+    # A disallowed name is not probed for presence either.
+    assert ch['telegram']['credentials'] == []
+    assert ch['instagram']['ready'] is False
+    assert 'telegram.token_env' in ch['instagram']['problem']
+    assert ch['instagram']['credentials'] == [{'env': 'TENANT_DEMO_RETAIL__IG_TOKEN', 'set': True}]
+    assert ch['whatsapp']['configured'] is False
 
 
 def test_channels_without_any_config_is_not_an_error(monkeypatch):

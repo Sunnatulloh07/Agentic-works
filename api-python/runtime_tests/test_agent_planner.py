@@ -118,6 +118,8 @@ class ResultPlannerTests(unittest.TestCase):
             self.assertIn('authenticated dashboard', body['messages'][0]['content'])
 
     def test_model_failure_has_no_adapter_retry(self):
+        # An unclassified failure is not retried; transient provider failures are
+        # (runtime_tests/test_model_retry.py).
         calls = []
         def fail(*args):
             calls.append(1)
@@ -125,6 +127,85 @@ class ResultPlannerTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ResultPlanner(self.e, fail)('tenant', self.context)
         self.assertEqual([1], calls)
+
+    def test_tools_reach_the_model_sorted_and_described(self):
+        # Deterministic order keeps the prompt byte-stable; the description tells
+        # the model when a tool is the right one.
+        self.planner()('tenant', self.context)
+        tools = json.loads(self.calls[0][1]['messages'][1]['content'])['tools']
+        self.assertEqual(['records.list', 'reports.summary'], [tool['name'] for tool in tools])
+        for tool in tools:
+            with self.subTest(tool=tool['name']):
+                self.assertTrue(tool['description'])
+
+
+def described():
+    return {tool['name']: tool for tool in build_registry(lambda t, q: [], lambda t: {}).describe()}
+
+
+class ToolDescriptionTests(unittest.TestCase):
+    """describe() gains a `description`; nothing that built a Tool before breaks."""
+
+    CONVERSATION_TOOLS = ('products.search', 'shop.info', 'orders.draft', 'records.create',
+                          'records.list', 'memory.put', 'memory.search', 'whatsapp.window',
+                          'knowledge.search', 'reports.summary')
+
+    def test_conversation_tools_say_when_to_use_them(self):
+        tools = described()
+        for name in self.CONVERSATION_TOOLS:
+            with self.subTest(tool=name):
+                text = tools[name]['description']
+                self.assertIsInstance(text, str)
+                self.assertTrue(20 <= len(text) <= 300, len(text))
+
+    def test_every_entry_carries_the_field_and_the_old_ones(self):
+        for entry in described().values():
+            with self.subTest(tool=entry['name']):
+                self.assertEqual({'name', 'risk', 'schema', 'runner', 'description'}, set(entry))
+                self.assertIsInstance(entry['description'], str)
+
+    def test_a_tool_built_without_a_description_still_works(self):
+        from platform_runtime.tools import Registry, Tool, obj
+        tool = Tool('unit.read', 'read', obj({}), None, False, False)
+        self.assertEqual('', tool.description)
+        registry = Registry(); registry.add(tool)
+        self.assertEqual('', registry.describe()[0]['description'])
+
+
+class OneShotPlannerPromptTests(unittest.TestCase):
+    """llm.Planner: same review as the result-fed planner."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.e = Engine(Path(self.tmp.name) / 'one.db', build_registry(), lambda tenant, agent: {
+            'tools': ['reports.summary', 'records.list'], 'ladder': 'autonomous'})
+        cfg = {'llm': {'model': 'unit-model', 'key_env': 'UNIT_KEY', 'base_url': 'https://example.invalid/v1'}}
+        for name, value in (('config', cfg), ('secret', 'unit-placeholder')):
+            patcher = patch('platform_runtime.llm.' + name, return_value=value)
+            patcher.start(); self.addCleanup(patcher.stop)
+        self.sent = []
+
+    def plan(self, text):
+        from platform_runtime.llm import Planner
+        plan = {'agent': 'ops', 'steps': [{'tool': 'reports.summary', 'args': {}}]}
+
+        def transport(url, body, headers):
+            self.sent.append(body)
+            return {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(plan)}}]}
+        agents = lambda tenant: [{'id': 'ops', 'tools': ['reports.summary', 'records.list']}]
+        Planner(self.e, agents, transport)('tenant', 'web', {'text': text})
+        return self.sent[-1]
+
+    def test_no_hardcoded_language_and_a_stable_system_prompt(self):
+        first = self.plan('hisobot')['messages'][0]['content']
+        self.assertNotIn('Uzbek', first)
+        self.assertIn('language of the input', first)
+        self.assertEqual(first, self.plan('boshqa narsa')['messages'][0]['content'])
+
+    def test_tools_are_sorted_and_described(self):
+        tools = json.loads(self.plan('hisobot')['messages'][1]['content'])['tools']
+        self.assertEqual(['records.list', 'reports.summary'], [tool['name'] for tool in tools])
+        self.assertTrue(all(tool['description'] for tool in tools))
 
 
 if __name__ == '__main__':

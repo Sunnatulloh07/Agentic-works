@@ -1,0 +1,12 @@
+import type {Takeover} from './conversation-client.mjs';
+export type NavItem={id:string;label:string};
+export function navFor(role:string):{primary:NavItem[];advanced:NavItem[]};
+export function mobileNav(role:string):{bottom:NavItem[];more:{main:NavItem[];advanced:NavItem[]}};
+export function defaultTab(role:string):string;
+export type ConversationRef={channel:string;conversation_id:string};
+export type ConversationLike=ConversationRef&{last_role:string;last_at:number;turn_status:string;takeover:Takeover|null};
+export type HandoffLike=ConversationRef&{created:number;reason:string;resolved?:boolean};
+export function conversationKey(ref:ConversationRef):string;
+export function conversationFlags(c:ConversationLike,handoffs:HandoffLike[]|null|undefined,seen:Record<string,number>,since:number,nowSeconds:number):{unread:boolean;needsHuman:boolean;reason:string};
+export function attentionCount(conversations:ConversationLike[]|null|undefined,handoffs:HandoffLike[]|null|undefined,seen:Record<string,number>,since:number,nowSeconds:number,openKey:string|null):number;
+export function documentTitle(workspaceName:string,count:number):string;

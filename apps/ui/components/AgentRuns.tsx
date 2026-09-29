@@ -1,6 +1,9 @@
 'use client';
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
+import {friendlyError, statusLabel} from '../lib/format.mjs';
+import {createIdempotency} from '../lib/idempotency.mjs';
+import {ConfirmButton} from './ui';
 
 type Agent = {id:string; name:string};
 type Run = {
@@ -26,14 +29,14 @@ export default function AgentRuns({client,tenant,agents,role,frozen,onOpenTask}:
   const [selected,setSelected] = useState<RunDetail|null>(null);
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
-  const pending = useRef<{signature:string;key:string}|null>(null);
+  const [keys] = useState(() => createIdempotency());
   const writer = ['owner','operator'].includes(role);
   const path = `/platform/${encodeURIComponent(tenant)}/agent-runs`;
   const request = <T,>(suffix:string,body?:unknown):Promise<T> => client.request<T>(path+suffix,body);
 
   async function perform(action:()=>Promise<void>) {
     setBusy(true);setError('');
-    try {await action();} catch(e) {setError(e instanceof Error?e.message:'Amal bajarilmadi');}
+    try {await action();} catch(e) {setError(friendlyError(e));}
     finally {setBusy(false);}
   }
   async function refresh() {
@@ -48,67 +51,65 @@ export default function AgentRuns({client,tenant,agents,role,frozen,onOpenTask}:
 
   async function create() {
     const payload = {agent,text:text.trim(),max_steps:maxSteps,max_seconds:1800};
-    const signature = JSON.stringify(payload);
     // An explicit user retry after a lost response reuses the same key.
     // There is no automatic POST retry and no refresh-token persistence.
-    if(!pending.current || pending.current.signature!==signature) {
-      pending.current = {signature,key:crypto.randomUUID()};
-    }
-    const result = await request<{run_id:string}>('',{...payload,key:pending.current.key});
+    const result = await request<{run_id:string}>('',{...payload,key:keys.key('run',payload)});
+    keys.settle('run',payload);
     const detail = await request<RunDetail>('/'+encodeURIComponent(result.run_id));
-    setSelected(detail);setText('');pending.current=null;
+    setSelected(detail);setText('');
     setRuns((await request<{runs:Run[]}>('')).runs);
   }
 
-  return <section style={panel}>
-    <h2>Natijaga tayanuvchi agent loop</h2>
+  return <section className="panel">
+    <h2>Agent sikllari</h2>
     <p>Kod preview. Agent har bir haqiqiy tool natijasidan keyin navbatdagi bitta qadamni tanlaydi.
       Tashqi va ichki write amallari odatdagi task tasdig‘ini kutadi. Bu cheksiz yoki tasdiqsiz ijro emas.</p>
-    <p style={{color:'#fde68a'}}>LLM operator konfiguratsiyasida alohida yoqiladi. Tool natijalari sozlangan
+    <p className="warn-text">LLM operator konfiguratsiyasida alohida yoqiladi. Tool natijalari sozlangan
       modelga yuborilishi mumkin. Secret kiritmang. Runtime offline testlari bajarildi; API/UI va live provider tekshiruvlari tugallanmagan.</p>
-    {error && <p role="alert" style={{color:'#fca5a5'}}>{error}</p>}
-    <label>Agent <select style={input} value={agent} onChange={event=>setAgent(event.target.value)}>
+    {error && <p role="alert" className="notice error">{error}</p>}
+    <label>Agent <select value={agent} onChange={event=>setAgent(event.target.value)}>
       {agents.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
     </select></label>
-    <label>Maksimal tool qadamlar <input style={input} type="number" min={1} max={12} step={1}
+    <label>Maksimal tool qadamlar <input type="number" min={1} max={12} step={1}
       value={maxSteps} onChange={event=>setMaxSteps(Number(event.target.value))}/></label>
     <p>Wall deadline: 30 daqiqa, tasdiq kutish ham shu vaqtga kiradi. Model chaqiruvlari: ko‘pi bilan qadamlar + 1.
       Bu haqiqiy pul xarajati limiti emas.</p>
-    <textarea aria-label="Agent loop topshirig‘i" style={{...input,width:'100%',boxSizing:'border-box'}}
+    <textarea aria-label="Agent sikli topshirig‘i"
       rows={4} maxLength={4000} value={text} onChange={event=>setText(event.target.value)}/>
-    <button style={button} disabled={busy || !writer || frozen || !agent || !text.trim()
+    <button className="btn" disabled={busy || !writer || frozen || !agent || !text.trim()
       || !Number.isInteger(maxSteps) || maxSteps<1 || maxSteps>12} onClick={()=>void perform(create)}>Loop yaratish</button>
-    <button style={button} disabled={busy} onClick={()=>void perform(refresh)}>Holatni yangilash</button>
-    {busy && <p role="status">Yuklanmoqda...</p>}
-    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:16}}>
+    <button className="btn" disabled={busy} onClick={()=>void perform(refresh)}>Holatni yangilash</button>
+    {busy && <p role="status" className="muted">Yuklanmoqda…</p>}
+    <div className="grid">
       <div><h3>Agent runlar</h3>
         {runs.length===0 && <p>Hozircha run yo‘q.</p>}
-        {runs.map(item=><button key={item.id} style={{...button,display:'block',textAlign:'left'}}
+        {runs.map(item=><button key={item.id} className="btn listbtn"
           disabled={busy} onClick={()=>void perform(async()=>setSelected(await request<RunDetail>('/'+encodeURIComponent(item.id))))}>
-          {item.agent} · {item.status}<br/>{item.steps}/{item.max_steps} qadam · {item.id.slice(0,10)}
+          {item.agent} · {statusLabel(item.status)}<br/>{item.steps}/{item.max_steps} qadam · {item.id.slice(0,10)}
         </button>)}
       </div>
       {selected && <article>
-        <h3>{selected.status}</h3><p><code>{selected.id}</code></p>
+        <h3>{statusLabel(selected.status)}</h3><p><code>{selected.id}</code></p>
         <p>{selected.steps}/{selected.max_steps} qadam · {selected.calls}/{selected.max_calls} rejalashtirish rezervi</p>
-        {selected.error && <p style={{color:'#fdba74'}}>{selected.error}</p>}
-        {active.has(selected.status) && <button style={button} disabled={busy || !writer}
-          onClick={()=>void perform(async()=>{
+        {selected.error && <p className="warn-text">{selected.error}</p>}
+        {active.has(selected.status) && <ConfirmButton label="Siklni bekor qilish" disabled={busy || !writer}
+          title="Agent siklini bekor qilasizmi?" message="Keyingi qadamlar bajarilmaydi. Allaqachon bajarilgan amallar orqaga qaytmaydi."
+          confirmLabel="Ha, bekor qilish" onConfirm={()=>perform(async()=>{
             await request('/'+encodeURIComponent(selected.id)+'/cancel',{});
             setSelected(await request<RunDetail>('/'+encodeURIComponent(selected.id)));
             setRuns((await request<{runs:Run[]}>('')).runs);
-          })}>Loopni bekor qilish</button>}
+          })}/>}
         <p style={{whiteSpace:'pre-wrap'}}>{selected.input}</p>
         {selected.answer && <>
           <h4>{selected.status==='needs_input'?'Aniqlashtirish kerak':'Model javobi'}</h4>
           <p style={{whiteSpace:'pre-wrap'}}>{selected.answer}</p>
-          <p style={{color:'#fde68a'}}>Dalil identifikatorlari tekshiriladi, lekin javobdagi har bir jumla
+          <p className="warn-text">Dalil identifikatorlari tekshiriladi, lekin javobdagi har bir jumla
             fakt sifatida avtomatik tasdiqlanmagan. Qaror qilishdan oldin tool natijasini ko‘ring.</p>
           <p>{selected.evidence_ids.join(', ')}</p>
         </>}
         {selected.turns.map(turn=><p key={turn.task}>
-          {turn.position+1}. {turn.status}
-          <button style={button} disabled={busy} onClick={()=>void perform(()=>onOpenTask(turn.task))}>
+          {turn.position+1}. {statusLabel(turn.status)}
+          <button className="btn" disabled={busy} onClick={()=>void perform(()=>onOpenTask(turn.task))}>
             Task va tasdiqlarni ochish
           </button>
         </p>)}
@@ -118,6 +119,4 @@ export default function AgentRuns({client,tenant,agents,role,frozen,onOpenTask}:
     </div>
   </section>;
 }
-const panel={background:'#111c2e',border:'1px solid #233149',borderRadius:12,padding:20,marginBottom:16};
-const input={background:'#0b1220',color:'#e2e8f0',border:'1px solid #475569',borderRadius:6,padding:10,margin:4};
-const button={background:'#1e3a5f',color:'#e2e8f0',border:'1px solid #3b5273',borderRadius:7,padding:'10px 14px',margin:4,cursor:'pointer'};
+

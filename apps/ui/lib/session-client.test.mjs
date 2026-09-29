@@ -90,3 +90,36 @@ test('malformed header names and values are rejected before network',async()=>{
     await assert.rejects(f.client.request('/a',undefined,'GET',headers));
   assert.equal(f.calls.length,before);
 });
+test('a failed refresh reports an expired session once',async()=>{
+  let time=0;const seen=[];
+  const c=new SessionClient('https://api.example',async(url)=>{
+    if(url.endsWith('/login'))return response({tokens:tokens(),workspaces:[]});
+    if(url.endsWith('/refresh'))return response({},401);
+    return response({ok:true});
+  },()=>time);
+  c.onExpired=(err)=>seen.push(err.status);
+  await c.login('u','p');time=880000;
+  await Promise.all([assert.rejects(c.request('/a')),assert.rejects(c.request('/b'))]);
+  assert.deepEqual(seen,[401]);assert.equal(c.session,null);
+});
+test('a 401 on a request reports an expired session',async()=>{
+  const f=fixture();const seen=[];f.client.onExpired=()=>seen.push('expired');
+  await f.client.login('u','p');f.fail();await assert.rejects(f.client.request('/a'));
+  assert.deepEqual(seen,['expired']);
+});
+test('logging out on purpose is not an expiry',async()=>{
+  const f=fixture();const seen=[];f.client.onExpired=()=>seen.push('expired');
+  await f.client.login('u','p');await f.client.logout();
+  await assert.rejects(f.client.request('/a'));
+  assert.deepEqual(seen,[]);
+});
+test('the platform fetch is called unbound, as browsers require',async()=>{
+  // Browsers throw "Illegal invocation" when fetch runs with `this` set to another object.
+  const original=globalThis.fetch;
+  globalThis.fetch=function(){
+    if(this!==undefined && this!==globalThis)throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    return Promise.resolve(response({tokens:tokens(),workspaces:[]}));
+  };
+  try{const c=new SessionClient('https://api.example');await c.login('u','p');assert.ok(c.session);}
+  finally{globalThis.fetch=original;}
+});

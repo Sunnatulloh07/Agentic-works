@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {conversationsPath,handoffsPath,threadPath,replyPath,releasePath,releaseRequest,takeoverActive,
-  replyRequest,replyErrorText,threadLines,turnStatusLabel,reasonLabel,orderView} from './conversation-client.mjs';
+  replyRequest,replyErrorText,threadLines,turnStatusLabel,reasonLabel,orderView,resolveHandoffPath,resolveHandoffRequest,openHandoffs,latestOpenHandoff,customerName} from './conversation-client.mjs';
 
 test('pinned conversation routes',()=>{
   assert.equal(conversationsPath('turkish-baby'),'/platform/turkish-baby/conversations');
@@ -47,6 +47,9 @@ test('turn statuses and handoff reasons read in Uzbek',()=>{
   assert.equal(reasonLabel('ungrounded_number'),'javobdagi son tasdiqlanmadi');
   assert.equal(reasonLabel('send_uncertain'),'javob mijozga yetgani noma’lum');
   assert.equal(reasonLabel('new_reason'),'new_reason');
+  assert.equal(turnStatusLabel('throttled'),'ko‘p xabar — navbatda emas');
+  assert.equal(reasonLabel('operator_takeover'),'operator suhbatida yozdi');
+  assert.equal(reasonLabel('order_pending'),'buyurtma allaqachon kutilmoqda');
 });
 test('order record body becomes a readable order',()=>{
   const body=JSON.stringify({product_id:'TB1',product_name:'Futbolka',size:'92',qty:2,unit_price_uzs:99000,
@@ -70,4 +73,32 @@ test('operator mode is shown only while the takeover is active',()=>{
   assert.equal(takeoverActive(null,1000),false);
   assert.equal(takeoverActive({until:'x'},1000),false);
   assert.equal(turnStatusLabel('operator'),'operator javob bermoqda');
+});
+
+test('resolve handoff: path, request and open-handoff helpers',()=>{
+  assert.equal(resolveHandoffPath('t','telegram:m1'),'/platform/t/handoffs/telegram%3Am1/resolve');
+  assert.throws(()=>resolveHandoffPath('t','a/b'));
+  assert.throws(()=>resolveHandoffPath('t',''));
+  assert.deepEqual(resolveHandoffRequest('k-12345678'),{body:{note:''},method:'POST',headers:{'Idempotency-Key':'k-12345678'}});
+  assert.equal(resolveHandoffRequest('k-12345678','x'.repeat(900)).body.note.length,500);
+  assert.throws(()=>resolveHandoffRequest('bad key'));
+  const hs=[{id:'a',channel:'telegram',conversation_id:'1',created:5,resolved:true},
+    {id:'b',channel:'telegram',conversation_id:'1',created:9,resolved:false},
+    {id:'c',channel:'telegram',conversation_id:'1',created:7},
+    {id:'d',channel:'whatsapp',conversation_id:'1',created:99}];
+  assert.deepEqual(openHandoffs(hs).map(h=>h.id),['b','c','d']);
+  assert.deepEqual(openHandoffs(null),[]);
+  assert.equal(latestOpenHandoff(hs,{channel:'telegram',conversation_id:'1'}).id,'b');
+  assert.equal(latestOpenHandoff(hs.slice(0,1),{channel:'telegram',conversation_id:'1'}),null);
+  assert.equal(latestOpenHandoff(hs,{channel:'telegram',conversation_id:'2'}),null);
+});
+
+test('customer name: linked name wins, then the channel name, else empty (caller shows the id)',()=>{
+  assert.equal(customerName({customer_name:'Dilnoza Karimova',sender_name:'dk'}),'Dilnoza Karimova');
+  assert.equal(customerName({customer_name:'  ',sender_name:' Ali V '}),'Ali V');
+  assert.equal(customerName({customer_name:'',sender_name:''}),'');
+  assert.equal(customerName({sender_name:42}),'');
+  assert.equal(customerName(null),'');
+  // Markup is returned verbatim: it is rendered as text by React, never as HTML.
+  assert.equal(customerName({sender_name:'<img src=x onerror=alert(1)>'}),'<img src=x onerror=alert(1)>');
 });

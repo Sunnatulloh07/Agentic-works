@@ -204,7 +204,42 @@ CREATE INDEX IF NOT EXISTS p_audit_tenant ON p_audit(tenant,id);
 DROP INDEX IF EXISTS p_events_conversation;
 CREATE INDEX IF NOT EXISTS p_events_conversation_id
  ON p_events(tenant,channel,''' + EVENT_CONVERSATION_ID + ''');
+CREATE INDEX IF NOT EXISTS p_events_status ON p_events(tenant,status,lease);
+CREATE INDEX IF NOT EXISTS p_tasks_status ON p_tasks(tenant,status);
 '''
+
+# The status scans every worker pass (accept_event, process_event) and every submit
+# (_create_task) runs. Named so a test can show they are answered from the
+# (tenant,status) indexes above: without them each one reads the tenant's whole
+# event or task history, which only ever grows.
+PENDING_EVENTS_SQL = "SELECT count(*) n FROM p_events WHERE tenant=? AND status IN ('pending','processing')"
+# "pending, or processing with an expired lease", written with the status set
+# first: the same rows, but the planner can then seek (tenant,status) instead of
+# walking every event of the tenant.
+def next_event_sql(channels=None, skip=()):
+    """NEXT_EVENT_SQL, optionally limited to `channels` or kept away from `skip`.
+
+    Only placeholder COUNTS come from the arguments; the names are bound. The
+    unary ``+`` keeps SQLite from answering a channel filter from the
+    (tenant,channel) conversation index, which reads the channel's whole history,
+    instead of seeking (tenant,status).
+    """
+    where = ''
+    if channels is not None:
+        where += ' AND +channel IN (' + ','.join('?' * len(channels)) + ')'
+    if skip:
+        where += ' AND +channel NOT IN (' + ','.join('?' * len(skip)) + ')'
+    return ("SELECT * FROM p_events WHERE tenant=? AND status IN ('pending','processing') "
+            "AND (status='pending' OR lease<=?)" + where + " ORDER BY rowid LIMIT 1")
+
+
+NEXT_EVENT_SQL = next_event_sql()
+PENDING_TASKS_SQL = ("SELECT count(*) n FROM p_tasks WHERE tenant=? "
+                     "AND status IN ('queued','running','waiting_approval')")
+# How long claim_event holds an inbound event while settle_event plans it. It must
+# outlast the planner's own model deadline (llm.EVENT_PLAN_DEADLINE_SECONDS): an
+# event whose lease ran out mid-plan is claimed and planned again by the next worker.
+EVENT_LEASE_SECONDS = 120
 
 
 # Every module that owns tables, in the order their schemas are applied. A tuple so
@@ -510,7 +545,7 @@ class Engine:
             if old['fingerprint']!=fp: raise Conflict('Idempotency key reused with different payload')
             return old['id']
         self.require_active(c,tenant)
-        pending=c.execute("SELECT count(*) n FROM p_tasks WHERE tenant=? AND status IN ('queued','running','waiting_approval')",(tenant,)).fetchone()['n']
+        pending=c.execute(PENDING_TASKS_SQL,(tenant,)).fetchone()['n']
         if pending>=1000:raise RateLimited('Task queue full')
         tid = uuid.uuid4().hex
         now = self.clock()
@@ -582,6 +617,11 @@ class Engine:
         The approval is recorded as decided by ``actor`` so the audit answers "who
         sent this", and the claim path re-checks the actor's authority, the
         conversation's existence and the tenant's freeze before dispatch.
+
+        Unless the agent's policy asks for ``independent_approval``: then the
+        author's own decision cannot count (``approve`` refuses the task's creator),
+        so the approval is created PENDING and waits for a second person, exactly
+        as any other write of that agent would.
         """
         if channel not in OUTBOUND_CHANNELS:
             raise ValueError('Channel cannot carry an operator reply')
@@ -604,8 +644,9 @@ class Engine:
             self.require_authority(c, tenant, 'approval', actor, required)
             origin = self._operator_origin(c, tenant, tool, steps[0]['args'])
             validated = self._validated(tenant, agent, steps, origin)
+            approver = '' if policy.get('independent_approval', False) else actor
             return self._create_task(c, tenant, OPERATOR_CHANNEL, OPERATOR_REPLY_PREFIX + key,
-                                     agent, steps, actor, validated, approver=actor)
+                                     agent, steps, actor, validated, approver=approver)
 
     def _refresh(self,c,tenant,tid):
         rows = c.execute('SELECT status FROM p_steps WHERE tenant=? AND task=? ORDER BY position', (tenant,tid)).fetchall()
@@ -840,7 +881,7 @@ class Engine:
                 if r['fingerprint']!=fp:raise Conflict('Conflicting event replay')
                 return {'ok':True,'duplicate':True,'status':r['status'],**json.loads(r['result'])}
             self.require_active(c,tenant)
-            pending=c.execute("SELECT count(*) n FROM p_events WHERE tenant=? AND status IN ('pending','processing')",(tenant,)).fetchone()['n']
+            pending=c.execute(PENDING_EVENTS_SQL,(tenant,)).fetchone()['n']
             day=int(self.clock()//86400)
             quota=c.execute('SELECT count FROM p_quota WHERE tenant=? AND day=?',(tenant,day)).fetchone()
             if pending>=1000 or (quota and quota['count']>=10000):raise RateLimited('Tenant inbox quota exhausted')
@@ -848,15 +889,46 @@ class Engine:
             c.execute('INSERT INTO p_events(tenant,channel,event_key,fingerprint,payload) VALUES(?,?,?,?,?)' ,(tenant,channel,key,fp,encode(payload)))
             return {'ok':True,'status':'accepted'}
 
-    def process_event(self,tenant,planner):
+    def process_event(self,tenant,planner,*,channels=None,skip=()):
+        """Claim the tenant's next inbound event and settle it here. True if one was claimed."""
+        r=self.claim_event(tenant,channels=channels,skip=skip)
+        if r is None:return False
+        return self.settle_event(tenant,r,planner)
+
+    def claim_event(self,tenant,*,channels=None,skip=()):
+        """Lease the tenant's next inbound event: one short write, no provider call.
+
+        Returns the event row carrying its ``claim`` token, or None. The lease --
+        not the thread -- is what makes the claim exclusive, so ``settle_event``
+        may run on another thread: nobody else claims the event until
+        EVENT_LEASE_SECONDS pass. ``channels`` limits the claim to those channels
+        (None: any; empty: none) and ``skip`` excludes some, which lets the worker
+        keep channels that plan without a model on its main thread.
+        """
+        if channels is not None and not channels:return None
+        channels=None if channels is None else sorted(channels)
+        skip=sorted(skip)
         token=uuid.uuid4().hex
         with self.tx() as c:
             frozen=c.execute('SELECT stopped FROM p_freeze WHERE tenant=?',(tenant,)).fetchone()
-            if frozen and frozen['stopped']:return False
-            r=c.execute("SELECT * FROM p_events WHERE tenant=? AND (status='pending' OR (status='processing' AND lease<=?)) ORDER BY rowid LIMIT 1",(tenant,self.clock())).fetchone()
-            if not r:return False
+            if frozen and frozen['stopped']:return None
+            r=c.execute(next_event_sql(channels,skip),(tenant,self.clock(),*(channels or ()),*skip)).fetchone()
+            if not r:return None
             r=dict(r)
-            c.execute("UPDATE p_events SET status='processing',claim=?,lease=? WHERE tenant=? AND channel=? AND event_key=?",(token,self.clock()+120,tenant,r['channel'],r['event_key']))
+            lease=self.clock()+EVENT_LEASE_SECONDS
+            c.execute("UPDATE p_events SET status='processing',claim=?,lease=? WHERE tenant=? AND channel=? AND event_key=?",(token,lease,tenant,r['channel'],r['event_key']))
+        r.update(status='processing',claim=token,lease=lease)
+        return r
+
+    def settle_event(self,tenant,r,planner):
+        """Plan an event from ``claim_event`` and record its outcome under that claim. True.
+
+        No transaction is open while the planner runs. The outcome is written only
+        if the claim still holds the event; if its lease ran out and another
+        worker re-claimed it, the p_tasks / p_conversation_turns lookups below keep
+        whichever worker plans second from creating a second task or turn.
+        """
+        token=r['claim']
         try:
             # Stable task ID key recovers crash between submit and event completion.
             with self.read() as c:

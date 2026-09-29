@@ -1,5 +1,10 @@
 export function conversationsPath(tenant:string):string;
 export function handoffsPath(tenant:string):string;
+export function resolveHandoffPath(tenant:string,handoffId:string):string;
+export function resolveHandoffRequest(key:string,note?:string):{body:{note:string};method:'POST';headers:{'Idempotency-Key':string}};
+export function openHandoffs<T extends {resolved?:boolean}>(handoffs:T[]|null|undefined):T[];
+export function latestOpenHandoff<T extends {channel:string;conversation_id:string;created:number;resolved?:boolean}>(handoffs:T[]|null|undefined,ref:{channel:string;conversation_id:string}):T|null;
+export function customerName(c:{customer_name?:string|null;sender_name?:string|null}|null|undefined):string;
 export function threadPath(tenant:string,channel:string,conversationId:string):string;
 export function replyPath(tenant:string,channel:string,conversationId:string):string;
 export function replyRequest(text:string,key:string):{body:{text:string};method:'POST';headers:{'Idempotency-Key':string}};

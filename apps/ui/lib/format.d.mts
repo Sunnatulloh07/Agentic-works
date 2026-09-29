@@ -1,0 +1,9 @@
+export function formatDate(seconds:unknown):string;
+export function formatTime(seconds:unknown):string;
+export function formatRelative(seconds:unknown,nowSeconds:number):string;
+export function statusLabel(status:unknown):string;
+export function reservationLabel(status:unknown):string;
+export function reservationTone(status:unknown):string;
+export function roleLabel(role:unknown):string;
+export function channelLabel(channel:unknown):string;
+export function friendlyError(err:unknown):string;

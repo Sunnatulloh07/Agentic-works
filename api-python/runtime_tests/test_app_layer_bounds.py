@@ -11,8 +11,7 @@ So this module is where the app layer's limits are actually addressed by value.
 It covers three shapes, and the split is deliberate:
 
 * **named constants** (``MAX_PERSONA_CHARS``, ``MAX_BODY``, ``MAX_BYTES``,
-  ``MAX_QUEUE``, ``MAX_RESULTS``, ``TTL_SECONDS``) — asserted literally *and*
-  behaviourally.
+  ``TTL_SECONDS``) — asserted literally *and* behaviourally.
 * **inline literals promoted in this phase** (the session token lifetime ``900``,
   the throttle's ``20``/``900``, the invitation window's ``300``/``604800``, the
   daily limit's ``1000``/``86400``/``0.8``) — these had no name at all, so nothing
@@ -22,10 +21,8 @@ It covers three shapes, and the split is deliberate:
   the pattern from an f-string, which trades readability for a name nobody reads;
   feeding the pattern one character past its ceiling proves the same thing.
 
-Two guards could not be reached from a unit test without standing up a WebSocket
-or a signed admin request, and they are pinned by their comparison site instead.
-That is weaker than a behavioural test and it is labelled as such rather than
-quietly counted as equivalent.
+The legacy runner WebSocket (``app/runner_ws.py``, never mounted) was deleted, and
+its two comparison-site pins with it.
 """
 
 import importlib
@@ -42,7 +39,7 @@ from fastapi import HTTPException
 os.environ.setdefault('ENV', 'test')
 os.environ.setdefault('ALLOW_INSECURE_DEV', 'true')
 
-from app import auth, identity_store, limits, packs, runner_ws, telegram, trace
+from app import auth, identity_store, limits, packs, telegram, trace
 from app.identity_store import AuthRateLimited, IdentityError
 from app.storage import reset
 
@@ -126,10 +123,6 @@ class DeclaredBoundTests(unittest.TestCase):
         self.assertEqual(packs.MAX_PERSONA_CHARS, 8000)
         self.assertEqual(telegram.MAX_BODY, 1_000_000)
         self.assertEqual(trace.MAX_BYTES, 5 * 1024 * 1024)
-
-    def test_runner_ceilings(self):
-        self.assertEqual(runner_ws.MAX_QUEUE, 100)
-        self.assertEqual(runner_ws.MAX_RESULTS, 1000)
 
     def test_the_warning_fires_before_the_ceiling(self):
         """A warning threshold above 1.0 would never fire; below 0 would always."""
@@ -407,32 +400,6 @@ class TelegramBodyCeilingTests(unittest.TestCase):
         self.assertEqual(2, len(re.findall(r'>\s*MAX_BODY\b', text)))
 
 
-class RunnerCeilingTests(unittest.TestCase):
-    """These two guards sit inside a WebSocket loop and a signed admin request.
-
-    Reaching them from a unit test would mean standing up either transport, which
-    would test the transport rather than the ceiling.  They are pinned by their
-    comparison site instead -- weaker than the behavioural tests above, and said
-    so out loud rather than counted as equivalent.
-    """
-
-    def test_the_queue_guard_names_the_constant(self):
-        self.assertIn('>= MAX_QUEUE', source(runner_ws))
-
-    def test_the_result_trim_names_the_constant(self):
-        text = source(runner_ws)
-        self.assertIn('n > MAX_RESULTS', text)
-        self.assertIn('n - MAX_RESULTS', text)
-
-    def test_the_trim_keeps_the_newest_and_drops_the_oldest(self):
-        """The arithmetic the mutation targets: over the ceiling, delete the excess."""
-        for n, expected in [(runner_ws.MAX_RESULTS, 0),
-                            (runner_ws.MAX_RESULTS + 1, 1),
-                            (runner_ws.MAX_RESULTS + 50, 50)]:
-            with self.subTest(n=n):
-                self.assertEqual(expected, max(0, n - runner_ws.MAX_RESULTS))
-
-
 class TraceRotationTests(unittest.TestCase):
     def test_a_file_at_the_ceiling_is_rotated_before_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -491,7 +458,6 @@ class NoUnnamedBoundTests(unittest.TestCase):
                       r'ex=COUNTER_TTL_SECONDS'],
         'telegram.py': [r'>\s*MAX_BODY'],
         'trace.py': [r'>\s*MAX_BYTES'],
-        'runner_ws.py': [r'>=\s*MAX_QUEUE', r'>\s*MAX_RESULTS'],
         'packs.py': [r'>\s*MAX_PERSONA_CHARS'],
     }
 

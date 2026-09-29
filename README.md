@@ -5,17 +5,35 @@
 Bu repo umumiy core + tenant pack + nazorat qilinadigan tool ijrosidan iborat. Telegram
 mahsulotning o‘zi emas, faqat kirish kanallaridan biri.
 
-| Ko‘rsatkich | Holat (2026-09-22 da o‘lchangan) |
+| Ko‘rsatkich | Holat (2026-09-29 da o‘lchangan) |
 |---|---|
-| `runtime_tests` (Windows, `cryptography` o‘rnatilgan) | **3 601 sinov**, `failures=1, errors=12` — **13 tasi Windows-only** va ro‘yxat `runtime_tests/test_platform_baseline.py` da sabab bilan qadalgan (2026-09-25 o‘lchovi) |
-| `integration_tests` | **351/351 PASS** (2026-09-25; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`, `cryptography` o‘rnatilgan). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi |
-| `api-python/tests/` (legacy) | **nafaqaga chiqarildi (2026-09-22)** — 33 qizil / 172 pass edi va hech bir gate uni yurgizmasdi; qarang `api-python/integration_tests/LEGACY-RETIRED.md` |
-| CI `http` job | endi **yig‘iladi** (`integration_tests/conftest.py` qo‘shilgani uchun) |
-| CI `ui_dependency_security` job | **PASS** — `npm audit --audit-level=high` → **0 vulnerabilities** (`next@16.3.6` + `react@19.3.0`; 2026-09-25 o‘lchovi). Eski `next@14.2.35` zaifliklari shu bilan yopildi |
-| Live provider acceptance | **hech biri** — eng yaxshisi `LOCAL_CONTRACT_TESTED` |
-| API bu mashinada ishga tushirilganmi | **yo‘q** — `api-python/.env` yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori bor |
+| `runtime_tests` (Windows, `cryptography` o‘rnatilgan) | **3 813 sinov**, `failures=1, errors=12, skipped=1` — **13 tasi Windows-only** (`test_portable_fs` ×11, `test_macos_bundle` ×1, `test_foundation_v02` mount_scope ×1) va `runtime_tests/test_platform_baseline.py` da sabab bilan qadalgan |
+| `integration_tests` | **402/402 PASS** (`ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false python -m pytest integration_tests -q`, `cryptography` o‘rnatilgan bo‘lishi shart) |
+| `scripts` testlari | **OK**; `python scripts/e2e_smoke.py` — **15/15** (json va `--protocol tools`; haqiqiy API + worker, soxta model va soxta Telegram loopback’da) |
+| UI | `npm run typecheck && npm run build` toza; node `lib` testlari **105/105**; `npm audit` → **0 vulnerabilities** (`next@16.3.6`, `react@19.3.0`) |
+| Runner (`node --test apps/runner/test.js`) | Windows’da **21/32** — 11 tasi POSIX-only |
+| CI (`.github/workflows/verify.yml`) | aynan **4 job**: `core`, `http`, `ui`, `ui_dependency_security` |
+| `api-python/tests/` (legacy) | **2026-09-22 da nafaqaga chiqarilgan va papka mavjud emas**; qarang `api-python/integration_tests/LEGACY-RETIRED.md` |
+| Live provider acceptance | **hech biri** — eng yaxshisi `LOCAL_CONTRACT_TESTED`. Haqiqiy Telegram va haqiqiy model bilan jonli sinov hali o‘tkazilmagan |
+| API bu mashinada ishga tushirilganmi | **yo‘q** — `api-python/.env` yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori bor (`e2e_smoke.py` vaqtinchalik muhitda API + workerni yurgizadi, lekin bu real deploy emas) |
 
-Joriy dalil: [`docs/development/PROGRESS-UZ.md`](docs/development/PROGRESS-UZ.md),
+**Ochiq qolgan:** haqiqiy Telegram / haqiqiy model bilan jonli sinov yo‘q; SQLite faqat bitta host uchun; web kanalidagi bir martalik planner worker drain’ni to‘sib qo‘yishi mumkin; tenant integratsiya yozmasligi kerak (konfig istalgan env nomini ko‘rsata oladi); native Claude `tool_use` planner va sotuv-bot eval to‘plami boshlangan, lekin to‘xtatilgan.
+
+**2026-09-27 dan beri qo‘shilgan (qisqacha):**
+
+- WhatsApp webhook mustahkamlandi: har `entry` alohida yo‘naltiriladi, bir yetkazishda ≤3 raqam, body hajmi chegaralangan, noto‘g‘ri konfig → `503`. `whatsapp.window` faqat joriy mijozga tegishli.
+- Grounding qoidasi: mijoz satrlari faqat 9+ xonali identifikatorlarni «asoslaydi». Har jo‘natuvchi uchun cheklovlar (`throttled` holati, `order_pending`).
+- Operator takeover faqat operator javobi **muvaffaqiyatli** yuborilgandan keyin boshlanadi; takeover paytidagi mijoz xabarlari `operator_takeover` handoff oladi. Operator javoblarida mustaqil approval hurmat qilinadi.
+- `FORWARDED_ALLOW_IPS='*'` rad etiladi; uvicorn `--no-proxy-headers` bilan yurgiziladi (`run_local` + Dockerfile).
+- Runner yopilish kodlari `4400/4401/4403/1011` (+ token-fayl rotatsiyasi). Worker drain + `PlannerPool` (20 parallel mijoz: 48 s → 12 s, o‘lchangan).
+- Model qayta urinish/backoff va `llm.timeout_seconds` (10..120, sukut 60). Budjet statuslari `released` / `unreconciled`. Persona — ishonchli biznes ko‘rsatmasi; javob mijoz tilida. Tool tavsiflari.
+- `load_pack` mtime keshi (2 000 mahsulot: 729 ms → 0,43 ms).
+- UI qayta ishlandi (do‘kon-birinchi): **Suhbatlar** sukut, jonli poller, idempotent qayta urinishlar, buyurtma kartalari, mobil ko‘rinish, tasdiqlashlar; brauzer loginidagi «Illegal invocation» tuzatildi.
+- Versiya yagona manbadan: `0.5.0-development-preview` (`app/version.py`). ERP reconcile chegaralari yagona manbadan (500 belgi), status indekslari.
+
+Joriy dalil: [`docs/development/PRODUCTION-GO-AUDIT-UZ.md`](docs/development/PRODUCTION-GO-AUDIT-UZ.md)
+(**yagona joriy NO_GO blockers/gaps hisoboti**),
+[`docs/development/PROGRESS-UZ.md`](docs/development/PROGRESS-UZ.md),
 [`docs/development/QOLGAN-ISHLAR-INVENTAR-UZ.md`](docs/development/QOLGAN-ISHLAR-INVENTAR-UZ.md),
 [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md).
 Birinchi marta ishga tushirayotgan bo‘lsangiz: [`docs/ONBOARDING-UZ.md`](docs/ONBOARDING-UZ.md).
@@ -43,9 +61,10 @@ yiqiladi, chunki `runtime_tests` package emas.
 
 ## Birinchi ishga tushirish (lokal UI + API + worker)
 
-> **Eski `setup_local.py` → `owner_login.py` ketma-ketligi ishlamaydi.** `setup_local.py`
+> **Eski `setup_local.py` → `owner_login.py` ketma-ketligi ishlamaydi** (`owner_login.py`
+> o‘chirilgan, git tarixida). `setup_local.py`
 > `.env` ichiga `IDENTITY_DIRECTORY=true` va `IDENTITY_BOOTSTRAP_ENABLED=false` yozadi;
-> shundan keyin `owner_login.py` chaqiradigan `POST /auth/token` **410 «Use session-bound
+> shundan keyin eski skript chaqiradigan `POST /auth/token` **410 «Use session-bound
 > identity login»** qaytaradi, `POST /identity/bootstrap` esa **403 «Bootstrap disabled»**
 > qaytaradi. Ustiga-ustak UI’da token qo‘yish maydoni **yo‘q** — `SessionGate.tsx`
 > email/parol formasi. Yagona ishlaydigan first-run yo‘li — `provision_identity.py`.
@@ -101,7 +120,8 @@ Docker yo‘lini tanlasangiz, provisioning konteyner ichida, `scripts/` mount qi
 varianti.
 
 UI’da `ops.assistant` tanlab standart `reports.summary` planini yuboring. Alohida worker
-ishni bajaradi, **Yangilash** orqali natijani oching (UI avtomatik polling qilmaydi).
+ishni bajaradi; **Suhbatlar** ko‘rinishi jonli poller bilan yangilanadi, task natijasini
+esa **Yangilash** orqali oching.
 Keyin `records.create` yozuvini yuboring: u task detail ichida tasdiq kutadi.
 
 Matnli `/report`, `/memory savol`, `/record kind|title|body` deterministik demo yo‘llari.
@@ -132,16 +152,20 @@ qadami kabi engine siyosatidan, dispatch paytidagi qabul qiluvchi qayta tekshiru
 
 Registry’da **91** tool bor va ulardan **20 tasi** yetkazib berilayotgan pack’lardan
 (`demo-retail`, `marketing`, `turkish-baby`, `_template`) chaqirilishi mumkin
-(2026-09-26 o‘lchovi; `whatsapp.*` va `agent.*` endi `turkish-baby`da). Bu sonni
+(2026-09-29 o‘lchovi; `whatsapp.*` va `agent.*` `turkish-baby`da). Bu sonni
 `python scripts/probes/measure_reachability.py` qayta hisoblaydi; hech bir pack
 implementatsiyasi bo‘lmagan tool’ni da’vo qilmaydi (**hollow claim: 0**).
 
-Tool’ga ega **22** yuqori darajali moduldan **17 tasi** hech bir pack’dan
-chaqirilmaydi: **11 283 satr** (13 460 dan, **83.8%**). Butun `platform_runtime`
-paketi bo‘ylab **84.5%** (11 828 / 14 005). Yetib bo‘ladigan tool’ga ega modul
-atigi **5** ta: `knowledge`, `oversight`, `shop_tools`, `tools`, `whatsapp`.
+> **Bu «o‘lik kod» o‘lchovi emas.** Quyidagi foiz faqat **hech bir pack e’lon qilmagan
+> tool modullari**ni sanaydi. Modul boshqa yo‘l bilan ishlatilishi mumkin: masalan
+> `whatsapp_inbound` webhook route orqali, `escalation` worker orqali yetib boriladi.
 
-Quyidagi **17** modulni ishlatadigan **birorta pack yo‘q**:
+Tool’ga ega **22** yuqori darajali moduldan **17 tasini hech bir pack e’lon qilmaydi**:
+**11 345 satr** (13 591 dan, **83.5%**). Butun `platform_runtime` paketi bo‘ylab
+**84.1%** (11 890 / 14 136). Pack e’lon qiladigan tool’ga ega modul atigi **5** ta:
+`knowledge`, `oversight`, `shop_tools`, `tools`, `whatsapp`.
+
+Quyidagi **17** modulni e’lon qiladigan **birorta pack yo‘q**:
 
 `assets` · `business_graph` · `connectors` · `documents` · `erp` · `escalation` ·
 `google_adapters` · `inventory` · `manufacturing` · `oee` · `sheets` · `speech` ·
@@ -154,16 +178,16 @@ Ularni hisoblasa 88.7% chiqadi va engine o‘lik kod deb e’lon qilinadi — bu
 > **Tuzatilgan sonlar.** Bu bo‘lim ilgari "qolgan 14 modulning 10 447 satri
 > (19 182 dan, 54%)" deb yozilgan edi va ro‘yxatda `reengagement` bilan `briefing`
 > bor, `connectors`, `google_adapters`, `sheets`, `speech` va `whatsapp_inbound`
-> esa **yo‘q** edi. 19 182 haqiqiy son (`platform_runtime/*.py` satrlari), lekin
-> 10 447 ni hech qanday bayon qilingan qoida qaytara olmaydi. Yuqoridagi raqamlar
-> skript bilan qayta hisoblanadi.
+> esa **yo‘q** edi. Yuqoridagi raqamlar skript bilan qayta hisoblanadi; 2026-09-27 dagi
+> 83.8% (11 283 / 13 460) dan keyin kod o‘zgargani uchun son 83.5% ga siljidi.
 
 WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`: handshake + imzolangan
-inbound, 19 HTTP testi bilan) va `whatsapp.*` tool’lari `turkish-baby` pack’ida e’lon
+inbound; webhook mustahkamlanishi HTTP testlari bilan qadalgan) va `whatsapp.*` tool’lari `turkish-baby` pack’ida e’lon
 qilingan — lekin live Meta acceptance hamon yo‘q.
 
 Bular **muzlatilgan preview modullar**, mahsulot funksiyasi emas. Ular test va chegara
-auditi bilan qoplangan, ammo hech bir mijoz konfiguratsiyasi ularga yetib bormaydi.
+auditi bilan qoplangan, ammo hech bir mijoz konfiguratsiyasi ularning tool’larini e’lon
+qilmaydi.
 Hujjatning boshqa joyida backend «tayyor» deb yozilgan bo‘lsa, u **yadro** haqida —
 bu modullar haqida emas.
 
@@ -201,7 +225,10 @@ Login throttle ikki qatlamli: har akkaunt (email) bo‘yicha 20/15 daqiqa va har
 ni proxy manzillari bilan to‘ldiring: shunda IP `X-Forwarded-For` ning o‘ngdan birinchi
 ishonchsiz manzilidan olinadi. Bo‘sh qoldirilsa header umuman o‘qilmaydi (soxtalashtirib
 bo‘lmaydi), lekin proxy ortidagi barcha mijozlar bitta IP bucket’ni bo‘lishadi. Xato
-yozuv API’ni startup’da to‘xtatadi.
+yozuv API’ni startup’da to‘xtatadi. `X-Forwarded-For` ni faqat shu qatlam o‘qiydi:
+`scripts/run_local.py` uvicorn’ni `--no-proxy-headers` bilan ishga tushiradi, o‘zingiz
+ishga tushirsangiz ham shunday qiling. `FORWARDED_ALLOW_IPS='*'` startup’da rad etiladi —
+uvicorn 0.52 unda chapdagi (mijoz yozgan) hop’ni oladi va throttle kalitini hujumchi tanlaydi.
 
 ## Tool va kanal sozlash
 
@@ -272,6 +299,8 @@ emas), majburiy `anthropic-version: 2023-06-01`, `system` **top-level maydon**, 
 bilan o‘qiladi. Bu qatlam faqat lokal kontrakt testlari bilan qoplangan — **haqiqiy
 Anthropic endpointiga chaqiruv qilinmagan**.
 
+**Native tool use:** `llm.protocol: json|tools` (sukut `json`). `tools` faqat `provider: anthropic` bilan va faqat natija-beriladigan (suhbat/agent) planner’da; bir martalik hodisa planner’i e’tiborsiz qoldiradi. Rad etilgan qaror uchun bitta tuzatish (`agent_run.planner_repair`); matnli javob eskalatsiya (`planner_failed_no_retry`). Simda `.` → `__` (`products__search`), qaror tool’lari `final_answer` / `ask_customer`. `json` bilan boshlang, eval’da (`EVAL_LLM_PROTOCOL=tools`) solishtiring. Tafsilot: `docs/ONBOARDING-UZ.md` 8a. Sotuv-bot eval: `docs/ONBOARDING-UZ.md` «Sotuv botini baholash».
+
 **Model nomlari haqida:** Claude Haiku 3 va Haiku 3.5 Anthropic tomonidan **nafaqaga
 chiqarilgan (retired)**. Joriy kichik model — **`claude-haiku-4-5`**. `docs/`
 ichidagi eski PRD matnlari (`agent-platform-PRD-TZ.md`) hali «Haiku 3.5» deb yozadi —
@@ -338,28 +367,33 @@ python -m unittest discover -s runtime_tests -t runtime_tests
 PIPELINE_MODE=platform IDENTITY_DIRECTORY=false python -m pytest integration_tests -q
 ````
 
-- `runtime_tests` — 3 239 sinov. Windows’da `failures=1, errors=12`; **hammasi 13 tasi
-  Windows-only sabab bilan** (`os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink privilegiyasi,
-  POSIX fayl rejimlari) va `test_platform_baseline.py` har bir sababni **yurgizib**
-  tasdiqlaydi.
-- `integration_tests` — **95/95 PASS**. Ilgari umuman yig‘ilmas edi; `conftest.py`
-  ordering bog‘liqligini yo‘q qildi. **Eslatma:** bu o‘lchovdan keyin nafaqaga
-  chiqarilgan `tests/` dan 5 fayl shu papkaga ko‘chirildi, shuning uchun jami son
-  o‘zgargan — qayta o‘lchang.
-- `api-python/tests/` — **nafaqaga chiqarildi (2026-09-22)**. U 33 qizil / 172 pass edi va
-  **hech bir gate uni yurgizmasdi**. Tirik kodni sinaydigan 5 fayl `integration_tests/`
-  ichiga ko‘chirildi, qolgani o‘chirildi. Sabablar: `api-python/integration_tests/LEGACY-RETIRED.md`.
-- CI: `core`, `http`, `ui` va `ui_dependency_security` joblari bor.
-  `ui_dependency_security` **qizil** va 14.x liniyasida yopilmaydi.
+- `runtime_tests` — 3 813 sinov (2026-09-29). Windows’da `failures=1, errors=12, skipped=1`;
+  **hammasi 13 tasi Windows-only sabab bilan** (`test_portable_fs` ×11, `test_macos_bundle`
+  ×1, `test_foundation_v02` mount_scope ×1: `os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink
+  privilegiyasi, POSIX fayl rejimlari) va `test_platform_baseline.py` har bir sababni
+  **yurgizib** tasdiqlaydi.
+- `integration_tests` — **402/402 PASS** (2026-09-29; `ENV=test ALLOW_INSECURE_DEV=true
+  PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`, `cryptography` kerak).
+- `scripts` testlari OK; `python scripts/e2e_smoke.py` — **15/15** (json va `--protocol tools`).
+- UI: `npm run typecheck && npm run build` toza, node `lib` testlari 105/105, `npm audit` 0.
+- Runner: `node --test apps/runner/test.js` Windows’da 21/32 (11 tasi POSIX-only).
+- Hammasini bir buyruqda: `python .claude/skills/platform-verify/scripts/verify.py [--pylib <dir>] [--manifest] [--fast] [--only ...]` (jadval chiqaradi; Windows istisnolari faqat qayd etilgan modul/sinovlarga).
+- `api-python/tests/` — **2026-09-22 da nafaqaga chiqarilgan, papka mavjud emas**. Tirik
+  kodni sinaydigan 5 fayl `integration_tests/` ichiga ko‘chirilgan; sabablar:
+  `api-python/integration_tests/LEGACY-RETIRED.md`.
+- CI (`.github/workflows/verify.yml`): aynan to‘rt job — `core`, `http`, `ui`,
+  `ui_dependency_security`. (`manifest_integrity` va `measure_reachability` CI job emas,
+  ular `scripts/verify_offline.py` ichidagi job nomlari.) `ui_dependency_security`
+  **PASS** (`next@16.3.6` + `react@19.3.0`; `npm audit` → 0 vulnerabilities).
 
 ## Muhim fayllar
 
 `api-python/platform_runtime/` executable engine, typed tools, LLM va MCP.
 `api-python/app/platform_api.py` control plane, `worker.py` persistent execution.
 `apps/ui/app/platform/` boshqaruv UI. `runtime_tests/` dependency-free testlar;
-`integration_tests/` FastAPI testlari (va nafaqaga chiqarilgan legacy to‘plamdan
-saqlangan 5 fayl — `integration_tests/LEGACY-RETIRED.md`). `api-python/tests/` endi
-**yo‘q**.
+`integration_tests/` FastAPI testlari (nafaqaga chiqarilgan legacy to‘plamdan
+saqlangan 5 fayl ham shu yerda — `integration_tests/LEGACY-RETIRED.md`).
+`api-python/tests/` **mavjud emas**.
 
 `docs/ONBOARDING-UZ.md` birinchi ishga tushirish, `docs/RUNBOOK.md` operatsion
 tartiblar, `docs/IMPLEMENTATION-STATUS.md` bajarilmagan ishlar.
@@ -402,7 +436,7 @@ emas.
 
 **486 offline test PASS / PRODUCTION NO-GO.** Holat: [v0.3.5 checkpoint va audit](docs/CHECKPOINT-V035-UZ.md),
 [SQL/NoSQL shartnomasi va haqiqiy moslik](docs/MANAGED-DATABASES-UZ.md). Test dalillari
-`docs/verification/v035/summary.json` da. Barcha DB va CRM integratsiyalari tayyor emas.
+`docs/verification/v035/summary.json` da (git tarixida). Barcha DB va CRM integratsiyalari tayyor emas.
 [Oldingi v0.3.3 holati](docs/CHECKPOINT-V033-UZ.md) tarixiy dalil sifatida saqlanadi.
 
 Connector revoke, agent scope, capability va config validation tuzatildi. Scope-aware read
@@ -411,7 +445,8 @@ release-tool testi o‘tdi. Python hamda JS/TS sintaksisi tekshirildi; bu HTTP/R
 typecheck/Next build o‘rnini bosmaydi. Next.js 14.2.5 xavfsizlik yangilanishi, provider
 adapterlari va live acceptance ochiq.
 
-Qayta tekshirish: `python scripts/verify_offline.py`. Dalillar: `docs/verification/v033/`.
+Qayta tekshirish: `python scripts/verify_offline.py` (yangi dalillar `.verify-offline/`ga,
+gitignore). Eski dalillar: `docs/verification/v033/` (git tarixida).
 
 ### Agent Platform v0.3.2, agent loop source checkpointi
 
@@ -433,7 +468,7 @@ Control-plane mutation authorization, atomik device audit/fencing, replay author
 Customer 360 actor talabi va qat’iy HTTP input uchun source o‘zgarishlari yozildi. Yangi
 regression test fayllari tayyorlandi, ammo foydalanuvchi tanloviga ko‘ra **hech qanday
 loyiha testi, build, typecheck, lint, compile yoki demo bajarilmadi**. Dalil:
-`docs/verification/v031/`.
+`docs/verification/v031/` (git tarixida).
 
 ### Agent Platform v0.3 hardening preview
 
@@ -442,7 +477,7 @@ loyiha testi, build, typecheck, lint, compile yoki demo bajarilmadi**. Dalil:
 
 Source: session-bound login/workspace UI, gated provisioning, replay-safe refresh
 families, worker authority checks, Customer 360 integrity va PostgreSQL read-only
-contract. Mahalliy dalillar `docs/verification/v03/`da. HTTP, React build, provider live
+contract. Mahalliy dalillar `docs/verification/v03/`da (git tarixida). HTTP, React build, provider live
 va production rollout tasdiqlanmagan.
 
 ### Agent Platform 0.2, tekshirilgan foundation preview
@@ -453,7 +488,7 @@ o‘zgarishlari qo‘shilgan. Universal CRM/ERP, haqiqiy signup/workspaces, bill
 streaming tayyor emas.
 
 Birinchi o‘qing: [Audit](docs/AUDIT-V02-UZ.md), [PRDlar](docs/prd-v02/00-INDEX.md),
-[Ishga tushirish](docs/V02-RUNBOOK-UZ.md), [test dalili](docs/verification/v02-summary.json).
+[Ishga tushirish](docs/V02-RUNBOOK-UZ.md), test dalili: `docs/verification/v02-summary.json` (git tarixida).
 
 O‘sha sanadagi offline to‘plam: **2814 test** (`failures=1, errors=11, skipped=1`), qarang:
 `docs/development/LOCAL-VERIFICATION-UZ.md`.
@@ -477,7 +512,7 @@ raqamlari bu versiya uchun dalil emas.
 
 **Eskirgan first-run yo‘riqnomasi (ishlamaydi, tarix uchun saqlangan):**
 `python scripts/setup_local.py` → `docker compose up --build -d` →
-`python scripts/owner_login.py` → `owner-token.local.txt` ichidagi JWT ni UI token
+`python scripts/owner_login.py` (o‘chirildi) → `owner-token.local.txt` ichidagi JWT ni UI token
 maydoniga kiritish. Bu ketma-ketlik 410/403 bilan to‘xtaydi va UI’da token maydoni yo‘q;
 yuqoridagi **Birinchi ishga tushirish** bo‘limiga qarang.
 

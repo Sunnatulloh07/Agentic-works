@@ -1,13 +1,14 @@
 """Operator takeover: while a human answers a chat, the bot does not.
 
 An operator reply starts a per-conversation takeover (until = now +
-conversation.takeover_minutes). A turn recorded during it is closed as 'operator'
-with no run, no reply and no handoff; the customer's line stays in the history
-for the operator. After expiry or an explicit release the bot answers again.
+conversation.takeover_minutes) once it is DELIVERED. A turn recorded during it is
+closed as 'operator' with no run and no reply, and handed off so it stays visible;
+the customer's line stays in the history for the operator. After expiry or an explicit release the bot answers again.
 Operator lines are part of the run input, like agent lines, so the bot sees
 what the human said. Same real Engine / scripted planner arrangement as
 test_conversation_turn.py.
 """
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -107,7 +108,10 @@ class TakeoverTests(unittest.TestCase):
 
     # --- takeover ----------------------------------------------------------------
 
-    def test_a_turn_during_takeover_gets_no_reply_and_no_handoff(self):
+    def test_a_turn_during_takeover_gets_no_reply_but_is_handed_off(self):
+        # No run and no bot reply -- a human holds the chat. But the turn is terminal
+        # and is never re-queued when the takeover ends, so without a handoff record a
+        # customer who wrote while the operator stepped away was silently unanswered.
         until = self.takeover()
         self.assertEqual(self.now + 30 * 60, until)
         self.inbound('m1', 'Qachon yetkazasiz?')
@@ -116,10 +120,22 @@ class TakeoverTests(unittest.TestCase):
         self.assertEqual((TAKEOVER_STATUS, '', ''), (turn['status'], turn['run_id'], turn['reply']))
         self.assertEqual([], self.sent)
         self.assertEqual([], self.rows('SELECT id FROM p_agent_runs'))
-        self.assertEqual([], self.rows('SELECT * FROM p_records WHERE kind=?', HANDOFF_KIND))
+        handoffs = self.rows('SELECT id,body FROM p_records WHERE kind=?', HANDOFF_KIND)
+        self.assertEqual([('telegram:m1', 'operator_takeover', 'Qachon yetkazasiz?')],
+                         [(h['id'], json.loads(h['body'])['reason'], json.loads(h['body'])['text'])
+                          for h in handoffs])
         self.assertEqual(1, len(self.rows("SELECT * FROM p_audit WHERE action='conversation.turn_operator'")))
         self.assertEqual([('customer', 'Qachon yetkazasiz?')],
                          [(r['role'], r['text']) for r in self.rows('SELECT role,text FROM p_conversation_history')])
+
+    def test_a_turn_during_takeover_notifies_the_operator_chat(self):
+        self.settings['notify_recipient'] = '-100777'
+        self.policy['allowed_recipients'] = ['-100777']
+        self.takeover()
+        self.inbound('m1', 'Qachon yetkazasiz?')
+        self.pump()
+        self.assertEqual(['-100777'], [args['conversation_id'] for _, args in self.sent])
+        self.assertIn('Qachon yetkazasiz?', self.sent[0][1]['text'])
 
     def test_a_bot_turn_already_running_when_the_operator_steps_in_sends_nothing(self):
         # The run opened before the takeover; its answer must not land on top of

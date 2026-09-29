@@ -259,6 +259,15 @@ def supervise(procs, poll_seconds: float = 0.5) -> int:
         return 130
 
 
+def api_command(port: int) -> list[str]:
+    """The uvicorn command line. --no-proxy-headers leaves the peer address alone:
+    app/client_ip.py (TRUSTED_PROXIES, right-most untrusted hop) is the only
+    X-Forwarded-For parser, so no FORWARDED_ALLOW_IPS setting can let a client
+    choose the address its login throttle is keyed on."""
+    return [sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1',
+            '--port', str(port), '--no-proxy-headers']
+
+
 def start(port: int, worker: bool) -> int:
     _api_importable()
     try:
@@ -267,7 +276,7 @@ def start(port: int, worker: bool) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f'FAIL  runtime config: {_brief(exc)}', file=sys.stderr)
         return 2
-    commands = [('api', [sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', str(port)])]
+    commands = [('api', api_command(port))]
     if worker:
         commands.append(('worker', [sys.executable, '-m', 'app.worker']))
     if os.name == 'posix':

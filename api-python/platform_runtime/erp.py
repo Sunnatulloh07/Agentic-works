@@ -717,6 +717,11 @@ def _definitive_refusal(error):
             and 400 <= status < 500 and status not in NOT_DEFINITIVE_4XX)
 
 
+# The owner's reconcile verdict: bounded evidence and the ERP's document id.
+# app/erp_api.py reads both, so the HTTP layer never disagrees with the runtime.
+MAX_RECONCILE_EVIDENCE_CHARS = 500
+MAX_EXTERNAL_ID_CHARS = 128
+
 def reconcile_posting(engine, tenant, posting_id, actor, role, outcome, evidence, *,
                       external_id=''):
     """The owner's verdict on a posting whose outcome is unknown.
@@ -730,11 +735,12 @@ def reconcile_posting(engine, tenant, posting_id, actor, role, outcome, evidence
         raise Forbidden('Owner required')
     if outcome not in {'posted', 'failed'}:
         raise ValueError('outcome must be posted or failed')
-    if not isinstance(evidence, str) or not evidence.strip() or len(evidence) > 500:
-        raise ValueError('Evidence required, maximum 500 characters')
+    if (not isinstance(evidence, str) or not evidence.strip()
+            or len(evidence) > MAX_RECONCILE_EVIDENCE_CHARS):
+        raise ValueError(f'Evidence required, maximum {MAX_RECONCILE_EVIDENCE_CHARS} characters')
     if outcome == 'posted' and (not isinstance(external_id, str)
-                                or not external_id.strip() or len(external_id) > 128):
-        raise ValueError('a posted verdict needs the ERP document id (max 128 characters)')
+                                or not external_id.strip() or len(external_id) > MAX_EXTERNAL_ID_CHARS):
+        raise ValueError(f'a posted verdict needs the ERP document id (max {MAX_EXTERNAL_ID_CHARS} characters)')
     recover_postings(engine, tenant)
     with engine.tx() as cursor:
         engine.require_authority(cursor, tenant, 'web', actor, ('owner',))

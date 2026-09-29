@@ -32,6 +32,44 @@ class EngineTests(unittest.TestCase):
         return self.submit([{'tool':'records.create','args':{'kind':'lead','title':'Test','body':'body'}}])
     def test_idempotency(self):
         t=self.submit();self.assertEqual(t,self.submit());self.assertEqual(1,len(self.e.list_tasks('a')))
+    def test_the_event_lease_outlives_the_event_planner_deadline(self):
+        """A plan still inside its model deadline must not see its event re-claimed.
+
+        process_event leases the event, then plans it; if the lease ran out first, a
+        second worker would plan the same message again (a second model call, and a
+        second reply if both finished)."""
+        from platform_runtime import engine as E
+        from platform_runtime.llm import EVENT_PLAN_DEADLINE_SECONDS
+        self.assertEqual(120,E.EVENT_LEASE_SECONDS)
+        self.assertLess(EVENT_PLAN_DEADLINE_SECONDS,E.EVENT_LEASE_SECONDS)
+        seen=[]
+        def planner(t,ch,p):
+            with self.e.read() as c:seen.append(c.execute("SELECT lease FROM p_events WHERE event_key='k'").fetchone()['lease'])
+            return {'agent':'ops','steps':[{'tool':'reports.summary','args':{}}]}
+        self.e.accept_event('a','telegram','k',{'sender':'u','text':'x'})
+        self.assertTrue(self.e.process_event('a',planner))
+        self.assertEqual([self.now+E.EVENT_LEASE_SECONDS],seen)
+    def test_status_scans_run_on_tenant_status_indexes(self):
+        """Every worker pass counts and claims events by status, and every submit counts
+        tasks by status: without (tenant,status) indexes each is a scan of the tenant's
+        whole history, which only ever grows."""
+        from platform_runtime import engine as E
+        cases=((E.PENDING_EVENTS_SQL,('a',),'p_events_status'),
+               (E.NEXT_EVENT_SQL,('a',1000),'p_events_status'),
+               (E.PENDING_TASKS_SQL,('a',),'p_tasks_status'))
+        with self.e.read() as c:
+            for sql,args,index in cases:
+                with self.subTest(index=index,sql=sql[:40]):
+                    plan=' '.join(r['detail'] for r in c.execute('EXPLAIN QUERY PLAN '+sql,args))
+                    self.assertIn(index,plan)
+                    # The tenant prefix alone would still read the whole history.
+                    self.assertIn('status=?',plan)
+        # The constants are the queries the engine runs, not copies of them.
+        for _ in range(3):self.e.accept_event('a','telegram',str(_),{'sender':'u','text':'x'})
+        self.assertTrue(self.e.process_event('a',lambda t,ch,p:{'agent':'ops','steps':[{'tool':'reports.summary','args':{}}]}))
+        with self.e.read() as c:
+            self.assertEqual(2,c.execute(E.PENDING_EVENTS_SQL,('a',)).fetchone()['n'])
+            self.assertEqual(1,c.execute(E.PENDING_TASKS_SQL,('a',)).fetchone()['n'])
     def test_task_page_size_is_clamped_not_refused(self):
         """Out-of-range page sizes are CLAMPED, not refused: 500 -> 200, 0 -> 1.
 

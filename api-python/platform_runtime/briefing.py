@@ -112,9 +112,19 @@ def _bounded(value, name):
 
 
 def _identifier(value, name, maximum=64):
+    """A required identifier, non-empty AFTER trimming and bounded before it.
+
+    Tested the RAW value for emptiness and returned the TRIMMED one, so ``' '``
+    passed a guard that says "is required" and came back ``''`` -- the bug
+    reengagement._identifier had. The bound stays on the raw value, so padding a
+    too-long identifier with spaces cannot slip it past the ceiling.
+    """
     if not isinstance(value, str) or not value or len(value) > maximum:
         raise ValueError(f'{name} is required')
-    return value.strip()
+    trimmed = value.strip()
+    if not trimmed:
+        raise ValueError(f'{name} must not be blank')
+    return trimmed
 
 
 class Briefing:

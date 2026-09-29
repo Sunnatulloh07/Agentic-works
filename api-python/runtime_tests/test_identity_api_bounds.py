@@ -462,8 +462,8 @@ class AccessTokenCapTests(unittest.TestCase):
 
         ``MIN_TOKEN_TTL_SECONDS`` is 1, so ``ttl<MIN_TOKEN_TTL_SECONDS`` and the ``ttl<1``
         it replaced are the same behaviour today.  No behavioural test can tell them
-        apart, and the mutation harness in
-        ``scripts/probes/mutation_check_identity_api.py`` proved it: reverting the floor
+        apart, and the mutation harness (``scripts/probes/mutation_check_identity_api.py``,
+        now in git history) proved it: reverting the floor
         left this suite green while every other revert was caught.  So this asserts the
         source, which catches a re-introduced literal but could not catch a wrong value.
         """

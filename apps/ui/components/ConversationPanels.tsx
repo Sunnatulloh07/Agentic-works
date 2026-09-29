@@ -1,96 +1,130 @@
 'use client';
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
-import {conversationsPath, handoffsPath, reasonLabel, releasePath, releaseRequest, replyErrorText, replyPath,
-  replyRequest, takeoverActive, threadLines, threadPath, turnStatusLabel,
+import {customerName, latestOpenHandoff, openHandoffs, reasonLabel, releasePath, releaseRequest, replyErrorText, replyPath,
+  replyRequest, resolveHandoffPath, resolveHandoffRequest, takeoverActive, threadLines, threadPath, turnStatusLabel,
   type Takeover} from '../lib/conversation-client.mjs';
-import {startAutoRefresh} from '../lib/shop-client.mjs';
+import {channelLabel, formatTime, friendlyError, statusLabel} from '../lib/format.mjs';
+import {conversationFlags, conversationKey} from '../lib/nav.mjs';
+import {type Idempotency} from '../lib/idempotency.mjs';
+import {Alert, Skeleton, nowSeconds, useLoader, When} from './ui';
 
 /**
- * "Suhbatlar" (conversation list -> thread -> operator reply) and
- * "Operatorga uzatilganlar" (handoffs). Thin callers of app/shop_api.py and the
- * operator-reply endpoint; the API decides roles, these panels only avoid
- * offering a button the API would refuse.
+ * "Suhbatlar": the conversation list, the operator-needed filter, the handoff history
+ * and one open thread with the operator reply. The list and handoffs come from the
+ * dashboard's shared poller; the open thread reloads on every poll. Thin callers of
+ * app/shop_api.py and the operator-reply endpoint -- the API decides roles.
  */
 
-const panel = {background: '#111c2e', border: '1px solid #233149', borderRadius: 12, padding: 20, marginBottom: 16};
-const button = {background: '#1e3a5f', color: '#e2e8f0', border: '1px solid #3b5273', borderRadius: 7, padding: '10px 14px', margin: 4, cursor: 'pointer'};
-const row = {borderBottom: '1px solid #334155', padding: 12};
-const muted = {color: '#94a3b8', fontSize: 13};
-const bubbleColor: Record<string, string> = {customer: '#64748b', agent: '#3b82f6', operator: '#22c55e'};
-const statusColor: Record<string, string> = {delivered: '#86efac', failed: '#fca5a5', uncertain: '#fdba74',
-  delivering: '#fde68a', open: '#93c5fd', queued: '#cbd5e1', operator: '#bbf7d0'};
-const when = (t: number) => new Date(t * 1000).toLocaleString();
-const nowSeconds = () => Date.now() / 1000;
-const badge = {background: '#14532d', color: '#bbf7d0', borderRadius: 6, padding: '2px 8px', fontSize: 12, marginLeft: 6};
-
-/** Visible while a human holds the chat: the bot answers nothing there until `until`. */
-function OperatorBadge({takeover}: {takeover: Takeover | null | undefined}) {
-  if (!takeoverActive(takeover, nowSeconds())) return null;
-  return <span style={badge} title={`Bot ${when(takeover!.until)} gacha javob bermaydi`}>
-    Operator rejimi · {takeover!.actor}</span>;
-}
+export type ThreadRef = {channel: string; conversation_id: string};
+export type Conversation = ThreadRef & {last_role: string; last_text: string; last_at: number;
+  turn_status: string; turn_error: string; sender: string; customer_name?: string; sender_name?: string; takeover: Takeover | null};
+export type Handoff = ThreadRef & {id: string; event_key: string; reason: string; text: string; created: number; agent: string;
+  resolved?: boolean; resolved_by?: string; resolved_at?: number | null};
 
 type Base = {client: SessionClient; tenant: string};
-export type ThreadRef = {channel: string; conversation_id: string};
 
-function useLoader<T>(load: () => Promise<T>) {
-  const [data, setData] = useState<T | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const refresh = useCallback(async () => {
-    setBusy(true); setError('');
-    try { setData(await load()); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Xato'); }
-    finally { setBusy(false); }
-  }, [load]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  return {data, busy, error, setError, refresh};
+/** Who the operator is talking to, as readably as the data allows. */
+function person(c: ThreadRef & {customer_name?: string; sender_name?: string; sender?: string}) {
+  const name = customerName(c);  // plain text: React escapes it, it is never markup
+  const id = c.sender || c.conversation_id;
+  return {title: name || id, detail: name ? `${channelLabel(c.channel)} · ${id}` : channelLabel(c.channel),
+    initials: name ? name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() : id.replace(/\D/g, '').slice(-2) || '?'};
 }
 
-function AutoRefresh({refresh}: {refresh: () => Promise<void>}) {
-  const [on, setOn] = useState(false);
-  useEffect(() => on ? startAutoRefresh(refresh, 10000) : undefined, [on, refresh]);
-  return <label style={{...muted, marginLeft: 8}}>
-    <input type="checkbox" checked={on} onChange={e => setOn(e.target.checked)}/> Har 10 soniyada yangilash
-  </label>;
+function reasonText(reason: string) {
+  if (reason === 'operator') return 'siz javob beryapsiz';
+  if (reason === 'failed' || reason === 'uncertain' || reason === 'throttled') return turnStatusLabel(reason);
+  return reasonLabel(reason);
 }
 
-// ------------------------------------------------------------------ list
+const ROLE = {customer: 'Mijoz', agent: 'Bot', operator: 'Operator'} as Record<string, string>;
+const BUSY_TURNS = new Set(['queued', 'open', 'delivering']);
 
-type Conversation = ThreadRef & {last_role: string; last_text: string; last_at: number;
-  turn_status: string; turn_error: string; sender: string; takeover: Takeover | null};
+type Filter = 'all' | 'attention' | 'history';
 
-export function ConversationsPanel({client, tenant, canReply, selected, onSelect}: Base & {
-  canReply: boolean; selected: ThreadRef | null; onSelect: (ref: ThreadRef | null) => void}) {
-  const load = useCallback(async () =>
-    (await client.request<{conversations: Conversation[]}>(conversationsPath(tenant))).conversations, [client, tenant]);
-  const {data, busy, error, refresh} = useLoader(load);
-  return <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 20}}>
-    <section style={panel}>
-      <h2>Suhbatlar · {data?.length ?? 0}</h2>
-      <p style={muted}>Har bir mijoz suhbatining oxirgi xabari va agent navbatining holati (oxirgi 100 ta).</p>
-      <button style={button} disabled={busy} onClick={() => void refresh()}>Yangilash</button>
-      <AutoRefresh refresh={refresh}/>
-      {error && <p role="alert" style={{color: '#fca5a5'}}>{error}</p>}
-      {data && data.length === 0 && <p>Hali suhbat yo‘q.</p>}
-      {data?.map(c => {
-        const active = selected?.channel === c.channel && selected?.conversation_id === c.conversation_id;
-        return <button key={c.channel + ':' + c.conversation_id}
-          style={{...button, display: 'block', width: '100%', textAlign: 'left', background: active ? '#2563eb' : '#1e293b'}}
-          onClick={() => onSelect({channel: c.channel, conversation_id: c.conversation_id})}>
-          <strong>{c.channel}</strong> · {c.conversation_id}
-          {c.turn_status && <span style={{color: statusColor[c.turn_status] || '#cbd5e1'}}> · {turnStatusLabel(c.turn_status)}</span>}
-          <OperatorBadge takeover={c.takeover}/>
-          <br/><small>{c.last_role === 'customer' ? 'Mijoz' : c.last_role === 'agent' ? 'Agent' : c.last_role}: {c.last_text.slice(0, 120)}</small>
-          <br/><small style={muted}>{when(c.last_at)}</small>
-        </button>;
-      })}
+export function InboxView({client, tenant, canReply, conversations, handoffs, loadError, selected, onSelect,
+  seen, since, version, keys, onChanged}: Base & {
+  canReply: boolean; conversations: Conversation[] | null; handoffs: Handoff[] | null; loadError: string;
+  selected: ThreadRef | null; onSelect: (ref: ThreadRef | null) => void; seen: Record<string, number>; since: number;
+  version: number; keys: Idempotency; onChanged: () => Promise<void>;
+}) {
+  const [filter, setFilter] = useState<Filter>('all');
+  const [resolving, setResolving] = useState('');
+  const [resolveFailure, setResolveFailure] = useState('');
+  const now = nowSeconds();
+  // Only OPEN handoffs are "Javob kerak"; the API already filters, this keeps the list honest if it ever sends both.
+  const openList = openHandoffs(handoffs);
+  async function resolve(h: Handoff) {
+    const payload = {handoff: h.id};
+    setResolving(h.id); setResolveFailure('');
+    try {
+      const req = resolveHandoffRequest(keys.key('resolve-handoff', payload));
+      await client.request(resolveHandoffPath(tenant, h.id), req.body, req.method, req.headers);
+      keys.settle('resolve-handoff', payload);
+      await onChanged();
+    } catch (e) { setResolveFailure(sendError(e)); }
+    finally { setResolving(''); }
+  }
+  const rows = (conversations || []).map(c => ({c, f: conversationFlags(c, openList, seen, since, now)}));
+  const attention = rows.filter(r => r.f.needsHuman);
+  const shown = filter === 'attention' ? attention : rows;
+  const openKey = selected ? conversationKey(selected) : null;
+  const open = conversations?.find(c => conversationKey(c) === openKey);
+  return <div className="inbox" data-open={selected ? 'true' : 'false'}>
+    <section className="panel inbox-list">
+      <h2>Suhbatlar</h2>
+      <div className="filters" role="group" aria-label="Suhbatlarni saralash">
+        <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>Hammasi · {rows.length}</button>
+        <button aria-pressed={filter === 'attention'} onClick={() => setFilter('attention')}>Javob kerak · {attention.length}</button>
+        <button aria-pressed={filter === 'history'} onClick={() => setFilter('history')}>Uzatilganlar</button>
+      </div>
+      <Alert text={loadError}/>
+      <Alert text={resolveFailure}/>
+      {!conversations && !loadError && <Skeleton rows={5}/>}
+      {filter !== 'history' && <div className="conv-list">
+        {conversations && shown.length === 0 && <p className="muted">
+          {filter === 'attention' ? 'Hamma mijozga javob berilgan.' : 'Hali suhbat yo‘q. Mijoz yozishi bilan shu yerda chiqadi.'}</p>}
+        {shown.map(({c, f}) => {
+          const p = person(c);
+          const key = conversationKey(c);
+          const held = takeoverActive(c.takeover, now);
+          return <button key={key} className={`conv${f.unread && key !== openKey ? ' unread' : ''}`}
+            aria-current={key === openKey ? 'true' : undefined}
+            onClick={() => onSelect({channel: c.channel, conversation_id: c.conversation_id})}>
+            <span className={`avatar ${c.channel}`} aria-hidden="true">{p.initials}</span>
+            <span className="name">{p.title}</span>
+            <span className="time"><When at={c.last_at}/></span>
+            <span className="preview">{c.last_role !== 'customer' && `${ROLE[c.last_role] || c.last_role}: `}{c.last_text}</span>
+            <span className="flags">
+              <span className="detail">{p.detail}</span>
+              {f.needsHuman && <span className="chip warn">Javob kerak · {reasonText(f.reason)}</span>}
+              {!f.needsHuman && held && <span className="chip ok">Operator rejimi</span>}
+              {!f.needsHuman && BUSY_TURNS.has(c.turn_status) && <span className="chip info">Bot javob yozmoqda</span>}
+            </span>
+          </button>;
+        })}
+      </div>}
+      {filter === 'history' && <div className="conv-list">
+        <p className="muted">Bot o‘zi javob bera olmagan va hali hal qilinmagan xabarlar (oxirgi 100 ta).</p>
+        {handoffs && openList.length === 0 && <p>Hal qilinmagan uzatilgan xabar yo‘q.</p>}
+        {openList.map(h => <article key={h.id} className="row">
+          <div className="panel-head"><strong>{reasonText(h.reason)}</strong><span className="muted"><When at={h.created}/></span></div>
+          <div className="message-card">{h.text || <em>Matn yo‘q</em>}</div>
+          <button className="btn small" onClick={() => onSelect({channel: h.channel, conversation_id: h.conversation_id})}>
+            {channelLabel(h.channel)} · {h.conversation_id} suhbatini ochish</button>
+          <button className="btn small" disabled={!canReply || resolving === h.id} onClick={() => void resolve(h)}>
+            {resolving === h.id ? 'Saqlanmoqda…' : 'Hal qilindi'}</button>
+        </article>)}
+      </div>}
     </section>
-    {selected
-      ? <ThreadPanel key={selected.channel + ':' + selected.conversation_id} client={client} tenant={tenant}
-          thread={selected} canReply={canReply} onClose={() => onSelect(null)}/>
-      : <section style={panel}><h2>Suhbat</h2><p>Chapdan suhbatni tanlang.</p></section>}
+    <div className="thread-slot">
+      {selected
+        ? <ThreadPanel key={openKey!} client={client} tenant={tenant} thread={selected} row={open}
+            canReply={canReply} onClose={() => onSelect(null)} version={version} keys={keys} onChanged={onChanged}
+            openHandoff={latestOpenHandoff(openList, selected)} onResolve={resolve} resolving={resolving}/>
+        : <section className="panel"><h2>Suhbat</h2><p className="muted">Suhbatni tanlang: mijoz yozgan hamma narsa va bot javoblari shu yerda.</p></section>}
+    </div>
   </div>;
 }
 
@@ -98,99 +132,115 @@ export function ConversationsPanel({client, tenant, canReply, selected, onSelect
 
 type Turn = {event_key: string; seq: number; status: string; error: string; task: string; reply: string;
   created: number; updated: number};
-type Thread = ThreadRef & {history: unknown[]; turns: Turn[]; operator_replies: unknown[]; takeover: Takeover | null};
+type Thread = ThreadRef & {history: unknown[]; turns: Turn[]; operator_replies: unknown[]; takeover: Takeover | null;
+  sender_name?: string};
 
-function ThreadPanel({client, tenant, thread, canReply, onClose}: Base & {
-  thread: ThreadRef; canReply: boolean; onClose: () => void}) {
+const sendError = (e: unknown) => {
+  const status = (e as {status?: unknown})?.status;
+  return typeof status === 'number' ? replyErrorText(e) : friendlyError(e);
+};
+
+function ThreadPanel({client, tenant, thread, row, canReply, onClose, version, keys, onChanged, openHandoff, onResolve, resolving}: Base & {
+  thread: ThreadRef; row?: Conversation; canReply: boolean; onClose: () => void; version: number;
+  keys: Idempotency; onChanged: () => Promise<void>;
+  openHandoff: Handoff | null; onResolve: (h: Handoff) => Promise<void>; resolving: string;
+}) {
   const load = useCallback(async () =>
     client.request<Thread>(threadPath(tenant, thread.channel, thread.conversation_id)), [client, tenant, thread]);
-  const {data, busy, error, refresh} = useLoader(load);
+  const {data, loading, error, refresh} = useLoader(load);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState('');
+  const [failure, setFailure] = useState('');
   const [sent, setSent] = useState('');
+  const box = useRef<HTMLElement>(null);
+  const lineBox = useRef<HTMLDivElement>(null);
+  const first = useRef(true);
+
+  useEffect(() => {
+    // On a phone the thread replaces the list; bring its top into view.
+    if (window.matchMedia?.('(max-width: 820px)').matches) box.current?.scrollIntoView({block: 'start'});
+  }, []);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    void refresh();
+  }, [version, refresh]);
+  const lines = threadLines(data);
+  useEffect(() => {
+    if (lineBox.current) lineBox.current.scrollTop = lineBox.current.scrollHeight;
+  }, [lines.length]);
+
   async function send() {
-    setSending(true); setSendError(''); setSent('');
+    const payload = {channel: thread.channel, conversation_id: thread.conversation_id, text};
+    setSending(true); setFailure(''); setSent('');
     try {
-      // A new key per send attempt: the API returns the same task for a replayed key.
-      const req = replyRequest(text, crypto.randomUUID());
-      const out = await client.request<{task_id: string; status: string}>(
+      // Same text to the same chat keeps its key until it succeeds, so clicking again
+      // after a lost response cannot send the customer a second copy.
+      const req = replyRequest(text, keys.key('reply', payload));
+      await client.request<{task_id: string; status: string}>(
         replyPath(tenant, thread.channel, thread.conversation_id), req.body, req.method, req.headers);
-      setSent(`Yuborildi: vazifa ${String(out.task_id).slice(0, 10)} · ${out.status}`);
+      keys.settle('reply', payload);
+      setSent('Javob yuborildi.');
       setText('');
-      await refresh();
-    } catch (e) { setSendError(replyErrorText(e)); }
-    finally { setSending(false); }
+      await Promise.all([refresh(), onChanged()]);
+    } catch (e) {
+      setFailure(`${sendError(e)} Qayta bossangiz, xabar ikki marta yuborilmaydi.`);
+    } finally { setSending(false); }
   }
   async function giveBack() {
-    setSending(true); setSendError(''); setSent('');
+    const payload = {channel: thread.channel, conversation_id: thread.conversation_id};
+    setSending(true); setFailure(''); setSent('');
     try {
-      const req = releaseRequest(crypto.randomUUID());
+      const req = releaseRequest(keys.key('release', payload));
       await client.request(releasePath(tenant, thread.channel, thread.conversation_id), req.body, req.method, req.headers);
-      setSent('Suhbat botga qaytarildi: keyingi xabarga bot javob beradi.');
-      await refresh();
-    } catch (e) { setSendError(replyErrorText(e)); }
+      keys.settle('release', payload);
+      setSent('Suhbat botga qaytarildi: mijozning keyingi xabariga bot javob beradi.');
+      await Promise.all([refresh(), onChanged()]);
+    } catch (e) { setFailure(sendError(e)); }
     finally { setSending(false); }
   }
-  const lines = threadLines(data);
+
+  const p = person({...thread, customer_name: row?.customer_name, sender_name: row?.sender_name || data?.sender_name,
+    sender: row?.sender});
   const held = takeoverActive(data?.takeover, nowSeconds());
-  return <section style={panel}>
-    <h2>{thread.channel} · {thread.conversation_id}<OperatorBadge takeover={data?.takeover}/></h2>
-    {held && <p style={muted}>Operator javob bergani uchun bot bu suhbatda {when(data!.takeover!.until)} gacha
-      javob bermaydi. Mijoz xabarlari shu yerda ko‘rinadi.
-      <button style={button} disabled={!canReply || sending} onClick={() => void giveBack()}>Botga qaytarish</button></p>}
-    <button style={button} disabled={busy} onClick={() => void refresh()}>Yangilash</button>
-    <button style={button} onClick={onClose}>Yopish</button>
-    <AutoRefresh refresh={refresh}/>
-    {error && <p role="alert" style={{color: '#fca5a5'}}>{error}</p>}
-    {data && lines.length === 0 && <p>Xabar tarixi yo‘q.</p>}
-    {lines.map((l, i) => <div key={i} style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', background: '#0b1220',
-      borderLeft: `3px solid ${bubbleColor[l.role] || '#94a3b8'}`, padding: '8px 12px', borderRadius: 6, margin: '8px 0',
-      marginLeft: l.role === 'customer' ? 0 : 24}}>
-      <small style={muted}>{l.label} · {when(l.at)}{l.status ? ` · ${l.status}` : ''}</small><br/>{l.text}
-    </div>)}
-    {data && data.turns.length > 0 && <details><summary>Agent navbatlari · {data.turns.length}</summary>
-      {data.turns.map(t => <p key={t.event_key} style={{...row, margin: 0}}>
-        <span style={{color: statusColor[t.status] || '#cbd5e1'}}>{turnStatusLabel(t.status)}</span>
-        {t.error && <span style={muted}> · {reasonLabel(t.error)}</span>}
-        <span style={muted}> · {when(t.updated)} · kalit {t.event_key}{t.task && ` · vazifa ${t.task.slice(0, 10)}`}</span>
+  return <section className="panel thread" ref={box} aria-label={`${p.title} bilan suhbat`}>
+    <div className="thread-head">
+      <button className="btn small back" onClick={onClose}>← Suhbatlar</button>
+      <span className={`avatar ${thread.channel}`} aria-hidden="true">{p.initials}</span>
+      <div className="grow"><h2>{p.title}</h2><span className="muted">{p.detail}</span></div>
+      {openHandoff && <button className="btn small" disabled={!canReply || resolving === openHandoff.id}
+        onClick={() => void onResolve(openHandoff)}>{resolving === openHandoff.id ? 'Saqlanmoqda…' : 'Hal qilindi'}</button>}
+      <button className="btn small close-wide" onClick={onClose} aria-label="Suhbatni yopish">Yopish</button>
+    </div>
+    {held && <div className="notice">
+      Siz javob berganingiz uchun bot bu suhbatda {formatTime(data!.takeover!.until)} gacha jim turadi.
+      <div><button className="btn small" disabled={!canReply || sending} onClick={() => void giveBack()}>Botga qaytarish</button></div>
+    </div>}
+    <Alert text={error}/>
+    <div className="lines" ref={lineBox}>
+      {loading && !data && <Skeleton rows={3}/>}
+      {data && lines.length === 0 && <p className="muted">Xabarlar tarixi yo‘q.</p>}
+      {lines.map((l, i) => <div key={i} className={`bubble ${l.role in ROLE ? l.role : 'customer'}`}>
+        <span className="meta">{ROLE[l.role] || l.label} · <When at={l.at}/>{l.status && l.status !== 'succeeded' ? ` · ${statusLabel(l.status)}` : ''}</span>
+        {l.text}
+      </div>)}
+    </div>
+    {data && data.turns.length > 0 && <details><summary className="muted">Bot navbatlari (texnik) · {data.turns.length}</summary>
+      {data.turns.map(t => <p key={t.event_key} className="row muted">
+        {turnStatusLabel(t.status)}{t.error && ` · ${reasonLabel(t.error)}`} · <When at={t.updated}/>
+        {t.task && ` · vazifa ${t.task.slice(0, 10)}`}
       </p>)}
     </details>}
-    <h3>Operator javobi</h3>
-    <p style={muted}>Javob shu suhbatga, agent nomidan emas, sizning nomingizdan yuboriladi va auditga yoziladi.
-      Yuborilgach bot shu suhbatda vaqtincha jim turadi (operator rejimi).</p>
-    <textarea aria-label="Operator javobi" value={text} maxLength={4000} rows={4} onChange={e => setText(e.target.value)}
-      style={{background: '#0b1220', color: '#e2e8f0', border: '1px solid #475569', borderRadius: 6, padding: 10,
-        width: '100%', boxSizing: 'border-box'}}/>
-    <button style={button} disabled={!canReply || sending || !text.trim()} onClick={() => void send()}>
-      {sending ? 'Yuborilmoqda...' : 'Javob yuborish'}</button>
-    {!canReply && <p style={muted}>Javob yuborish owner/operator uchun va ijro to‘xtatilmagan bo‘lishi kerak.</p>}
-    {sendError && <p role="alert" style={{color: '#fca5a5'}}>{sendError}</p>}
-    {sent && <p role="status" style={{color: '#86efac'}}>{sent}</p>}
-  </section>;
-}
-
-// -------------------------------------------------------------- handoffs
-
-type Handoff = ThreadRef & {id: string; event_key: string; reason: string; text: string; created: number; agent: string};
-
-export function HandoffsPanel({client, tenant, onOpen}: Base & {onOpen: (ref: ThreadRef) => void}) {
-  const load = useCallback(async () =>
-    (await client.request<{handoffs: Handoff[]}>(handoffsPath(tenant))).handoffs, [client, tenant]);
-  const {data, busy, error, refresh} = useLoader(load);
-  return <section style={panel}>
-    <h2>Operatorga uzatilganlar · {data?.length ?? 0}</h2>
-    <p style={muted}>Agent o‘zi javob bera olmagan yoki javobi yetib borgani noma’lum bo‘lgan xabarlar (oxirgi 100 ta).</p>
-    <button style={button} disabled={busy} onClick={() => void refresh()}>Yangilash</button>
-    <AutoRefresh refresh={refresh}/>
-    {error && <p role="alert" style={{color: '#fca5a5'}}>{error}</p>}
-    {data && data.length === 0 && <p>Uzatilgan xabar yo‘q.</p>}
-    {data?.map(h => <article key={h.id} style={row}>
-      <strong>{reasonLabel(h.reason)}</strong> · <span style={muted}>{h.channel} · {h.conversation_id} · {when(h.created)}</span>
-      <div style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', background: '#0b1220', borderLeft: '3px solid #f59e0b',
-        padding: '8px 12px', borderRadius: 6, margin: '8px 0'}}>{h.text || <em>Matn yo‘q</em>}</div>
-      <button style={button} onClick={() => onOpen({channel: h.channel, conversation_id: h.conversation_id})}>
-        Suhbatni ochish</button>
-    </article>)}
+    <div className="composer">
+      <label htmlFor={`reply-${thread.channel}-${thread.conversation_id}`} className="muted">
+        Javobingiz {channelLabel(thread.channel)} orqali sizning nomingizdan ketadi; keyin bot bu suhbatda vaqtincha jim turadi.</label>
+      <textarea id={`reply-${thread.channel}-${thread.conversation_id}`} value={text} maxLength={4000} rows={3}
+        placeholder="Mijozga javob yozing" onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canReply && !sending && text.trim()) void send(); }}/>
+      <button className="btn primary" disabled={!canReply || sending || !text.trim()} onClick={() => void send()}>
+        {sending ? 'Yuborilmoqda…' : 'Yuborish'}</button>
+      {!canReply && <p className="muted">Javob yozish egasi va operator uchun, bot to‘xtatilmagan bo‘lishi kerak.</p>}
+      <Alert text={failure}/>
+      {sent && <p role="status" className="success">{sent}</p>}
+    </div>
   </section>;
 }

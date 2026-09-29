@@ -32,8 +32,13 @@ class DeclaredBoundTests(unittest.TestCase):
     def test_the_posting_limit(self):
         self.assertEqual(erp_api.POSTING_LIMIT, 100)
 
-    def test_the_evidence_ceiling(self):
-        self.assertEqual(erp_api.MAX_EVIDENCE_CHARS, 1000)
+    def test_the_evidence_ceiling_is_the_runtimes_own(self):
+        # It said 1000 while erp.reconcile_posting refused anything over 500, so
+        # 501..1000 passed the route and failed one layer down. One source now.
+        from platform_runtime import erp
+        self.assertEqual(erp_api.MAX_EVIDENCE_CHARS, erp.MAX_RECONCILE_EVIDENCE_CHARS)
+        self.assertEqual(erp_api.MAX_EXTERNAL_ID_CHARS, erp.MAX_EXTERNAL_ID_CHARS)
+        self.assertEqual(erp.MAX_RECONCILE_EVIDENCE_CHARS, 500)
 
     def test_the_external_id_ceiling(self):
         self.assertEqual(erp_api.MAX_EXTERNAL_ID_CHARS, 128)
@@ -46,10 +51,10 @@ class DeclaredBoundTests(unittest.TestCase):
         """The module docstring may restate the numbers; the code may not."""
         text = source()
         code = text.replace(ast.get_docstring(ast.parse(text), clean=False) or '', '', 1)
-        for literal in ('POSTING_LIMIT = 100', 'MAX_EVIDENCE_CHARS = 1000',
-                        'MAX_EXTERNAL_ID_CHARS = 128'):
+        for literal in ('POSTING_LIMIT = 100', 'MAX_EVIDENCE_CHARS = erp.MAX_RECONCILE_EVIDENCE_CHARS',
+                        'MAX_EXTERNAL_ID_CHARS = erp.MAX_EXTERNAL_ID_CHARS'):
             self.assertIn(literal, code)
-        for inline in ('LIMIT 100', 'max_length=1000', 'max_length=128'):
+        for inline in ('LIMIT 100', 'max_length=1000', 'max_length=500', 'max_length=128'):
             self.assertNotIn(inline, code)
 
     def test_the_two_authority_shapes_are_pinned(self):

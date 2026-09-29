@@ -185,6 +185,31 @@ class ConversationOrderTests(unittest.TestCase):
         self.assertEqual(1, len(self.rows("SELECT * FROM p_approvals a JOIN p_steps s ON s.id=a.step "
                                           "WHERE s.tool='records.create'")))
 
+    def test_a_second_draft_while_an_order_awaits_approval_is_audited_and_handed_off(self):
+        from platform_runtime import conversation
+        self.assertEqual(1, conversation.MAX_PENDING_ORDERS_PER_SENDER)
+        self.inbound('m1')
+        self.decisions = self.draft_then_final('Jami 198 000 so‘m.')
+        self.pump()
+        first = self.order_task()
+        self.inbound('m2', 'Yana 2 ta olaman')
+        self.decisions = self.draft_then_final('Jami 198 000 so‘m.')
+        self.pump()
+        self.assertIsNone(self.task('telegram', 'm2:order'))
+        self.assertEqual('delivered', self.turn('m2')['status'])
+        self.assertEqual(1, len(self.audits('conversation.order_throttled')))
+        handoffs = self.rows('SELECT id,body FROM p_records WHERE tenant=? AND kind=?', T, HANDOFF_KIND)
+        self.assertEqual([('telegram:m2', 'order_pending')],
+                         [(h['id'], json.loads(h['body'])['reason']) for h in handoffs])
+        # The waiting order is untouched; once it is decided the customer can order again.
+        self.assertEqual('waiting_approval', self.e.get(T, first['id'])['status'])
+        self.e.approve(T, first['steps'][0]['id'], 'op', 'approved', 'operator')
+        self.pump()
+        self.inbound('m3', 'Yana bittasini olaman')
+        self.decisions = self.draft_then_final('Jami 198 000 so‘m.')
+        self.pump()
+        self.assertIsNotNone(self.task('telegram', 'm3:order'))
+
     def test_no_order_agent_means_no_order(self):
         self.settings['order_agent'] = ''
         self.inbound()

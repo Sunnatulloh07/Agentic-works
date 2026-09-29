@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {submitPath,toolChoices,argumentFields,buildArguments,toolCallBody} from './tools-client.mjs';
+import {submitPath,toolChoices,argumentFields,buildArguments,toolCallBody,toolDescription} from './tools-client.mjs';
 
 const SCHEMA={type:'object',additionalProperties:false,required:['query'],
   properties:{
@@ -77,4 +77,10 @@ test('the task body is exactly one step',()=>{
   assert.throws(()=>toolCallBody({agent:'a',tool:'b',args:[],key:'k'}));
   assert.throws(()=>toolCallBody({agent:'a',tool:'b',args:{},key:'  '}));
   assert.throws(()=>toolCallBody({agent:'a',tool:'b',args:{},key:'x'.repeat(257)}));
+});
+
+test('tool description is optional secondary text',()=>{
+  assert.equal(toolDescription({name:'a',description:'  Ombor qoldig‘ini o‘qiydi  '}),'Ombor qoldig‘ini o‘qiydi');
+  for(const bad of [{name:'a'},{description:5},null,undefined])assert.equal(toolDescription(bad),'');
+  assert.equal(toolChoices([{name:'a',description:'x'}],{tools:['a']})[0].description,'x');
 });

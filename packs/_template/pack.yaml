@@ -11,8 +11,9 @@
 #  - suhbat (conversation): kiruvchi xabarga natija asosida javob. Faqat
 #    conversation.enabled: true va triggers'da {type: message, source: <kanal>}
 #    bo'lgan birinchi agent tanlanadi. Javobdagi 4+ xonali son (narx, telefon,
-#    buyurtma raqami) lookup natijasida, shu suhbatning oldingi xabarlarida,
-#    persona yoki fallback_text'da bo'lmasa, fallback_text yuboriladi va
+#    buyurtma raqami) lookup natijasida, bot/operatorning oldingi javoblarida,
+#    persona yoki fallback_text'da bo'lmasa (mijoz xabari faqat 9+ xonali telefon
+#    yoki buyurtma raqamini tasdiqlaydi, narxni emas), fallback_text yuboriladi va
 #    operatorga uzatiladi (yillar va "1.5 mln"/"150 ming" kabi shakllar tushuniladi).
 #    Chegaralar: max_steps 1..12, max_seconds 60..86400, history_turns 0..20,
 #    fallback_text <= 1000 belgi (bo'sh bo'lsa core'ning standart matni).
@@ -33,7 +34,7 @@ agents:
     conversation:
       enabled: false
       max_steps: 3
-      max_seconds: 120
+      max_seconds: 180
       history_turns: 6
       fallback_text: ""
   - id: ops.assistant

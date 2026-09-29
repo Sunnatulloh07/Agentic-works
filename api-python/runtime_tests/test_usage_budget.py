@@ -1,13 +1,14 @@
 """Real temporary SQLite ledger tests. Model usage is an offline fake receipt."""
 import concurrent.futures
 import datetime
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from platform_runtime.engine import Engine, Conflict, Forbidden, NotFound, RateLimited, digest
 from platform_runtime.tools import build_registry
-from platform_runtime.usage_budget import (UsageBudget, amount, bounded,
+from platform_runtime.usage_budget import (UNCERTAIN_SLOT_SECONDS, UsageBudget, amount, bounded,
                                            metered_completion, token_cost)
 
 class BudgetTests(unittest.TestCase):
@@ -164,6 +165,72 @@ class BudgetTests(unittest.TestCase):
         rid2 = self.reserve('evidence2')
         with self.assertRaises(ValueError):
             self.b.reconcile('a', rid2, 'owner', 1, 'e' * 501)
+
+    # ---------------------------------------- released calls and expired slots
+    #
+    # Measured before the fix: every failed metered call became `uncertain` and
+    # kept its parallel-call slot until an owner reconciled it, so after
+    # `max_inflight` failures -- a provider outage is enough -- every later turn
+    # was refused with 'Budget parallel call limit reached'.
+
+    def audits(self, action):
+        with self.e.read() as db:
+            return [json.loads(r['data']) for r in db.execute(
+                'SELECT data FROM p_audit WHERE tenant=? AND action=? ORDER BY id', ('a', action))]
+
+    def test_a_call_the_provider_never_billed_is_released(self):
+        r = self.reserve(); self.b.dispatch('a', r)
+        self.b.release('a', r, 'rejected'); self.b.release('a', r, 'rejected')
+        s = self.b.summary('a')
+        self.assertEqual((0, 0, 0), (s['spent_micro'], s['reserved_micro'], s['inflight']))
+        self.assertEqual([], self.b.pending('a'))
+        self.assertEqual([{'id': r, 'actual_micro': 0, 'reservation_exceeded': False, 'reason': 'rejected'}],
+                         self.audits('budget.released'))
+        self.reserve('two', 100)  # the whole limit is available again
+
+    def test_only_a_dispatched_call_can_be_released(self):
+        r = self.reserve()
+        with self.assertRaises(Conflict): self.b.release('a', r, 'not_sent')
+        self.b.dispatch('a', r); self.b.settle('a', r, 20)
+        with self.assertRaises(Conflict): self.b.release('a', r, 'not_sent')
+        r2 = self.reserve('two'); self.b.dispatch('a', r2)
+        for reason in ('', 'unknown', None, 'x' * 300):
+            with self.subTest(reason=reason), self.assertRaises(ValueError):
+                self.b.release('a', r2, reason)
+
+    def fill_with_uncertain(self):
+        self.b.configure('a', 'owner', 'USD', 100, 1)
+        r = self.reserve('lost', 10); self.b.dispatch('a', r); self.b.uncertain('a', r)
+        return r
+
+    def test_an_uncertain_call_holds_its_slot_for_the_slot_lease_only(self):
+        r = self.fill_with_uncertain()
+        self.now[0] += UNCERTAIN_SLOT_SECONDS - 1
+        self.assertEqual(1, self.b.summary('a')['inflight'])
+        with self.assertRaises(RateLimited): self.reserve('two', 10)
+        self.now[0] += 1
+        self.assertEqual(0, self.b.summary('a')['inflight'])
+        self.reserve('two', 10)
+        self.assertEqual('unreconciled', {p['id']: p['status'] for p in self.b.pending('a')}[r])
+        self.assertEqual([{'id': r, 'after_seconds': UNCERTAIN_SLOT_SECONDS}],
+                         self.audits('budget.uncertain_slot_expired'))
+
+    def test_an_expired_slot_still_holds_its_money_until_reconciled(self):
+        r = self.fill_with_uncertain()
+        self.now[0] += UNCERTAIN_SLOT_SECONDS
+        self.reserve('two', 10)
+        self.assertEqual(20, self.b.summary('a')['reserved_micro'])
+        self.b.reconcile('a', r, 'owner', 3, 'provider invoice line 7')
+        s = self.b.summary('a')
+        self.assertEqual((3, 10), (s['spent_micro'], s['reserved_micro']))
+
+    def test_a_dispatch_orphaned_by_a_crash_expires_the_same_way(self):
+        self.b.configure('a', 'owner', 'USD', 100, 1)
+        r = self.reserve('orphan', 10); self.b.dispatch('a', r)
+        self.now[0] += UNCERTAIN_SLOT_SECONDS
+        self.reserve('two', 10)
+        self.assertEqual('unreconciled', {p['id']: p['status'] for p in self.b.pending('a')}[r])
+        with self.assertRaises(Conflict): self.b.settle('a', r, 1)
 
 
 class MeteringTests(unittest.TestCase):

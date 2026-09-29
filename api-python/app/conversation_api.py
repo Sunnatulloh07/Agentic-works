@@ -18,7 +18,6 @@ channel that cannot carry a reply, or no agent holding its send tool.
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field
 
-from platform_runtime.conversation import start_takeover
 from platform_runtime.engine import OPERATOR_ROLES, OUTBOUND_CHANNELS
 from . import platform_api as api
 from .packs import PackError
@@ -46,7 +45,8 @@ def reply(tenant: str, channel: str, conversation_id: str, req: Reply, request: 
     e = api.engine()
     task_id = api.call(e.operator_reply, tenant, channel, conversation_id, req.text,
                        actor=who['sub'], role=who['role'], key=key, agent=agent)
-    # A human now holds this chat: the bot opens no run for it for the agent's
-    # conversation.takeover_minutes (platform_runtime.conversation.start_takeover).
-    api.call(start_takeover, e, tenant, channel, conversation_id, who['sub'], agent)
+    # The chat is NOT taken over here: a queued reply may still fail (a blocked bot,
+    # a closed WhatsApp window) and a replay must not extend anything. The worker
+    # starts the takeover once the reply is delivered
+    # (platform_runtime.operator_reply.settle_operator_replies).
     return {'task_id': task_id, 'status': api.call(e.get, tenant, task_id)['status']}

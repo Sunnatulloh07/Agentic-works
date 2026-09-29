@@ -1,4 +1,7 @@
-# Implementation status — joriy holat (2026-09-22)
+# Implementation status — joriy holat (2026-09-29)
+
+> **Yagona joriy NO_GO blockers/gaps hisoboti:** `development/PRODUCTION-GO-AUDIT-UZ.md`
+> (2026-09-29). Bu fayl — status bloki + tarix; raqamlar yangilangan.
 
 **v0.5 · IN_PROGRESS · production NO_GO.** Bu fayl bitta joriy status blokidan va oxirida
 yig‘ilgan **Tarixiy holat** bo‘limidan iborat. Oldingi versiyalarning bannerlari o‘chirilmadi,
@@ -10,33 +13,73 @@ faqat pastga ko‘chirildi.
 |---|---|
 | API bu mashinada ishga tushirilganmi? | **Yo‘q.** `api-python/.env` yo‘q, `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori bor. |
 | Biror provider `live_verified`mi? | **Yo‘q.** Eng yuqori daraja — `LOCAL_CONTRACT_TESTED`. |
-| `runtime_tests` | **3 601 sinov** (2026-09-25); Windows’da `failures=1, errors=12` — **13 tasi Windows-only** sabab bilan va ro‘yxat `test_platform_baseline.py` da qadalgan. |
-| `integration_tests` | **351/351 PASS** (2026-09-25; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`; birinchi ikkitasini `conftest.py` o‘zi qo‘yadi; `cryptography` o‘rnatilgan bo‘lishi shart). Legacy to‘plamdan ko‘chirilgan 5 fayl shu songa kiradi. |
-| `api-python/tests/` (legacy) | **Nafaqaga chiqarildi (2026-09-22).** U 33 qizil / 172 pass edi va hech bir gate uni yurgizmasdi. Sabablar: `api-python/integration_tests/LEGACY-RETIRED.md`. |
-| CI `http` job | endi **yig‘iladi** — `integration_tests/conftest.py` ordering bog‘liqligini yo‘q qildi. |
-| CI `ui_dependency_security` job | **PASS** — `npm audit --audit-level=high` → 0 vulnerabilities (2026-09-25; `next@16.3.6` + `react@19.3.0`). |
-| First-run yo‘li | Faqat `scripts/provision_identity.py`. Eski `setup_local.py` → `owner_login.py` ketma-ketligi **o‘lik** (410 / 403, UI’da token maydoni yo‘q). |
+| `runtime_tests` | **3 813 sinov** (2026-09-29); Windows’da `failures=1, errors=12, skipped=1` — **13 tasi Windows-only** (`test_portable_fs` ×11, `test_macos_bundle` ×1, `test_foundation_v02` mount_scope ×1) va `test_platform_baseline.py` da sabab bilan qadalgan. |
+| `integration_tests` | **402/402 PASS** (2026-09-29; `ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false python -m pytest integration_tests -q`; `cryptography` o‘rnatilgan bo‘lishi shart). |
+| `scripts` testlari va e2e | Testlar **OK**; `python scripts/e2e_smoke.py` — **15/15** (json va `--protocol tools`; haqiqiy API + worker, soxta model va soxta Telegram loopback’da). |
+| UI | `npm run typecheck && npm run build` toza; node `lib` testlari **105/105**; `npm audit` → **0 vulnerabilities** (`next@16.3.6`, `react@19.3.0`). |
+| Runner | `node --test apps/runner/test.js` Windows’da **21/32** (11 tasi POSIX-only). |
+| CI (`.github/workflows/verify.yml`) | Aynan **4 job**: `core`, `http`, `ui`, `ui_dependency_security`. `manifest_integrity` va `measure_reachability` CI job **emas** — ular `scripts/verify_offline.py` ichidagi job nomlari. `http` job `integration_tests/conftest.py` tufayli yig‘iladi. |
+| `api-python/tests/` (legacy) | **2026-09-22 da nafaqaga chiqarilgan; papka mavjud emas.** Sabablar: `api-python/integration_tests/LEGACY-RETIRED.md`. |
+| First-run yo‘li | Faqat `scripts/provision_identity.py`. Eski `setup_local.py` → `owner_login.py` ketma-ketligi **o‘lik** (410 / 403, UI’da token maydoni yo‘q); `owner_login.py` o‘chirilgan. |
+| Tozalash (2026-09-27..29) | O‘chirildi (git tarixida): `scripts/probes/*` (`measure_reachability.py` qoldi), `docs/verification/**`, `reports/context-audit.md`, 13 ta `scripts/check_*_example.py` (o‘rniga `api-python/runtime_tests/test_config_examples.py`), o‘lik `app/orchestrator.py`, `tool_registry.py`, `ports.py`, `runner_ws.py`, `app/integrations/`, `platform_runtime/retry.py`, `scripts/owner_login.py`, `db_backup.py` (→ `sqlite_backup.py`), `docs_tools.py`, `append_doc_section.py`, `measure_suite.py`, `time_test_files.py`, `measure_kdf_cost.py` (o‘rniga `pytest --durations=25`). `verify_offline.py` dalillari endi `.verify-offline/`ga (gitignore). |
+
+**Ochiq qolgan (2026-09-29):** haqiqiy Telegram / haqiqiy model bilan jonli sinov yo‘q; SQLite faqat bitta host.
+
+### 2026-09-29 da tugallangan
+
+- **Sotuv-bot eval:** `evals/sales_bot/` (turkish-baby 40, demo-retail 13 holat) + `scripts/run_sales_eval.py` (`--dry-run` bepul; haqiqiy model faqat `--yes-spend` bilan). Yo‘riqnoma: ONBOARDING «Sotuv botini baholash».
+- **Native tool use:** `llm.protocol: json|tools` (sukut `json`; `tools` faqat anthropic, faqat natija-beriladigan planner; bitta tuzatish urinishi, `agent_run.planner_repair`; matnli javob → `planner_failed_no_retry`).
+- **Kalit doirasi:** pack-local `integrations.yaml` faqat `TENANT_<TENANT>__NAME` yoki `PLATFORM_SHARED_SECRET_NAMES`; platforma sirlari taqiqlangan; bitta yomon havola tenant konfigini rad etadi (Kanallar ekrani `problem` ko‘rsatadi).
+- **Worker:** dashboard/web hodisalari planner pool’da (5,25 s → 0,15 s); SIGTERM’da ~100 s kutadi (stop grace ≥ 110 s).
+- **Mijoz ismlari** (`sender_name`, faqat ko‘rsatish uchun) va **Hal qilindi** (handoff resolve, `status=open|resolved|all`).
+- **Verifikatsiya skilli:** `.claude/skills/platform-verify` (`verify.py`).
+
+### 2026-09-27 dan beri qo‘shilgan
+
+- **WhatsApp webhook:** har `entry` alohida yo‘naltiriladi, bir yetkazishda ≤3 raqam, body hajmi chegaralangan, noto‘g‘ri konfig → `503`. `whatsapp.window` faqat joriy mijozga tegishli.
+- **Grounding va cheklovlar:** mijoz satrlari faqat 9+ xonali identifikatorlarni «asoslaydi»; har jo‘natuvchi uchun cheklovlar (`throttled` holati, `order_pending`).
+- **Operator:** takeover faqat operator javobi **muvaffaqiyatli** yuborilgandan keyin boshlanadi; takeover paytidagi mijoz xabarlari `operator_takeover` handoff oladi; operator javoblarida mustaqil approval hurmat qilinadi.
+- **Proksi xavfsizligi:** `FORWARDED_ALLOW_IPS='*'` rad etiladi; uvicorn `--no-proxy-headers` bilan yurgiziladi (`run_local` + Dockerfile).
+- **Runner:** yopilish kodlari `4400/4401/4403/1011` (+ token-fayl rotatsiyasi).
+- **Worker:** drain + `PlannerPool` (20 parallel mijoz: 48 s → 12 s, o‘lchangan).
+- **Model:** qayta urinish/backoff va `llm.timeout_seconds` (10..120, sukut 60); budjet statuslari `released` / `unreconciled`; persona — ishonchli biznes ko‘rsatmasi, javob mijoz tilida; tool tavsiflari.
+- **Pack:** `load_pack` mtime keshi (2 000 mahsulot: 729 ms → 0,43 ms).
+- **UI:** do‘kon-birinchi qayta ishlash — **Suhbatlar** sukut, jonli poller, idempotent qayta urinishlar, buyurtma kartalari, mobil ko‘rinish, tasdiqlashlar; brauzer loginidagi «Illegal invocation» tuzatildi.
+- **Boshqa:** versiya yagona manbadan `0.5.0-development-preview` (`app/version.py`); ERP reconcile chegaralari yagona manbadan (500 belgi); status indekslari.
 
 ## Qamrov: registry va pack’lar orasidagi bo‘shliq
 
 Registry’da **91** tool bor. Yetkazib berilayotgan pack’lardan (`demo-retail`, `marketing`,
-`turkish-baby`, `_template`) **20 tasi** chaqirilishi mumkin (2026-09-25 o‘lchovi;
-`whatsapp.*` va `agent.*` endi `turkish-baby`da). Qolgan 14 modulning **10 447 satri**
-(19 182 dan, 54%) hamon chaqirilmaydi.
+`turkish-baby`, `_template`) **20 tasi** chaqirilishi mumkin (2026-09-29 o‘lchovi;
+`whatsapp.*` va `agent.*` `turkish-baby`da). Tool-owning `platform_runtime` kodining
+**83.5%** (**11 345 / 13 591** satr, **17 / 22** modul) **hech bir pack tomonidan e’lon
+qilinmagan**
+(`scripts/probes/measure_reachability.py` qayta hisoblaydi; butun paket bo‘ylab **84.1%**,
+11 890 / 14 136, 19 / 24). Pack e’lon qiladigan tool-owning modul atigi **5** ta: `knowledge`,
+`oversight`, `shop_tools`, `tools`, `whatsapp`. (2026-09-27 dagi 83.8% / 11 283 / 13 460 dan
+keyin kod o‘zgargani uchun son siljidi.)
 
-Quyidagi modullarni ishlatadigan **birorta pack yo‘q**:
+> **Bu «o‘lik kod» o‘lchovi emas**, faqat **hech bir pack e’lon qilmagan tool modullari**
+> o‘lchovi: `whatsapp_inbound` webhook route orqali, `escalation` worker orqali yetib boriladi.
 
-`erp` · `documents` · `inventory` · `business_graph` ·
-`telephony` · `assets` · `vision` · `manufacturing` · `oee` · `workforce` · `supervisor` ·
-`reengagement` · `escalation` · `briefing`
+Quyidagi **17** tool-owning modulni hech bir pack e’lon qilmaydi
+(`measure_reachability.py` → `unreachable_tool_modules`):
 
-WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`; 19 HTTP testi
+`assets` · `business_graph` · `connectors` · `documents` · `erp` · `escalation` ·
+`google_adapters` · `inventory` · `manufacturing` · `oee` · `sheets` · `speech` ·
+`supervisor` · `telephony` · `vision` · `whatsapp_inbound` · `workforce`
+
+(`reengagement` va `briefing` tool-owning emas — ular `engine.submit` orqali oddiy task
+sifatida yetib boriladi, shuning uchun bu ro‘yxatda yo‘q. Yadro `engine.py`/`llm.py` ham
+tool-owning emas, lekin route/webhook orqali yetib boriladi va maxrajga kirmaydi.)
+
+WhatsApp inbound HTTP route **bor** (`app/whatsapp_api.py`; HTTP testlari
 `integration_tests/test_whatsapp_webhook_http.py`) va `whatsapp.*` tool’lari
 `turkish-baby` pack’ida e’lon qilingan — live Meta acceptance hamon yo‘q.
 
 Bular **muzlatilgan (frozen) preview modullar** — mahsulot funksiyasi emas. Ular test va
-chegara auditi bilan qoplangan, lekin hech bir mijoz konfiguratsiyasi ularga yetib
-bormaydi. Hujjatlarda backend «tayyor» deb yozilgan joyda gap **yadro** haqida, bu
+chegara auditi bilan qoplangan, lekin hech bir mijoz konfiguratsiyasi ularning tool’larini
+e’lon qilmaydi. Hujjatlarda backend «tayyor» deb yozilgan joyda gap **yadro** haqida, bu
 modullar haqida emas.
 
 ## Approval siyosati — joriy shakl
@@ -83,7 +126,7 @@ Claude Haiku 3 va Haiku 3.5 **nafaqaga chiqarilgan**; joriy kichik model —
 | PostgreSQL, distributed execution, HA/klaster | Qisman. `postgres_connector.py` read-only; ijro bitta instance uchun |
 | Observability (metrika eksporti, trace, alerting) | Yo‘q. `MetricsPanel` health va navbat hisobini ko‘rsatadi, ko‘proq emas |
 | DR (disaster recovery) mashqi | Yo‘q real mashq; `scripts/dr_drill.py` bor |
-| Provayder 429/5xx uchun backoff | Yo‘q |
+| Provayder 429/5xx uchun backoff | Bor (model qayta urinish/backoff, `llm.timeout_seconds` 10..120, sukut 60); live provayderda sinalmagan |
 | Integrator onboarding, user directory, refresh/revoke user tokens | Qisman |
 | Billing, subscription freeze, token/usage cost budget | Qisman. `usage_budget.py` obuna/hisob-faktura emas |
 | Gmail, Drive, Calendar, alohida CRM adapter | Qisman, `LOCAL_CONTRACT_TESTED`. MCP generic call’ni tasdiqlangan CRM adapter deb atamang |
@@ -96,7 +139,7 @@ Claude Haiku 3 va Haiku 3.5 **nafaqaga chiqarilgan**; joriy kichik model —
 | Backup encryption/offsite rotation, migration rollback framework | Yo‘q. Online SQLite backup utility va smoke test bor |
 | Security/load/browser E2E/failure/recovery to‘liq acceptance | Qisman unit coverage, to‘liq emas |
 | Uch kunlik haqiqiy staging pilot va production deployment | Bajarilmagan |
-| UI dependency xavfsizligi | **FAIL** — Next 15 + React 19 migratsiyasi kerak |
+| UI dependency xavfsizligi | **PASS** — `next@16.3.6` + `react@19.3.0`, `npm audit` 0 vulnerabilities (jonli Telegram/model bilan emas, faqat dependency auditi) |
 
 ## Bilinadigan chegaralar
 
@@ -112,12 +155,13 @@ Runnerda POSIX descriptor tekshiruvi bor, ammo u butun OS sandbox o‘rnini bosm
 Dedicated non-privileged OS user, ACL va faqat ajratilgan kataloglar talab qilinadi.
 Journalda o‘qilgan fayl mazmuni saqlanishi mumkin, disk shifrlash va retention kerak.
 
-Yangi UI avtomatik polling qilmaydi, **Yangilash** ishlatiladi. Tarixiy `/legacy` UI
+**Suhbatlar** ko‘rinishi jonli poller bilan yangilanadi; task detail natijasi uchun
+**Yangilash** ishlatiladi. Tarixiy `/legacy` UI
 platforma rejimida mos emas; eski mutation endpointlar default o‘chirilgan. Production’da
 `PIPELINE_MODE=legacy` ishlatmang.
 
-Internetga chiqadigan production’dan oldin dependency/security review majburiy — hozir u
-**qizil**.
+Internetga chiqadigan production’dan oldin dependency/security review majburiy: `npm audit`
+hozir 0, lekin haqiqiy Telegram/model bilan jonli sinov va Python tomon review hali yo‘q.
 
 ### 2026-09-23 da yopilgan nuqsonlar (lokal testlar bilan, live emas)
 
@@ -178,7 +222,7 @@ fence’ni olib tashlashi mumkin.
 ### Holat: v0.3.1 code-review preview
 
 **SOURCE_ONLY / NOT_RUN / PRODUCTION NO-GO.** `CHECKPOINT-V031-UZ.md` va
-`verification/v031/` o‘sha checkpoint manbasi. Ish tartibi: `WORKING-AGREEMENT-UZ.md`.
+`verification/v031/` (git tarixida) o‘sha checkpoint manbasi. Ish tartibi: `WORKING-AGREEMENT-UZ.md`.
 
 Kod o‘zgarishlari va yangi regression ssenariylari yozildi. Test/build/typecheck/lint/
 compile/demo bajarilmadi. To‘liq PRD implementatsiyasi yakunlanmagan.
@@ -186,14 +230,14 @@ compile/demo bajarilmadi. To‘liq PRD implementatsiyasi yakunlanmagan.
 ### Holat: v0.3 hardening preview
 
 **Production NO-GO.** PRD: `prd-v03/00-HARDENING-PRD-UZ.md`; audit: `AUDIT-V03-UZ.md`; test
-dalillari: `verification/v03/`.
+dalillari: `verification/v03/` (git tarixida).
 
 Yangi kod identity/session, UI, worker va connector hardeningni qamrab oladi. Barcha CRM/ERP
 tayyor emas. HTTP va React build mahalliy bajarilmagan.
 
 ### Amaldagi holat: v0.2 engineering preview
 
-Dalillar: `verification/v02-summary.json`, `AUDIT-V02-UZ.md`,
+Dalillar: `verification/v02-summary.json` (git tarixida), `AUDIT-V02-UZ.md`,
 `prd-v02/06-RELEASE-ACCEPTANCE.md`.
 
 114 Python runtime test va 15 Node test lokal bajarildi. Aisha adapterlari faqat mock
@@ -268,7 +312,7 @@ tekshiruv yozilgan, ammo CI ishga tushirilmagan.
 
 69 ta Python fayl AST syntax tekshiruvdan o‘tdi. To‘rtta TSX fayli TypeScript 7.0.2
 `--noCheck` bilan sintaktik emitdan o‘tdi. **Bu React typecheck yoki Next build o‘tdi degani
-emas.** Test loglari `docs/verification/` ichida.
+emas.** Test loglari `docs/verification/` ichida edi (git tarixida).
 
 #### Kod yozilgan, ammo integratsion tekshiruv bajarilmagan (2026-09-13 holati)
 

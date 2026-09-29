@@ -94,6 +94,34 @@ class CheckTests(unittest.TestCase):
             self.assertIn('PASS  runtime config', out)
             self.assertIn('PASS  pack demo-retail', out)
 
+    @unittest.skipUnless(HAS_API_DEPS, 'needs PyYAML to read a pack-local integrations.yaml')
+    def test_a_reference_outside_the_tenant_namespace_is_reported_by_key_and_rule(self):
+        run_local._api_importable()
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'demo-retail').mkdir()
+            (Path(d) / 'demo-retail' / 'integrations.yaml').write_text(
+                'llm:\n  key_env: TENANT_DEMO_RETAIL__LLM_KEY\ntelegram:\n  token_env: JWT_SECRET\n',
+                encoding='utf-8')
+            (Path(d) / 'shop').mkdir()
+            (Path(d) / 'shop' / 'integrations.yaml').write_text('telegram:\n  token_env: OTHER_BOT_TOKEN\n',
+                                                                encoding='utf-8')
+            environ = {'PLATFORM_INTEGRATIONS_FILE': str(Path(d) / 'absent.json'), 'PACKS_DIR': d}
+            values = {'JWT_SECRET': 'ValueJwtNeverPrinted_0123456789abcdef',
+                      'OTHER_BOT_TOKEN': '123:ValueTokenNeverPrinted'}
+            with unittest.mock.patch.dict(os.environ, {**environ, **values}):
+                os.environ.pop('PLATFORM_SHARED_SECRET_NAMES', None)
+                results = dict((name, (ok, detail)) for name, ok, detail in
+                               run_local.integration_checks(environ, ['demo-retail', 'shop']))
+        ok, detail = results['integrations demo-retail']
+        self.assertIs(False, ok)
+        self.assertIn('telegram.token_env', detail)
+        self.assertIn('platform secret', detail)
+        ok, detail = results['integrations shop']
+        self.assertIs(False, ok)
+        self.assertIn('TENANT_SHOP__', detail)
+        self.assertIn('PLATFORM_SHARED_SECRET_NAMES', detail)
+        self.assertNotIn('NeverPrinted', repr(results))
+
     def test_missing_integration_config_names_both_places(self):
         with tempfile.TemporaryDirectory() as d:
             environ = {'PLATFORM_INTEGRATIONS_FILE': str(Path(d) / 'absent.json'), 'PACKS_DIR': str(REPO / 'packs')}
@@ -130,6 +158,28 @@ class ConversationCheckTests(unittest.TestCase):
     def test_opted_in_loop_passes(self):
         ok, _ = run_local.conversation_check(self.AGENTS, {'llm': {'model': 'claude-opus-5', 'agent_loop_enabled': True}})
         self.assertIs(True, ok)
+
+
+class ApiCommandTests(unittest.TestCase):
+    def test_uvicorn_never_rewrites_the_client_address_from_headers(self):
+        """app/client_ip.py (TRUSTED_PROXIES) must be the ONLY X-Forwarded-For parser.
+
+        uvicorn 0.52 with FORWARDED_ALLOW_IPS='*' takes the LEFT-most hop, which the
+        client writes: the per-IP login throttle would then key on a value the
+        attacker chooses per request.
+        """
+        command = run_local.api_command(8010)
+        self.assertIn('--no-proxy-headers', command)
+        self.assertEqual(['-m', 'uvicorn', 'app.main:app'], command[1:4])
+        self.assertEqual(['--host', '127.0.0.1', '--port', '8010'],
+                         command[command.index('--host'):command.index('--port') + 2])
+
+    def test_the_container_image_also_leaves_forwarded_headers_to_client_ip(self):
+        # The Docker path starts uvicorn itself; without the flag uvicorn rewrites the
+        # peer from X-Forwarded-For before app/client_ip.py (TRUSTED_PROXIES) sees it.
+        dockerfile = (REPO / 'api-python' / 'Dockerfile').read_text(encoding='utf-8')
+        cmd = next(line for line in dockerfile.splitlines() if line.startswith('CMD'))
+        self.assertIn('"--no-proxy-headers"', cmd)
 
 
 class SuperviseTests(unittest.TestCase):

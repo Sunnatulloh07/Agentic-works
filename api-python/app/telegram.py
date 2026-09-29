@@ -8,6 +8,8 @@ import os
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
+from platform_runtime.display_name import clean_display_name
+
 from .pipeline import handle_text_message
 from .security import resolve_webhook_tenant
 
@@ -36,6 +38,18 @@ def message_text(message: dict) -> str:
         if message.get(field):
             return placeholder
     return ""
+
+
+def sender_name(message: dict) -> str:
+    """Bounded display name from ``from`` (first + last name, else @username); '' if none.
+
+    Customer-chosen text: for showing the operator only, never for authorisation.
+    """
+    who = message.get("from")
+    if not isinstance(who, dict):
+        return ""
+    return (clean_display_name(who.get("first_name"), who.get("last_name"))
+            or clean_display_name(who.get("username")))
 
 
 @router.post("/webhooks/telegram")
@@ -74,5 +88,5 @@ async def telegram_webhook(request: Request, tenant: str = "") -> dict:
     sender = str(update.message.get("from", {}).get("id", update.message.get("chat", {}).get("id", "?")))
     return handle_text_message(tenant, "telegram", str(update.update_id),
                                sender, text,
-                               numeric_id=update.update_id,
+                               numeric_id=update.update_id, sender_name=sender_name(update.message),
                                conversation_id=str(update.message.get("chat", {}).get("id", sender)))

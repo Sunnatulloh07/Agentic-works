@@ -6,6 +6,7 @@ Expired planner leases are escalated, not automatically retried. SQL state is
 sole authority; user/model/tool text cannot modify permissions or budgets.
 """
 import json
+import re
 import uuid
 
 from .engine import (OUTBOUND_TOOLS, Conflict, Forbidden, NotFound, RateLimited,
@@ -25,17 +26,38 @@ MAX_STEPS = 12
 MAX_SECONDS = 86400
 MAX_OBSERVATION_BYTES = 12000
 MAX_HISTORY_BYTES = 48000
-PLANNER_LEASE_SECONDS = 60
+# A decision that arrives after its lease is discarded, so the lease must outlive
+# the worst-case planner call: model_transport.MODEL_CALL_DEADLINE_SECONDS (150 s,
+# every attempt and backoff wait included) plus 30 s for connecting and the
+# commit. At 60 s a call delayed by a legitimate retry would be discarded after
+# it was paid for. A run's own wall deadline still caps the lease (see _reserve).
+PLANNER_LEASE_SECONDS = 180
 # The channel of a dashboard run. Any other channel is an inbound conversation
 # turn: the run's authority is the channel sender's, its tasks are submitted under
 # that channel, and it may never send -- the reply is delivered by
 # conversation.ConversationTurns after the run ends, bound to the verified event.
 DASHBOARD_CHANNEL = 'agent'
 MAX_CHANNEL_CHARS = 32
+# A planner that opts in (``planner.supports_repair(tenant)``; the `tools`
+# protocol) gets ONE more call when its decision is rejected for a shape or
+# validation reason -- bad arguments, unknown evidence, a repeated call --
+# with the rejection fed back. The extra call is reserved like any other (one
+# more `calls`, a fresh lease) and fenced again before dispatch; a second
+# rejection escalates exactly as before. Policy refusals are never repaired.
+MAX_DECISION_REPAIRS = 1
+# What the model is told about a rejection is platform text only: an exception
+# message outside this charset (quotes, braces, newlines -- anything that could
+# echo arguments or configuration) is replaced by a fixed sentence.
+REPAIR_REASON = re.compile(r"[A-Za-z0-9 .,:;()'_-]{1,200}")
+GENERIC_REPAIR_REASON = 'Decision failed platform validation'
 
 
 class LoopDecisionError(ValueError):
     pass
+
+
+class ObservationUnavailable(LoopDecisionError):
+    """The run's own history cannot be read. A state fault, never the model's."""
 
 
 class AgentLoop:
@@ -169,20 +191,30 @@ class AgentLoop:
           WHERE l.tenant=? AND l.run_id=? ORDER BY l.position''',
                          (row['tenant'], row['id'])).fetchall()
         if len(rows) != row['steps']:
-            raise LoopDecisionError('Observation history incomplete')
+            raise ObservationUnavailable('Observation history incomplete')
         observations = []
         for item in rows:
             if item['status'] != 'succeeded' or item['task_status'] != 'succeeded':
-                raise LoopDecisionError('Only successful steps are observations')
+                raise ObservationUnavailable('Only successful steps are observations')
             observation = {'evidence_id': 'step:' + item['id'], 'task_id': item['task'],
                            'tool': item['tool'], 'arguments': json.loads(item['args']),
                            'result': json.loads(item['result'])}
             if len(encode(observation).encode('utf-8')) > MAX_OBSERVATION_BYTES:
-                raise LoopDecisionError('Observation exceeds context bound')
+                raise ObservationUnavailable('Observation exceeds context bound')
             observations.append(observation)
         if len(encode(observations).encode('utf-8')) > MAX_HISTORY_BYTES:
-            raise LoopDecisionError('Observation history exceeds context bound')
+            raise ObservationUnavailable('Observation history exceeds context bound')
         return observations
+
+    @staticmethod
+    def _context(row, observations):
+        """The planner's context for the call being reserved; `row` is read before its `calls+1`."""
+        return {'run_id': row['id'], 'agent': row['agent'], 'input': row['input'],
+                'channel': row['channel'],
+                'call_index': row['calls'] + 1,
+                'remaining_steps': row['max_steps'] - row['steps'],
+                'remaining_calls': row['max_calls'] - row['calls'] - 1,
+                'observations': observations}
 
     def _reserve(self, tenant, run_id):
         """Return (changed, reservation). Reserve call budget before the provider."""
@@ -235,13 +267,7 @@ class AgentLoop:
               WHERE tenant=? AND id=?""", (claim, lease, now, tenant, run_id))
             e.audit(c, tenant, row['current_task'], 'agent_run.planner_reserved', row['actor'],
                     {'run': run_id, 'call': row['calls'] + 1})
-            context = {'run_id': run_id, 'agent': row['agent'], 'input': row['input'],
-                       'channel': row['channel'],
-                       'call_index': row['calls'] + 1,
-                       'remaining_steps': row['max_steps'] - row['steps'],
-                       'remaining_calls': row['max_calls'] - row['calls'] - 1,
-                       'observations': observations}
-            return True, {'claim': claim, 'context': context}
+            return True, {'claim': claim, 'context': self._context(row, observations)}
 
     def _decision(self, row, observations, decision):
         if not isinstance(decision, dict) or len(encode(decision).encode('utf-8')) > 20000:
@@ -283,7 +309,10 @@ class AgentLoop:
             raise LoopDecisionError('Unsupported decision action')
         return action
 
-    def _commit(self, tenant, run_id, claim, decision=None, failure=False):
+    def _commit(self, tenant, run_id, claim, decision=None, failure=False, repair=False):
+        """Commit one planner result. Returns True/False, or -- only when `repair`
+        is allowed and the decision was rejected for a repairable reason -- the
+        context of the one repair call, already reserved under the same claim."""
         e = self.engine
         with e.tx() as c:
             row = self._row(c, tenant, run_id)
@@ -303,6 +332,7 @@ class AgentLoop:
                 self._stop(c, row, 'escalated', 'planner_failed_no_retry')
                 return True
             c.execute('SAVEPOINT agent_decision')
+            observations = None
             try:
                 observations = self._observations(c, row)
                 action = self._decision(row, observations, decision)
@@ -329,13 +359,39 @@ class AgentLoop:
                       WHERE tenant=? AND id=?""", (status, answer, encode(evidence), now, tenant, run_id))
                     e.audit(c, tenant, row['current_task'], 'agent_run.' + status, row['actor'],
                             {'run': run_id, 'evidence_ids': evidence})
-            except (ValueError, LookupError, PermissionError, RateLimited):
+            except (ValueError, LookupError, PermissionError, RateLimited) as exc:
                 c.execute('ROLLBACK TO SAVEPOINT agent_decision')
                 c.execute('RELEASE SAVEPOINT agent_decision')
+                if (repair and observations is not None and self._repairable(exc)
+                        and row['calls'] < row['max_calls']):
+                    return self._repair(c, row, observations, decision, exc)
                 self._stop(c, row, 'escalated', 'planner_decision_rejected')
             else:
                 c.execute('RELEASE SAVEPOINT agent_decision')
             return True
+
+    @staticmethod
+    def _repairable(exc):
+        """A rejection of the decision's shape or content, not of policy or state."""
+        return (isinstance(exc, (ValueError, LookupError))
+                and not isinstance(exc, (Conflict, ObservationUnavailable)))
+
+    @staticmethod
+    def _repair_reason(exc):
+        text = str(exc)
+        return text if REPAIR_REASON.fullmatch(text) else GENERIC_REPAIR_REASON
+
+    def _repair(self, c, row, observations, decision, exc):
+        """Reserve the one repair call inside the rejecting transaction: one more
+        `calls` and a fresh lease under the same claim. Nothing else changes."""
+        e = self.engine
+        now = e.clock()
+        reason = self._repair_reason(exc)
+        c.execute('UPDATE p_agent_runs SET calls=calls+1,lease=?,updated=? WHERE tenant=? AND id=?',
+                  (min(row['deadline'], now + PLANNER_LEASE_SECONDS), now, row['tenant'], row['id']))
+        e.audit(c, row['tenant'], row['current_task'], 'agent_run.planner_repair', row['actor'],
+                {'run': row['id'], 'call': row['calls'] + 1, 'reason': reason})
+        return {**self._context(row, observations), 'repair': {'decision': decision, 'error': reason}}
 
     def _planner_dispatch_allowed(self, tenant, run_id, claim):
         # Last local fence. A request already handed to the provider cannot be recalled.
@@ -349,26 +405,74 @@ class AgentLoop:
             self.engine.require_authority(c, tenant, row['channel'], row['actor'])
             return True
 
-    def tick(self, tenant, planner):
-        """Advance at most one run, at most one provider call. No automatic retries."""
+    def _candidates(self, tenant):
         with self.engine.read() as c:
-            candidates = [row['id'] for row in c.execute(
+            return [row['id'] for row in c.execute(
                 """SELECT id FROM p_agent_runs
                    WHERE tenant=? AND status IN (""" + _ACTIVE_PLACEHOLDERS + """)
                    ORDER BY created,id LIMIT 100""", (tenant, *ACTIVE))]
-        for run_id in candidates:
+
+    def reserve_next(self, tenant, skip=()):
+        """Reserve the oldest run due a planner call: (changed, run_id, reservation).
+
+        The worker's planner pool calls this, then hands the reservation to
+        ``plan`` on another thread. Unlike ``tick`` it keeps looking past a run it
+        retired (a deadline, a finished task), and it never touches a run in
+        ``skip`` -- runs the caller is already planning. The SQL claim written by
+        ``_reserve`` is what makes a second reservation of one run impossible.
+        """
+        changed = False
+        for run_id in self._candidates(tenant):
+            if run_id in skip:
+                continue
+            moved, reservation = self._reserve(tenant, run_id)
+            if reservation:
+                return True, run_id, reservation
+            changed = changed or moved
+        return changed, None, None
+
+    @staticmethod
+    def _repairs(planner, tenant):
+        """How many rejected decisions this planner may repair: 0 unless it opts in."""
+        check = getattr(planner, 'supports_repair', None)
+        try:
+            return MAX_DECISION_REPAIRS if check is not None and check(tenant) is True else 0
+        except Exception:
+            return 0
+
+    def plan(self, tenant, run_id, reservation, planner):
+        """Make the one reserved planner call and commit its result. Returns True.
+
+        No SQL transaction is open during the call. A failure is committed as
+        ``planner_failed_no_retry``; transient provider retries, if any, happened
+        inside the planner under the lease. A planner that opts in may get one
+        repair call (see MAX_DECISION_REPAIRS), reserved by ``_commit`` and
+        fenced here again before it is dispatched.
+        """
+        claim = reservation['claim']
+        context = reservation['context']
+        repairs = self._repairs(planner, tenant)
+        while True:
+            try:
+                if not self._planner_dispatch_allowed(tenant, run_id, claim):
+                    self._commit(tenant, run_id, claim, failure=True)
+                    return True
+                decision = planner(tenant, context)
+            except Exception:
+                self._commit(tenant, run_id, claim, failure=True)
+                return True
+            outcome = self._commit(tenant, run_id, claim, decision, repair=repairs > 0)
+            if not isinstance(outcome, dict):
+                return True
+            repairs -= 1
+            context = outcome
+
+    def tick(self, tenant, planner):
+        """Advance at most one run, at most one planner call. No automatic retries."""
+        for run_id in self._candidates(tenant):
             changed, reservation = self._reserve(tenant, run_id)
             if reservation:
-                try:
-                    if not self._planner_dispatch_allowed(tenant, run_id, reservation['claim']):
-                        self._commit(tenant, run_id, reservation['claim'], failure=True)
-                        return True
-                    decision = planner(tenant, reservation['context'])
-                except Exception:
-                    self._commit(tenant, run_id, reservation['claim'], failure=True)
-                else:
-                    self._commit(tenant, run_id, reservation['claim'], decision)
-                return True
+                return self.plan(tenant, run_id, reservation, planner)
             if changed:
                 return True
         return False

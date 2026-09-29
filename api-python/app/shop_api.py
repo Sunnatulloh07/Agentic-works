@@ -19,6 +19,7 @@ import re
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from .packs import PackError, load_pack
 from .platform_api import engine, identity
@@ -135,21 +136,84 @@ MAX_CONVERSATION_ID_CHARS = 256
 
 
 @router.get('/{tenant}/handoffs')
-def shop_handoffs(tenant: str, request: Request):
-    """What the bot passed to a human (conversation.handoff records), newest first."""
+def shop_handoffs(tenant: str, request: Request, status: Literal['open', 'resolved', 'all'] = 'open'):
+    """What the bot passed to a human (conversation.handoff records), newest first.
+
+    ``resolved`` is an operator's mark (POST .../resolve), kept beside the record; a
+    later handoff on the same conversation is its own record and is open again.
+    Default ``open``: the ones still waiting for a person."""
     from platform_runtime.conversation import HANDOFF_KIND
     identity(request, tenant, OPERATORS)
+    where = {'open': ' AND x.handoff_id IS NULL', 'resolved': ' AND x.handoff_id IS NOT NULL', 'all': ''}[status]
     with engine().read() as c:
-        rows = c.execute('SELECT id,body,created FROM p_records WHERE tenant=? AND kind=? '
-                         'ORDER BY created DESC,id DESC LIMIT ?',
+        rows = c.execute('SELECT r.id,r.body,r.created,x.actor resolved_by,x.created resolved_at '
+                         'FROM p_records r LEFT JOIN p_handoff_resolutions x '
+                         'ON x.tenant=r.tenant AND x.handoff_id=r.id '
+                         'WHERE r.tenant=? AND r.kind=?' + where + ' ORDER BY r.created DESC,r.id DESC LIMIT ?',
                          (tenant, HANDOFF_KIND, MAX_SHOP_ROWS)).fetchall()
     out = []
     for r in rows:
         body = _json(r['body'], {})
         out.append({'id': r['id'], 'created': r['created'], 'text': _text(body.get('text'))[0],
                     **{k: str(body.get(k, ''))[:MAX_CONVERSATION_ID_CHARS]
-                       for k in ('channel', 'event_key', 'conversation_id', 'reason', 'agent')}})
-    return {'handoffs': out}
+                       for k in ('channel', 'event_key', 'conversation_id', 'reason', 'agent')},
+                    'resolved': r['resolved_at'] is not None,
+                    'resolved_by': str(r['resolved_by'] or '')[:MAX_CONVERSATION_ID_CHARS],
+                    'resolved_at': r['resolved_at']})
+    return {'handoffs': out, 'status': status}
+
+
+class Resolution(BaseModel):
+    note: str = Field('', max_length=500)
+
+
+@router.post('/{tenant}/handoffs/{handoff_id}/resolve')
+def shop_handoff_resolve(tenant: str, handoff_id: str, request: Request, req: Resolution | None = None):
+    """A person handled this handoff. Idempotent; also closes older open ones of its chat."""
+    from platform_runtime.conversation import resolve_handoff
+    from platform_runtime.engine import Forbidden
+    who = identity(request, tenant, OPERATORS)
+    if not request.headers.get('Idempotency-Key', ''):
+        raise HTTPException(422, 'Idempotency-Key header required')
+    try:
+        done = resolve_handoff(engine(), tenant, handoff_id, who['sub'], req.note if req else '')
+    except Forbidden:
+        raise HTTPException(403, 'Policy denied') from None
+    if done is None:
+        raise HTTPException(404, 'Handoff not found')
+    return done
+
+
+def _linked_name(c, tenant, channel, sender):
+    """Customer 360 name for a sender the shop has linked on this channel, else ''.
+
+    Only the channel identity decides; verified links win over unverified ones."""
+    if not sender:
+        return ''
+    row = c.execute(
+        '''SELECT p.display_name FROM p_channel_identities i
+           JOIN p_customers p ON p.id=i.customer_id AND p.tenant=i.tenant
+           WHERE i.tenant=? AND i.channel=? AND i.external_id=? AND p.status!='deleted'
+           ORDER BY i.verified DESC,i.created LIMIT 1''', (tenant, channel, sender)).fetchone()
+    return str(row['display_name'])[:MAX_CONVERSATION_ID_CHARS] if row else ''
+
+
+def _sender_name(c, tenant, channel, conversation_id):
+    """The name the customer gave the channel (Telegram profile, WhatsApp profile name).
+
+    The latest turn whose inbound event carried one. Customer-chosen text: it is
+    cleaned again here, shown as text, and never used to identify anyone."""
+    from platform_runtime.display_name import clean_display_name
+    row = c.execute(
+        """SELECT COALESCE(NULLIF(json_extract(e.payload,'$.sender_name'),''),
+                           json_extract(e.payload,'$.profile_name')) name
+           FROM p_conversation_turns t JOIN p_events e
+             ON e.tenant=t.tenant AND e.channel=t.channel AND e.event_key=t.event_key
+           WHERE t.tenant=? AND t.channel=? AND t.conversation_id=?
+             AND COALESCE(NULLIF(json_extract(e.payload,'$.sender_name'),''),
+                          NULLIF(json_extract(e.payload,'$.profile_name'),'')) IS NOT NULL
+           ORDER BY t.created DESC,t.rowid DESC LIMIT 1""", (tenant, channel, conversation_id)).fetchone()
+    return clean_display_name(row['name']) if row else ''
 
 
 @router.get('/{tenant}/conversations')
@@ -173,10 +237,12 @@ def shop_conversations(tenant: str, request: Request):
                 'SELECT status,error,sender FROM p_conversation_turns WHERE tenant=? AND channel=? '
                 'AND conversation_id=? ORDER BY created DESC,rowid DESC LIMIT 1',
                 (tenant, r['channel'], r['conversation_id'])).fetchone()
+            sender = turn['sender'] if turn else ''
             out.append({'channel': r['channel'], 'conversation_id': r['conversation_id'],
                         'last_role': r['role'], 'last_text': _text(r['text'])[0], 'last_at': r['created'],
                         'turn_status': turn['status'] if turn else '', 'turn_error': turn['error'] if turn else '',
-                        'sender': turn['sender'] if turn else '',
+                        'sender': sender, 'customer_name': _linked_name(c, tenant, r['channel'], sender),
+                        'sender_name': _sender_name(c, tenant, r['channel'], r['conversation_id']),
                         'takeover': takeover_state(c, tenant, r['channel'], r['conversation_id'], now)})
     return {'conversations': out}
 
@@ -194,6 +260,7 @@ def shop_conversation(tenant: str, channel: str, conversation_id: str, request: 
     e = engine()
     with e.read() as c:
         takeover = takeover_state(c, *key, e.clock())
+        sender_name = _sender_name(c, *key)
         history = [dict(r) for r in c.execute(
             'SELECT seq,role,text,created FROM p_conversation_history WHERE tenant=? AND channel=? '
             'AND conversation_id=? ORDER BY seq', key)]
@@ -224,7 +291,8 @@ def shop_conversation(tenant: str, channel: str, conversation_id: str, request: 
     for turn in turns:
         turn['reply'] = _text(turn['reply'])[0]
     return {'channel': channel, 'conversation_id': conversation_id, 'history': history,
-            'turns': turns, 'operator_replies': replies, 'takeover': takeover}
+            'turns': turns, 'operator_replies': replies, 'takeover': takeover,
+            'sender_name': sender_name}
 
 
 @router.post('/{tenant}/conversations/{channel}/{conversation_id}/release')
@@ -261,16 +329,21 @@ def _credential_refs(block, scoped=False):
 @router.get('/{tenant}/channels')
 def shop_channels(tenant: str, request: Request):
     identity(request, tenant, INTEGRATORS)
-    from platform_runtime.tools import IntegrationNotConfigured, config
+    from platform_runtime.tools import IntegrationNotConfigured, integration_status
     try:
-        cfg = config(tenant)
+        # Never resolves a credential: only names, and whether each is set.
+        cfg, violations = integration_status(tenant)
     except IntegrationNotConfigured:
         # "Not configured" is a status to show; an unreadable file is an error.
-        cfg = {}
+        cfg, violations = {}, []
     except RuntimeError:
         raise HTTPException(503, 'Integration configuration unavailable')
     except (ValueError, OSError):
         raise HTTPException(503, 'Integration configuration unavailable')
+    # One name the tenant may not use makes config() refuse its whole file, so no
+    # channel is ready; each says which key, never a value, and a disallowed name
+    # is not probed for presence.
+    denied = {name for _, name, _ in violations}
     out = []
     for channel in CHANNELS:
         blocks = [(name, cfg.get(name)) for name in CHANNEL_BLOCKS[channel]]
@@ -278,9 +351,14 @@ def shop_channels(tenant: str, request: Request):
         refs = []
         for name, block in present:
             for ref in _credential_refs(block, scoped=name == 'whatsapp_tokens'):
-                if ref not in refs:
+                if ref not in refs and ref not in denied:
                     refs.append(ref)
         creds = [{'env': ref, 'set': bool(os.environ.get(ref))} for ref in refs]
+        paths = [path for path, _, _ in violations if path.split('.', 1)[0] in CHANNEL_BLOCKS[channel]]
+        paths = paths or [path for path, _, _ in violations][:1]
+        problem = ('misconfigured: credential name not allowed for this tenant ('
+                   + ', '.join(p[:120] for p in paths[:5]) + ')') if paths else ''
         out.append({'channel': channel, 'configured': bool(present), 'credentials': creds,
-                    'ready': bool(present) and bool(creds) and all(x['set'] for x in creds)})
+                    'ready': bool(present) and bool(creds) and all(x['set'] for x in creds) and not violations,
+                    'problem': problem})
     return {'channels': out}

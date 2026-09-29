@@ -747,6 +747,30 @@ class BriefingTests(unittest.TestCase):
 
     # ----------------------------------------------------------------- dispatch
 
+    def test_a_blank_identifier_is_refused(self):
+        # The same bug reengagement.py had: the RAW value was tested for emptiness and
+        # the TRIMMED one returned, so ' ' passed a guard that says "is required".
+        from platform_runtime import briefing as B
+        for value in (' ', '   ', '\t', '\n', '\r\n'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                B._identifier(value, 'agent', 128)
+        with self.assertRaises(ValueError):
+            B._identifier('', 'agent', 128)
+        self.assertEqual('a', B._identifier('  a  ', 'agent', 128))
+        with self.assertRaises(ValueError):
+            B._identifier('a' * 128 + ' ' * 10, 'agent', 128)  # the bound stays on the raw value
+
+    def test_a_blank_field_is_refused_through_configure(self):
+        for field in ('agent', 'recipient', 'connection', 'actor'):
+            with self.subTest(field=field):
+                args = {'agent': AGENT, 'recipient': RECIPIENT, 'connection': CONNECTION, 'actor': OWNER}
+                args[field] = ' '
+                with self.assertRaises(ValueError):
+                    self.briefing.configure(TENANT, 'blank', args['agent'], args['recipient'],
+                                            args['connection'], args['actor'], sections=SECTIONS)
+        with self.assertRaises(ValueError):
+            self.configure(sections=[{'entity': 'order', 'attribute': 'status', 'equals': ' '}])
+
     def test_a_schedule_can_be_disabled_at_configure_time(self):
         self.configure(enabled=False)
         self.due()

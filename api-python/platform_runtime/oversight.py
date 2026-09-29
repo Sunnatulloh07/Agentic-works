@@ -188,8 +188,10 @@ def cost(engine, tenant, agent, since_seconds=DEFAULT_WINDOW_SECONDS):
             (tenant,)).fetchone()
     by_status = {row['status']: {'calls': row['n'], 'amount_micro': row['total']}
                  for row in ledger}
-    inflight = sum(item['amount_micro'] for status, item in by_status.items()
-                   if status in {'reserved', 'dispatching', 'uncertain'})
+    # usage_budget.HELD is the one list of statuses whose money is still held
+    # (including 'unreconciled': slot freed, amount not yet decided).
+    from .usage_budget import HELD
+    inflight = sum(item['amount_micro'] for status, item in by_status.items() if status in HELD)
     return {
         'agent': agent, 'since': since, 'until': now,
         'attribution': 'agent_run_window',

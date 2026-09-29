@@ -236,6 +236,41 @@ class RoutingTests(Base):
             f'      phone_number_id: "{NUMBER}"\n', encoding='utf-8')
         self.assertEqual(['kids', T], whatsapp_inbound.tenants_for_phone_number(NUMBER))
 
+    def test_several_numbers_are_resolved_in_one_pass_over_the_tenants(self):
+        tenant = self.packs / 'kids'
+        tenant.mkdir()
+        (tenant / 'integrations.yaml').write_text(
+            'whatsapp:\n  registers:\n    main:\n      connection: whatsapp\n'
+            f'      phone_number_id: "{OTHER_NUMBER}"\n', encoding='utf-8')
+        read = []
+        real = whatsapp.whatsapp_config
+        with patch.object(whatsapp, 'whatsapp_config', side_effect=lambda t: read.append(t) or real(t)):
+            owners = whatsapp_inbound.number_owners([NUMBER, OTHER_NUMBER, '12 34', None, '999'])
+        self.assertEqual({NUMBER: [T], OTHER_NUMBER: ['kids'], '999': []}, owners)
+        self.assertEqual(['kids', T], read)  # each tenant read once, not once per number
+        self.assertEqual(['kids', T], whatsapp_inbound.tenants_for_phone_numbers([NUMBER, OTHER_NUMBER]))
+        self.assertEqual({}, whatsapp_inbound.number_owners(['x', None]))
+        self.assertEqual(3, whatsapp_inbound.MAX_ROUTED_NUMBERS)
+
+    def test_an_unreadable_tenant_configuration_refuses_routing_by_name_and_type(self):
+        """Skipping it made that tenant's number 'unknown': acknowledged, never retried."""
+        tenant = self.packs / 'kids'
+        tenant.mkdir()
+        target = tenant / 'integrations.yaml'
+        for body, kind in (('whatsapp:\n  registers:\n    main: {connection: whatsapp, '
+                            'phone_number_id: "12ab-SECRET"}\n', 'ValueError'),
+                           ('whatsapp: [unclosed\n', 'RuntimeError')):
+            with self.subTest(kind=kind):
+                target.write_text(body, encoding='utf-8')
+                with self.assertRaises(whatsapp_inbound.RoutingUnavailable) as caught:
+                    whatsapp_inbound.number_owners([NUMBER])
+                self.assertEqual(('kids', kind), (caught.exception.source, caught.exception.error))
+                self.assertNotIn('SECRET', str(caught.exception))
+        target.unlink()
+        self.cfg.write_text('{not json', encoding='utf-8')
+        with self.assertRaises(whatsapp_inbound.RoutingUnavailable):
+            whatsapp_inbound.number_owners([NUMBER])
+
     def test_the_app_secret_defaults_to_meta_app_secret_and_a_tenant_may_override(self):
         self.assertEqual(SECRET, whatsapp_inbound.app_secret_for(None))
         self.assertEqual(SECRET, whatsapp_inbound.app_secret_for(T))
@@ -420,6 +455,60 @@ class SendGateTests(Base):
         self.accept(message(sender='998901234567'))
         self.send({'register': 'shop', 'contact': 'ali', 'text': 'Salom Ali'})
         self.assertEqual('998901234567', self.posts[0]['body']['to'])
+
+
+class WindowScopeTests(Base):
+    """whatsapp.window on a customer's own conversation reads that customer only.
+
+    Unscoped, a model answering one customer could list every declared contact's
+    window -- who wrote to the shop, and when -- into its context and its reply.
+    """
+    ALI, VALI = '998901234567', '998907654321'
+
+    def setUp(self):
+        super().setUp()
+        self.policy['tools'].append('whatsapp.window')
+        self.write_config(registers={'shop': {'connection': 'whatsapp', 'phone_number_id': NUMBER,
+                                              'contacts': {'ali': self.ALI, 'vali': self.VALI}}})
+        self.accept(message(sender=self.ALI))
+
+    def step(self, channel, key, actor, contact='ali'):
+        args = {'contact': contact} if contact else {}
+        tid = self.e.submit(T, channel, key, AGENT, [{'tool': 'whatsapp.window', 'args': args}], actor)
+        return self.e.get(T, tid)['steps'][0]['id']
+
+    def window(self, step, contact='ali'):
+        return whatsapp.window(self.e, T, AGENT, step, contact=contact)
+
+    def test_the_conversations_own_contact_is_answered(self):
+        for key in ('wamid.C1', 'agent-run:r1:0'):  # the event's plan, and a turn's run step
+            with self.subTest(key=key):
+                report = self.window(self.step('whatsapp', key, self.ALI))
+                [row] = report['registers'][0]['contacts']
+                self.assertEqual(('ali', True), (row['contact'], row['open']))
+
+    def test_another_customers_window_is_refused(self):
+        with self.assertRaises(Forbidden):
+            self.window(self.step('whatsapp', 'agent-run:r1:0', self.ALI, 'vali'), 'vali')
+
+    def test_a_conversation_step_must_name_its_contact(self):
+        with self.assertRaises(Forbidden):
+            self.window(self.step('whatsapp', 'agent-run:r1:0', self.ALI, ''), '')
+
+    def test_a_customer_on_another_channel_reads_no_whatsapp_window(self):
+        for channel in ('telegram', 'instagram'):
+            with self.subTest(channel=channel), self.assertRaises(Forbidden):
+                self.window(self.step(channel, 'agent-run:r1:0', self.ALI), 'ali')
+
+    def test_the_dashboard_still_sees_every_declared_contact(self):
+        report = self.window(self.step('web', 'dash-1', 'owner', ''), '')
+        self.assertEqual(['ali', 'vali'], [row['contact'] for row in report['registers'][0]['contacts']])
+
+    def test_through_the_engine_a_cross_customer_read_fails_the_step(self):
+        step = self.step('whatsapp', 'agent-run:r2:0', self.ALI, 'vali')
+        self.assertTrue(self.e.tick(T))
+        [row] = self.rows('SELECT status,error FROM p_steps WHERE id=?', step)
+        self.assertEqual(('failed', 'Forbidden'), (row['status'], row['error']))
 
 
 class ProviderVerdictTests(Base):

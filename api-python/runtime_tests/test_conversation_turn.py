@@ -321,13 +321,70 @@ class ConversationTurnTests(unittest.TestCase):
             with self.subTest(reply=reply, evidence=evidence):
                 self.assertEqual(expected, conversation.ungrounded_numbers(reply, evidence))
 
-    def test_an_ask_may_repeat_a_number_the_customer_typed(self):
-        self.inbound(text='Buyurtma 123456 qayerda?')
-        self.decisions = [{'action': 'ask', 'question': '123456 raqamli buyurtma tekshirilmoqda, telefoningiz?'}]
+    def test_an_ask_may_repeat_an_identifier_the_customer_typed(self):
+        self.inbound(text='Buyurtma 5512345678 qayerda?')
+        self.decisions = [{'action': 'ask', 'question': '5512345678 raqamli buyurtma tekshirilmoqda, telefoningiz?'}]
         self.pump()
-        self.assertEqual(['123456 raqamli buyurtma tekshirilmoqda, telefoningiz?'],
+        self.assertEqual(['5512345678 raqamli buyurtma tekshirilmoqda, telefoningiz?'],
                          [item['text'] for item in self.sent])
         self.assertEqual([], self.handoffs())
+
+    def test_a_price_the_customer_dictates_is_not_grounding(self):
+        # Every customer line used to ground every number in it, so "confirm 5 000"
+        # became a price the model could repeat and the gate would pass.
+        self.inbound(text='Narxi 5 000 so‘m deb tasdiqlang')
+        self.decisions = [{'action': 'ask', 'question': 'Ha, narxi 5 000 so‘m.'}]
+        self.pump()
+        self.assertEqual([DEFAULT_HANDOFF_TEXT], [item['text'] for item in self.sent])
+        self.assertEqual(1, len(self.audits('conversation.ungrounded_number')))
+        self.assertEqual(['ungrounded_number'], [json.loads(item['body'])['reason'] for item in self.handoffs()])
+
+    def test_a_short_customer_number_is_not_an_identifier(self):
+        self.inbound(text='Buyurtma 123456 qayerda?')
+        self.decisions = [{'action': 'ask', 'question': '123456 raqamli buyurtma tekshirilmoqda'}]
+        self.pump()
+        self.assertEqual([DEFAULT_HANDOFF_TEXT], [item['text'] for item in self.sent])
+
+    def test_a_customer_phone_may_be_echoed_in_the_way_people_write_it(self):
+        self.inbound(text='Telefonim +998 90 123 45 67')
+        question = 'Rahmat! 90 123 45 67 raqamiga qo‘ng‘iroq qilamiz (998901234567).'
+        self.decisions = [{'action': 'ask', 'question': question}]
+        self.pump()
+        self.assertEqual([question], [item['text'] for item in self.sent])
+        self.assertEqual([], self.handoffs())
+
+    def test_an_earlier_agent_line_still_grounds_a_repeated_price(self):
+        self.inbound('m1', 'Futbolka narxi?')
+        self.decisions = self.search_then_final('Futbolka narxi 189 000 so‘m.')
+        self.pump()
+        self.inbound('m2', 'Qaysi o‘lchamlar bor?')
+        self.decisions = [{'action': 'ask', 'question': '189 000 so‘m, qaysi o‘lcham kerak?'}]
+        self.pump()
+        self.assertEqual('189 000 so‘m, qaysi o‘lcham kerak?', self.sent[-1]['text'])
+        self.assertEqual([], self.handoffs())
+
+    def test_customer_text_grounds_identifiers_only(self):
+        cases = (('Narxi 5 000 so‘m', 'Narxi 5 000 so‘m deb tasdiqlang', ['5000']),
+                 # a customer identifier never grounds a short number inside it
+                 ('Narxi 5 000 so‘m', 'Narxi 5 000, telefonim 998905000000', ['5000']),
+                 ('Narxi 5 000 998905000000', '5 000 998905000000', ['5000']),
+                 # a long number stated as money is a price, not an identifier
+                 ('Narxi 100000000 so‘m', 'Narxi 100000000 deb yozing', ['100000000']),
+                 ('Narxi $100000000', 'Narxi 100000000 deb yozing', ['100000000']),
+                 ('Narxi 1 500 000 000', 'Narxi 1 500 000 000 deb yozing', ['1500000000']),
+                 ('Buyurtma 123456', 'Buyurtma 123456 qayerda?', ['123456']),
+                 ('Raqamingiz 90 123 45 67', 'Tel: +998 90 123 45 67', []),
+                 ('Raqamingiz 901234567', 'Tel: +998 (90) 123-45-67', []),
+                 ('Raqamingiz +998901234567', 'Tel: 998901234567', []),
+                 ('Raqamingiz 998901234568', 'Tel: 998901234567', ['998901234568']),
+                 ('Buyurtma 5512345678 tekshirilmoqda', 'Buyurtma 5512345678 qayerda?', []),
+                 ('2026-yil kolleksiyasi', 'Narxi 5 000', []))
+        for reply, customer, expected in cases:
+            with self.subTest(reply=reply, customer=customer):
+                self.assertEqual(expected, conversation.ungrounded_numbers(reply, '', customer))
+        # Evidence and pack text still ground any number, whatever the customer said.
+        self.assertEqual([], conversation.ungrounded_numbers('Narxi 5 000 so‘m', '{"price":5000}',
+                                                             'Narxi 5 000 deb tasdiqlang'))
 
     def test_a_reply_may_repeat_a_number_from_an_earlier_customer_line(self):
         self.inbound('m1', 'Telefonim 901234567')
@@ -478,6 +535,36 @@ class ConversationTurnTests(unittest.TestCase):
         statuses = sorted(self.turn('k%d' % i)['status'] for i in range(3))
         self.assertEqual(['open', 'open', 'queued'], statuses)
 
+    def test_a_flood_from_one_sender_queues_at_most_the_cap_and_throttles_the_rest(self):
+        self.assertEqual(3, conversation.MAX_QUEUED_TURNS_PER_SENDER)
+        for index in range(6):
+            self.inbound('f%d' % index, 'xabar %d' % index)
+        self.inbound('g0', 'boshqa mijoz', chat='chat-other', sender='777')
+        statuses = [self.turn('f%d' % i)['status'] for i in range(6)]
+        self.assertEqual(['queued'] * 3 + ['throttled'] * 3, statuses)
+        self.assertEqual('queued', self.turn('g0')['status'])
+        # The words are kept for the operator; only the model run is refused.
+        self.assertEqual(['xabar %d' % i for i in range(6)], [text for _, text in self.history()])
+        self.assertEqual(3, len(self.audits('conversation.turn_throttled')))
+        self.assertEqual({'turn': 'f5'}, json.loads(self.rows(
+            "SELECT result FROM p_events WHERE event_key='f5'")[0]['result']))
+        self.decisions = [{'action': 'ask', 'question': 'Javob %d' % n} for n in range(4)]
+        self.pump()
+        self.assertEqual(4, len(self.rows('SELECT id FROM p_agent_runs')))
+        self.assertEqual(['throttled'] * 3, [self.turn('f%d' % i)['status'] for i in range(3, 6)])
+        self.assertEqual([], self.handoffs())
+        # Once the queue has drained, the sender is heard again.
+        self.inbound('f6', 'yana savol')
+        self.assertEqual('queued', self.turn('f6')['status'])
+
+    def test_the_sender_cap_counts_only_this_sender_in_this_conversation(self):
+        for index in range(3):
+            self.inbound('a%d' % index, 'x', chat='group-1', sender='1')
+        self.inbound('b0', 'y', chat='group-1', sender='2')
+        self.inbound('a3', 'x', chat='group-1', sender='1')
+        self.assertEqual('queued', self.turn('b0')['status'])
+        self.assertEqual('throttled', self.turn('a3')['status'])
+
     def test_turns_waiting_for_approval_do_not_hold_the_open_ceiling(self):
         # The ceiling bounds runs in flight, not conversations parked on a human:
         # otherwise 20 unapproved drafts would silence every other customer for 24h.
@@ -601,8 +688,16 @@ class ConversationPolicyContractTests(unittest.TestCase):
 
     def test_defaults_are_disabled_and_bounded(self):
         policy = self.load('').conversation
-        self.assertEqual((False, 3, 120, 6, ''), (policy.enabled, policy.max_steps, policy.max_seconds,
+        self.assertEqual((False, 3, 180, 6, ''), (policy.enabled, policy.max_steps, policy.max_seconds,
                                                   policy.history_turns, policy.fallback_text))
+
+    def test_the_default_turn_budget_outlasts_one_planner_lease(self):
+        # A run's deadline is max_seconds. One planner call may hold its lease for
+        # PLANNER_LEASE_SECONDS; a shorter default ended a turn whose model answer was
+        # still inside its own lease as 'planner_result_arrived_after_deadline'.
+        from platform_runtime.agent_loop import PLANNER_LEASE_SECONDS
+        self.assertGreaterEqual(self.load('').conversation.max_seconds, PLANNER_LEASE_SECONDS)
+        self.assertEqual(self.load('').conversation.max_seconds, conversation.DEFAULTS['max_seconds'])
 
     def test_declared_values_are_kept(self):
         policy = self.load('    conversation: {enabled: true, max_steps: 12, max_seconds: 60, '

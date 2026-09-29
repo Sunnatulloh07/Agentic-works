@@ -33,6 +33,14 @@ export class SessionClient {
     }
     this.base = base.replace(/\/$/, ''); this.fetcher=fetcher; this.now=now;
     this.session=null; this.epoch=0; this.pending=null;
+    // Called once when the server ends the session (failed refresh or a 401), never on
+    // an explicit login/logout, so the UI can return to sign-in instead of a dead page.
+    this.onExpired=null;
+  }
+  expire(err, epoch) {
+    if (epoch !== this.epoch) return;
+    this.clear();
+    try { this.onExpired?.(err); } catch { /* a listener cannot break the request path */ }
   }
   clear() { this.epoch++; this.session=null; this.pending=null; }
   install(tokens, epoch) {
@@ -46,7 +54,10 @@ export class SessionClient {
     method=method || (body===undefined?'GET':'POST');
     if(!['GET','POST','PUT','PATCH','DELETE'].includes(method) || (method==='GET' && body!==undefined))throw new Error('API metodi yaroqsiz');
     const extra=checkedHeaders(headers);
-    const response=await this.fetcher(this.base+path, {
+    // Called unbound: `this.fetcher(...)` would run the browser's fetch with `this` set to
+    // this client, which browsers reject as an illegal invocation.
+    const fetcher=this.fetcher;
+    const response=await fetcher(this.base+path, {
       method, credentials:'omit', cache:'no-store', redirect:'error',
       headers:{'Content-Type':'application/json',...extra,...(token?{Authorization:'Bearer '+token}:{})},
       ...(body===undefined?{}:{body:JSON.stringify(body)})
@@ -76,7 +87,7 @@ export class SessionClient {
       const epoch=this.epoch; const raw=this.session.refresh_token;
       const job=this.send('/identity/refresh',{refresh_token:raw}).then(tokens=>{
         this.install(tokens,epoch); return tokens.access_token;
-      }).catch(err=>{if(epoch===this.epoch)this.clear();throw err;});
+      }).catch(err=>{this.expire(err,epoch);throw err;});
       this.pending=job;
       job.finally(()=>{if(this.pending===job)this.pending=null;}).catch(()=>{});
     }
@@ -90,7 +101,7 @@ export class SessionClient {
       if(epoch!==this.epoch)throw new Error('Session o‘zgargan');
       return result;
     } catch(err) {
-      if(err.status===401 && epoch===this.epoch)this.clear();
+      if(err.status===401)this.expire(err,epoch);
       throw err; // Never retry side-effecting POST requests on auth/network failure.
     }
   }

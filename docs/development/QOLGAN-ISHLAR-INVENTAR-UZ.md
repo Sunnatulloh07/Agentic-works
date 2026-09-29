@@ -253,7 +253,7 @@ erkin matn (foydalanuvchi ID). Bu ma’lum cheklov, panelda yozilgan.
 | `windows_desktop` | **TODO** | Runner + native adapterlar |
 | `telephony_outbound` | **STAGE_C_LOCAL_CONTRACT_TESTED** | Dialer, SIP, codec, concurrent slot |
 | `wa_window_until_graph_attribute` | **INVESTIGATED_REFUSED** | Ataylab rad etilgan |
-| `ui_dependency_security` | **FAIL (yangi)** | `next@14.2.35` da 1 critical + 1 high; tuzatish **Next ≥15.5.24 + React 19** talab qiladi |
+| `ui_dependency_security` | **PASS** (2026-09-25) | `next@16.3.6` + `react@19.3.0`; `npm audit --audit-level=high` → 0 vulnerabilities. Eski `next@14.2.35` zaifliklari yopildi |
 
 
 **`windows_desktop` muhim izoh:** hozirgi lokal-executor xavfsizlik shartnomasi
@@ -360,16 +360,16 @@ ham yopiq turgan.
 
 | Savol | Javob |
 |---|---|
-| Offline to'plam (`runtime_tests`) | **3 148 sinov**, `failures=1, errors=12, skipped=1` |
+| Offline to'plam (`runtime_tests`) | **3 651 sinov** (2026-09-26), `failures=1, errors=12, skipped=1` |
 | Windows uchun bloklangan | **13** (12 error + 1 failure) — `test_platform_baseline.py` qadaydi |
 | Eng katta **yagona** sabab | `os.O_NOFOLLOW` — **6 tasi** |
 | Ikkinchi sabab (nomi yo'q edi) | `symlink_privilege` (`OSError`, `WinError 1314`) — **2 tasi** |
 | Sabab **haqiqatan sabab**mi? | ha — `test_each_recorded_reason_is_the_actual_cause` har bir bloklangan sinovni **yurgizib**, ko'tarilgan istisnoni qatordagi sababga solishtiradi |
-| `integration_tests` | **95 sinov, 95 pass, 50 s** — ilgari **yig'ilmasdi** (`conftest.py` qo'shildi) |
+| `integration_tests` | **357 sinov, 357 pass** (2026-09-27) — ilgari **yig'ilmasdi** (`conftest.py` qo'shildi); legacy to'plamdan ko'chirilgan 5 fayl shu songa kiradi |
 | `integration_tests` gate'da | **yo'q** — FastAPI/HTTPX talab qiladi, offline Computer'da yurmaydi |
 | **`api-python/tests/`** | **33 qizil, 172 pass, 4 skip** — va uni **hech bir gate yurgizmaydi**. Qaror qabul qilindi: **nafaqaga chiqarish jarayonda** |
 | CI `http` job | endi **yig'iladi** — `integration_tests/conftest.py` `ENV` va `ALLOW_INSECURE_DEV` ni qo'yib, collection ordering bog'liqligini yo'q qildi |
-| CI `ui_dependency_security` job | **hamon FAIL** — `next@14.2.35` da 1 critical + 1 high; Next 15 + React 19 kerak |
+| CI `ui_dependency_security` job | **PASS** — `npm audit --audit-level=high` → 0 vulnerabilities (`next@16.3.6` + `react@19.3.0`, 2026-09-25) |
 | POSIX'da yurishimi | CI (`ubuntu-latest`) shu 13 sinovni **yurgizadi**; lokal POSIX o'lchovi olinmagan |
 | **Node runner** (`apps/runner/test.js`) | **11 / 31 qizil** Windows'da (2026-09-25 o'lchovi; ilgari 11/24 deb yozilgan edi, to'plam o'sgan). Uch sabab: `execute()` Linux'da bo'lmaganda rad etadi (5), `symlink` EPERM (2), POSIX ruxsat bitlari (4). **Endi qadalgan**: `apps/runner/windows-baseline.test.js` har bir sababni **yurgizib** tasdiqlaydi va 11 ta nomni `test.js`da qidiradi |
 | `verify_offline.py` | endi **tugatadi** (§155) va noto'g'ri interpreter bilan ishga tushirilsa **rad etadi** (§156.10); Windows'da `python_runtime` va `node_runner` endi **`PASS_WITH_RECORDED_BLOCKED`** — qizil to'plam qayd etilgan platforma yuzasi bilan solishtiriladi (`test_platform_baseline.BLOCKED`, `windows-baseline.test.js`), **yangi qizil = FAIL** (§162). **§165 da ikki job qo'shildi:** `manifest_integrity` — **birinchi** qadam, haqiqiy `MANIFEST.sha256`ni tekshiradi (ilgari faqat manifest *tooling*'ining unit testlari yurardi, shuning uchun manifest eskirgan bo'lsa ham darvoza yashil edi) va `measure_reachability` — headline coverage raqamini har yurishda qayta hisoblaydi |

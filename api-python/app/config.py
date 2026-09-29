@@ -44,6 +44,20 @@ def validate_runtime_config(env: Mapping[str, str] | None = None) -> RuntimeConf
         parse_trusted_proxies(values.get("TRUSTED_PROXIES", ""))
     except ProxyConfigError as exc:
         raise ConfigError(str(exc)) from None
+    # uvicorn'ning o‘z proxy qatlami '*' bilan har kimdan X-Forwarded-For qabul qiladi
+    # va CHAPdagi hop’ni oladi -- uni mijoz yozadi, ya’ni per-IP throttle kaliti
+    # hujumchi tanlagan qiymat bo‘lib qoladi. Yagona XFF o‘quvchisi app/client_ip.py.
+    if "*" in (part.strip() for part in values.get("FORWARDED_ALLOW_IPS", "").split(",")):
+        raise ConfigError("FORWARDED_ALLOW_IPS='*' ruxsat etilmaydi: uvicorn’ni --no-proxy-headers "
+                          "bilan ishga tushiring va proxy manzillarini TRUSTED_PROXIES ga yozing")
+    # Pack ichidagi integrations.yaml o‘z TENANT_<NOM>__ nom maydonidan tashqaridagi env
+    # nomini faqat shu ro‘yxat orqali o‘qiy oladi. Ro‘yxatdagi platforma siri uni har bir
+    # pack’ka ochib bergan bo‘lardi, shuning uchun xato birinchi so‘rovda emas, startup’da.
+    from platform_runtime.tools import CredentialScopeError, shared_secret_names
+    try:
+        shared_secret_names(values)
+    except CredentialScopeError as exc:
+        raise ConfigError(str(exc)) from None
     if not production and values.get("ALLOW_INSECURE_DEV", "").lower() == "true":
         return RuntimeConfig(
             environment=environment,

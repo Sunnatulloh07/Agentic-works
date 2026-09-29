@@ -10,7 +10,7 @@ GET  /platform/{tenant}/erp/postings?status=uncertain|unconfirmed|posting|failed
   module's public surface for one filtered read.
 
 POST /platform/{tenant}/erp/postings/{posting_id}/reconcile
-  body {"outcome": "posted"|"failed", "evidence": 1..1000 chars,
+  body {"outcome": "posted"|"failed", "evidence": 1..500 chars,
         "external_id": optional, <=128 chars}, owner only.
   Delegates to ``platform_runtime.erp.reconcile_posting`` -- the owner's
   audited verdict on a posting stuck ``uncertain``/``unconfirmed`` after a
@@ -50,8 +50,8 @@ POSTING_COLUMNS = ('id', 'document', 'driver', 'kind', 'supplier', 'number', 'cu
 
 # Declared bounds; pinned literally in runtime_tests/test_erp_api_bounds.py.
 POSTING_LIMIT = 100
-MAX_EVIDENCE_CHARS = 1000
-MAX_EXTERNAL_ID_CHARS = 128
+MAX_EVIDENCE_CHARS = erp.MAX_RECONCILE_EVIDENCE_CHARS
+MAX_EXTERNAL_ID_CHARS = erp.MAX_EXTERNAL_ID_CHARS
 
 
 @router.get('/{tenant}/erp/postings')

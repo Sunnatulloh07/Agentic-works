@@ -177,13 +177,19 @@ def without_package_prefix(test_id: str) -> str:
     return test_id[len('runtime_tests.'):] if test_id.startswith('runtime_tests.') else test_id
 
 
-def recorded_blocked(name: str, text: str, root: Path):
+def recorded_blocked(name: str, text: str, root: Path, platform: str = os.name):
     """The failing set when it is within the recorded platform surface, else None.
 
     A blocked test that starts passing is allowed (the baseline module's own guard
     re-measures the reasons); a failing test OUTSIDE the record keeps the job FAIL.
     Python ids are returned in the record's own form (with the package prefix).
+
+    The record is a WINDOWS allowance (O_NOFOLLOW, mkfifo, POSIX modes, symlink
+    privilege). On any other platform those tests are security checks that must
+    pass, so nothing is ever accepted as recorded there.
     """
+    if platform != 'nt':
+        return None
     clean = ANSI_RE.sub('', text)
     try:
         if name == 'python_runtime':
@@ -445,7 +451,7 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    output = args.output or root / 'docs' / 'verification' / ('local-' + stamp)
+    output = args.output or root / '.verify-offline' / ('local-' + stamp)
     summary = run(root, output.resolve())
     print('Evidence:', output)
     print('Production: NO-GO. Read summary.json for blocked and unperformed checks.')

@@ -38,13 +38,16 @@ HAS_YAML = importlib.util.find_spec('yaml') is not None
 NEEDS_YAML = unittest.skipUnless(HAS_YAML, 'PyYAML is not installed')
 
 TENANT = 't_pack'
+# A pack-local file may name only its tenant's TENANT_<TENANT>__* variables
+# (test_credential_scope.py); the operator JSON is trusted for any other name.
+OWN_TOKEN = 'TENANT_T_PACK__TELEGRAM_TOKEN'
 PACK_YAML = """telegram:
-  token_env: DEMO_TELEGRAM_TOKEN
+  token_env: TENANT_T_PACK__TELEGRAM_TOKEN
   chat_id: '42'
 instagram:
   account_id: '17841400000000001'
   graph_version: v21.0
-  token_env: DEMO_INSTAGRAM_TOKEN
+  token_env: TENANT_T_PACK__INSTAGRAM_TOKEN
 """
 JSON_BLOCK = {'telegram': {'token_env': 'OPERATOR_TELEGRAM_TOKEN'},
               'instagram': {'account_id': '17841409999999999'}}
@@ -73,9 +76,9 @@ class PackConfigCase(unittest.TestCase):
         return target
 
     def env(self, **values):
-        """Exact environment: the two keys under test are absent unless given."""
+        """Exact environment: the keys under test are absent unless given."""
         base = {k: v for k, v in os.environ.items()
-                if k not in ('PACKS_DIR', 'PLATFORM_INTEGRATIONS_FILE')}
+                if k not in ('PACKS_DIR', 'PLATFORM_INTEGRATIONS_FILE', 'PLATFORM_SHARED_SECRET_NAMES')}
         base.update(values)
         return mock.patch.dict(os.environ, base, clear=True)
 
@@ -86,7 +89,7 @@ class ConfigSourceTests(PackConfigCase):
         self.write_pack(TENANT, PACK_YAML)
         path = self.write_json({TENANT: JSON_BLOCK})
         with self.env(PACKS_DIR=str(self.packs), PLATFORM_INTEGRATIONS_FILE=str(path)):
-            self.assertEqual(config(TENANT)['telegram']['token_env'], 'DEMO_TELEGRAM_TOKEN')
+            self.assertEqual(config(TENANT)['telegram']['token_env'], OWN_TOKEN)
 
     def test_absent_pack_file_falls_back_to_the_json_unchanged(self):
         path = self.write_json({TENANT: JSON_BLOCK})
@@ -178,7 +181,7 @@ class ConfigSourceTests(PackConfigCase):
     @NEEDS_YAML
     def test_env_name_survives_as_a_plain_dict_so_secret_still_resolves(self):
         self.write_pack(TENANT, PACK_YAML)
-        with self.env(PACKS_DIR=str(self.packs), DEMO_TELEGRAM_TOKEN='7:aaa'):
+        with self.env(PACKS_DIR=str(self.packs), **{OWN_TOKEN: '7:aaa'}):
             block = config(TENANT)
             self.assertIs(type(block), dict)
             self.assertIs(type(block['telegram']), dict)
@@ -190,9 +193,9 @@ class ConfigSourceTests(PackConfigCase):
         # operators reloading a pack -- change it between calls.
         self.write_pack(TENANT, PACK_YAML)
         with self.env(PACKS_DIR=str(self.packs)):
-            self.assertEqual(config(TENANT)['telegram']['token_env'], 'DEMO_TELEGRAM_TOKEN')
-            self.write_pack(TENANT, 'telegram:\n  token_env: ROTATED_TOKEN\n')
-            self.assertEqual(config(TENANT)['telegram']['token_env'], 'ROTATED_TOKEN')
+            self.assertEqual(config(TENANT)['telegram']['token_env'], OWN_TOKEN)
+            self.write_pack(TENANT, 'telegram:\n  token_env: TENANT_T_PACK__ROTATED_TOKEN\n')
+            self.assertEqual(config(TENANT)['telegram']['token_env'], 'TENANT_T_PACK__ROTATED_TOKEN')
 
     def test_default_packs_dir_is_the_repository_packs_directory(self):
         # Mirrors app/packs.py without importing it: platform_runtime must not

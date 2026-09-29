@@ -11,7 +11,6 @@ import time
 from fastapi import HTTPException
 
 from . import approvals as appr
-from . import runner_ws as rws  # noqa: F401 (kelajak: operator xabarnomasi)
 from . import trace
 from .hotlead import log_lead
 from .limits import check_and_hit, warned
@@ -158,7 +157,8 @@ def _legacy_handle_text_message(tenant: str, channel: str, update_key: str, send
 
 def handle_text_message(tenant: str, channel: str, update_key: str, sender: str,
                         text: str, numeric_id: int | None = None,
-                        count_quota: bool = True, conversation_id: str | None = None) -> dict:
+                        count_quota: bool = True, conversation_id: str | None = None,
+                        sender_name: str = "") -> dict:
     """Durable acceptance first. No early processed flag, LLM or provider call here."""
     import os
     if os.getenv("PIPELINE_MODE") == "legacy":
@@ -174,5 +174,7 @@ def handle_text_message(tenant: str, channel: str, update_key: str, sender: str,
     # Existing quota accounting is intentionally not used before durable acceptance:
     # a failed quota check must not poison the inbox idempotency key.
     if channel == "ui": channel = "web"
-    return call(engine().accept_event,tenant,channel,str(update_key),{
-        "sender":sender,"conversation_id":conversation_id or sender,"text":(text or "")[:MAX_TEXT_CHARS]})
+    payload = {"sender":sender,"conversation_id":conversation_id or sender,"text":(text or "")[:MAX_TEXT_CHARS]}
+    if sender_name:  # display only; absent when unknown so nameless events keep their fingerprint
+        payload["sender_name"] = sender_name
+    return call(engine().accept_event,tenant,channel,str(update_key),payload)

@@ -81,6 +81,16 @@ test('4403 means revoked or rotated: exit at once with a re-enroll message, even
     assert.equal(out.action,'exit');assert.match(out.message,/revoked or rotated/);assert.match(out.message,/re-enroll/);
   }
 });
+test('4403 with a rotated token already in RUNNER_TOKEN_FILE reconnects instead of exiting',()=>{
+  // POST /devices bumps the generation, so a proactive rotation closes the old
+  // session with 4403 while the file already holds the new token.
+  const out=closeAction({code:4403,authenticated:true,expiresAt:NOW+60000,now:NOW,tokenFromFile:true,tokenChanged:true,rejections:0});
+  assert.equal(out.action,'retry');assert.match(out.message,/rotated/);
+  const same=closeAction({code:4403,authenticated:true,expiresAt:NOW+60000,now:NOW,tokenFromFile:true,tokenChanged:false,rejections:0});
+  assert.equal(same.action,'exit');
+  const env=closeAction({code:4403,authenticated:true,expiresAt:NOW+60000,now:NOW,tokenFromFile:false,tokenChanged:true,rejections:0});
+  assert.equal(env.action,'exit');
+});
 test('4401 with a live token is retried, then exits as a refused token',()=>{
   let state=0,out;
   for(let i=1;i<MAX_AUTH_REJECTIONS;i++){

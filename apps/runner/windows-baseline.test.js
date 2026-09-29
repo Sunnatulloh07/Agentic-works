@@ -2,7 +2,7 @@
 // The Windows-blocked surface of apps/runner/test.js, recorded as a number.
 //
 // The inventory said "11/24"; measured now (node v24.18.1, this host) test.js holds
-// 31 tests, 20 pass, 11 fail, 0 skipped. These eleven are UNVERIFIED on Windows, not
+// 32 tests, 21 pass, 11 fail, 0 skipped (2026-09-29). These eleven are UNVERIFIED on Windows, not
 // verified-green, and the split is by cause:
 //
 //   5  execute() refuses every filesystem call off Linux ("...requires Linux FD
@@ -26,7 +26,7 @@ const fs=require('node:fs');const os=require('node:os');const path=require('node
 const {execute,loadToken}=require('./runner');
 
 // Recorded so the number can be corrected rather than re-derived (see module docstring).
-const RECORDED_SIGNATURE={tests:31,pass:20,fail:11,skipped:0};
+const RECORDED_SIGNATURE={tests:32,pass:21,fail:11,skipped:0};
 
 const REASONS={
   preview:error=>error instanceof Error &&

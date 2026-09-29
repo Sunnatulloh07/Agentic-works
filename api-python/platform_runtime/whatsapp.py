@@ -58,8 +58,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .engine import (EVENT_CONVERSATION_ID, SAFE_REASON, Conflict, DeliveryRejected,
-                     Forbidden, NotFound)
+from .engine import (EVENT_CONVERSATION_ID, OUTBOUND_CHANNELS, SAFE_REASON, Conflict,
+                     DeliveryRejected, Forbidden, NotFound)
 
 # ------------------------------------------------------------------ constants
 
@@ -659,13 +659,43 @@ def window_sources(engine, tenant, agent, entry, step, *, contacts):
 # --------------------------------------------------------------- read function
 
 
+def _customer_scope(engine, tenant, step):
+    """``(channel, customer)`` when this step serves one inbound customer, else None.
+
+    A task on an inbound customer channel (engine.OUTBOUND_CHANNELS) -- an event's own
+    plan, a conversation turn's AgentLoop step, its reply -- is submitted AS that
+    channel's verified sender: Engine.process_event, AgentLoop (a run's actor is the
+    turn's sender) and conversation.py all pass it, and no route can choose those
+    channels (dashboard tasks are 'web', dashboard and re-engagement runs 'agent').
+    So the task's actor names the one customer the step may speak about. A step of
+    the dashboard or cron -- or an id no task owns -- is unscoped.
+    """
+    with engine.read() as c:
+        row = c.execute('''SELECT t.channel,t.actor FROM p_steps s
+          JOIN p_tasks t ON t.tenant=s.tenant AND t.id=s.task WHERE s.tenant=? AND s.id=?''',
+                        (tenant, step)).fetchone()
+    if row is None or row['channel'] not in OUTBOUND_CHANNELS:
+        return None
+    return row['channel'], row['actor']
+
+
 def window(engine, tenant, agent, step, *, contact=''):
     """Report the 24-hour service window per declared recipient.
 
     Free-form text is only deliverable while this says ``open: true``. The answer
     is computed from our clock and the last inbound timestamp, so it can be
     explained to an operator instead of being re-asked of the provider.
+
+    A step serving one customer's conversation (``_customer_scope``) reads that
+    customer's own window only: it must name the contact, and the contact must be
+    the verified sender -- by contact id (the outreach ``ingest`` path) or by the
+    declared number (the conversation route's wa_id). Unscoped, a model answering
+    one customer could list who else wrote to the shop, and when.
     """
+    scope = _customer_scope(engine, tenant, step)
+    if scope is not None and (scope[0] != INBOUND_CHANNEL or not contact):
+        raise Forbidden('A customer conversation may read only its own WhatsApp window: '
+                        'it must name that contact, on the whatsapp channel')
     registers = _registers(tenant)
     if not registers:
         return {'registers': [], 'complete': True,
@@ -678,6 +708,9 @@ def window(engine, tenant, agent, step, *, contact=''):
             if contact not in contacts:
                 raise Forbidden(f'Contact {contact!r} is not declared for register '
                                 f'{name!r}')
+            if scope is not None and scope[1] not in (contact, contacts[contact]):
+                raise Forbidden(f'Contact {contact!r} is not the customer of this '
+                                f'conversation')
             contacts = {contact: contacts[contact]}
         resolved, sources, status = window_sources(
             engine, tenant, agent, entry, step, contacts=contacts)

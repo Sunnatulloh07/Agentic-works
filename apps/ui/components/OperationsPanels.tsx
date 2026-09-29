@@ -2,6 +2,9 @@
 import {useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
 import {canReadInbox} from '../lib/shop-client.mjs';
+import {friendlyError} from '../lib/format.mjs';
+import {createIdempotency} from '../lib/idempotency.mjs';
+import {ConfirmButton} from './ui';
 
 /**
  * Panels for the tenant routes that existed only in the backend.
@@ -20,11 +23,7 @@ import {canReadInbox} from '../lib/shop-client.mjs';
 type Agent = {id: string; name: string; tools: string[]};
 type Props = {client: SessionClient; tenant: string; role: string; frozen: boolean; agents: Agent[]};
 
-const panel = {background: '#111c2e', border: '1px solid #233149', borderRadius: 12, padding: 20, marginBottom: 16};
-const control = {display: 'block', background: '#0b1220', color: '#e2e8f0', border: '1px solid #475569', padding: 8, margin: '8px 0', borderRadius: 6, maxWidth: '100%', boxSizing: 'border-box' as const};
-const button = {...control, display: 'inline-block', marginRight: 8, cursor: 'pointer'};
-const pre = {whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const, fontSize: 12, background: '#0b1220', padding: 12, borderRadius: 6};
-const row = {borderTop: '1px solid #334155', paddingTop: 12, marginTop: 12};
+const mono = {fontFamily: 'var(--mono)'};
 
 /** One place where every panel gets its busy/error/message handling, so no panel can
  * forget to clear a stale success message before a failing call. */
@@ -35,7 +34,7 @@ function useOps() {
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError(''); setMessage('');
     try { await fn(); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Xato'); }
+    catch (e) { setError(friendlyError(e)); }
     finally { setBusy(false); }
   }
   return {busy, error, message, setMessage, run};
@@ -43,15 +42,15 @@ function useOps() {
 
 function Status({busy, error, message}: {busy: boolean; error: string; message: string}) {
   return <>
-    {error && <p role="alert" style={{color: '#fca5a5'}}>{error}</p>}
-    {message && <p role="status" style={{color: '#86efac'}}>{message}</p>}
-    {busy && <p role="status">Bajarilmoqda...</p>}
+    {error && <p role="alert" className="notice error">{error}</p>}
+    {message && <p role="status" className="notice success">{message}</p>}
+    {busy && <p role="status" className="muted">Bajarilmoqda…</p>}
   </>;
 }
 
 function AgentSelect({value, onChange, agents, label}: {value: string; onChange: (v: string) => void; agents: Agent[]; label: string}) {
   return <label>{label}
-    <select style={control} value={value} onChange={e => onChange(e.target.value)}>
+    <select value={value} onChange={e => onChange(e.target.value)}>
       <option value="">Tanlang</option>
       {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
     </select>
@@ -62,15 +61,15 @@ function Ledger({entries, total, truncated}: {entries: unknown[]; total: number;
   if (!entries.length) return <p>Jurnal yozuvi yo‘q.</p>;
   return <>
     <p>{entries.length} yozuv ko‘rsatilgan · jami {total}{truncated && ' · sahifa kesilgan, davomi bor'}</p>
-    <pre style={pre}>{JSON.stringify(entries, null, 2)}</pre>
+    <pre>{JSON.stringify(entries, null, 2)}</pre>
   </>;
 }
 
 /** Numeric field with the API's own minimum and maximum, so the browser refuses what
  * the server would refuse rather than reporting a 422 after a round trip. */
 function NumericField({label, value, onChange, min, max, hint}: {label: string; value: string; onChange: (v: string) => void; min: number; max: number; hint?: string}) {
-  return <label>{label}{hint && <small style={{color: '#94a3b8'}}> · {hint}</small>}
-    <input style={control} type="number" min={min} max={max} step={1} value={value} onChange={e => onChange(e.target.value)}/>
+  return <label>{label}{hint && <small className="muted"> · {hint}</small>}
+    <input type="number" min={min} max={max} step={1} value={value} onChange={e => onChange(e.target.value)}/>
   </label>;
 }
 
@@ -95,36 +94,36 @@ export function ReengagementPanel({client, tenant, role, frozen, agents}: Props)
   async function loadLedger() {
     setLedger(await client.request<{entries: unknown[]; total: number; truncated: boolean}>(`${base}/${encodeURIComponent(policy)}/ledger`));
   }
-  return <section style={panel}>
+  return <section className="panel">
     <h2>Qayta aloqa (re-engagement)</h2>
     <p>Faolsiz mijozlarga avtomatik qayta aloqa. Bu <strong>haqiqiy mijozga</strong> xabar
-      yuboradigan jadval, shuning uchun sozlash faqat owner uchun. Jurnal — yuborilgan
+      yuboradigan jadval, shuning uchun sozlash faqat do‘kon egasi uchun. Jurnal — yuborilgan
       urinishlarning dalili, yetkazilganligining kafolati emas.</p>
     <Status {...ops}/>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(load)}>Siyosatlar ro‘yxati</button>
-    {policies.map(p => <button key={p.policy} style={button} disabled={ops.busy}
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(load)}>Siyosatlar ro‘yxati</button>
+    {policies.map(p => <button key={p.policy} className="btn" disabled={ops.busy}
       onClick={() => { setPolicy(p.policy); ops.run(loadLedger); }}>
       {p.policy} · {p.enabled ? 'faol' : 'o‘chirilgan'}
     </button>)}
-    <label>Siyosat nomi<input style={control} value={policy} maxLength={128} onChange={e => setPolicy(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(loadLedger)}>Jurnalni yuklash</button>
+    <label>Siyosat nomi<input value={policy} maxLength={128} onChange={e => setPolicy(e.target.value)}/></label>
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(loadLedger)}>Jurnalni yuklash</button>
     {ledger && <Ledger {...ledger}/>}
     {isOwner && <>
-      <h3>Owner: siyosatni sozlash</h3>
+      <h3>Siyosatni sozlash (egasi)</h3>
       <AgentSelect label="Agent" value={agent} onChange={setAgent} agents={agents}/>
-      <label>Connector<input style={control} value={connection} maxLength={128} onChange={e => setConnection(e.target.value)}/></label>
+      <label>Connector<input value={connection} maxLength={128} onChange={e => setConnection(e.target.value)}/></label>
       <NumericField label="Faolsizlik, daqiqa" min={1} max={20160} value={inactive} onChange={setInactive} hint="1–20160 (14 kun)"/>
       <NumericField label="Cooldown, soniya" min={300} max={2592000} value={cooldown} onChange={setCooldown}/>
       <NumericField label="Maksimal urinish" min={1} max={10} value={attempts} onChange={setAttempts}/>
       <NumericField label="Bir siklda maksimal" min={1} max={20} value={perCycle} onChange={setPerCycle}/>
-      <button style={button} disabled={ops.busy || frozen || !agent || !connection.trim()}
+      <button className="btn" disabled={ops.busy || frozen || !agent || !connection.trim()}
         onClick={() => ops.run(async () => {
           await client.request(`${base}/${encodeURIComponent(policy)}`, {
             agent, connection, inactive_minutes: num(inactive), cooldown_seconds: num(cooldown),
             max_attempts: num(attempts), max_per_cycle: num(perCycle), enabled: true}, 'PUT');
           ops.setMessage('Siyosat saqlandi.'); await load();
         })}>Saqlash</button>
-      <button style={button} disabled={ops.busy || frozen}
+      <button className="btn" disabled={ops.busy || frozen}
         onClick={() => ops.run(async () => {
           const r = await client.request<{changed: number}>(`${base}/${encodeURIComponent(policy)}/sync`, {});
           ops.setMessage(`Jurnal sinxronlandi: ${r.changed} yozuv o‘zgardi.`); await loadLedger();
@@ -153,30 +152,30 @@ export function BriefingPanel({client, tenant, role, frozen, agents}: Props) {
   async function loadLedger() {
     setLedger(await client.request<{entries: unknown[]; total: number; truncated: boolean}>(`${base}/${encodeURIComponent(schedule)}/ledger`));
   }
-  return <section style={panel}>
+  return <section className="panel">
     <h2>Brifing</h2>
     <p>Belgilangan vaqtda boshqaruv bo‘limiga xulosa yuboradi. Bo‘limlar manbadan
       o‘qiladi; manba bo‘sh bo‘lsa brifing ham bo‘sh bo‘ladi — bu nosozlik emas.</p>
     <Status {...ops}/>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(load)}>Jadvallar ro‘yxati</button>
-    {schedules.map(s => <button key={s.schedule} style={button} disabled={ops.busy}
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(load)}>Jadvallar ro‘yxati</button>
+    {schedules.map(s => <button key={s.schedule} className="btn" disabled={ops.busy}
       onClick={() => { setSchedule(s.schedule); ops.run(loadLedger); }}>
       {s.schedule} · {s.enabled ? 'faol' : 'o‘chirilgan'}
     </button>)}
-    <label>Jadval nomi<input style={control} value={schedule} maxLength={128} onChange={e => setSchedule(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(loadLedger)}>Jurnalni yuklash</button>
+    <label>Jadval nomi<input value={schedule} maxLength={128} onChange={e => setSchedule(e.target.value)}/></label>
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(loadLedger)}>Jurnalni yuklash</button>
     {ledger && <Ledger {...ledger}/>}
     {isOwner && <>
-      <h3>Owner: jadvalni sozlash</h3>
+      <h3>Jadvalni sozlash (egasi)</h3>
       <AgentSelect label="Agent" value={agent} onChange={setAgent} agents={agents}/>
-      <label>Qabul qiluvchi<input style={control} value={recipient} maxLength={128} onChange={e => setRecipient(e.target.value)} placeholder="chat yoki kanal identifikatori"/></label>
-      <label>Connector<input style={control} value={connection} maxLength={128} onChange={e => setConnection(e.target.value)}/></label>
-      <label>Sarlavha<input style={control} value={title} maxLength={120} onChange={e => setTitle(e.target.value)}/></label>
+      <label>Qabul qiluvchi<input value={recipient} maxLength={128} onChange={e => setRecipient(e.target.value)} placeholder="chat yoki kanal identifikatori"/></label>
+      <label>Connector<input value={connection} maxLength={128} onChange={e => setConnection(e.target.value)}/></label>
+      <label>Sarlavha<input value={title} maxLength={120} onChange={e => setTitle(e.target.value)}/></label>
       <NumericField label="Soat" min={0} max={23} value={hour} onChange={setHour} hint="0–23, mahalliy"/>
       <NumericField label="Daqiqa" min={0} max={59} value={minute} onChange={setMinute}/>
-      <label>Bo‘limlar (JSON massiv)<textarea style={{...control, width: '100%', fontFamily: 'monospace'}} rows={4}
+      <label>Bo‘limlar (JSON massiv)<textarea style={mono} rows={4}
         value={sections} onChange={e => setSections(e.target.value)}/></label>
-      <button style={button} disabled={ops.busy || frozen || !agent || !recipient.trim()}
+      <button className="btn" disabled={ops.busy || frozen || !agent || !recipient.trim()}
         onClick={() => ops.run(async () => {
           await client.request(`${base}/${encodeURIComponent(schedule)}`, {
             agent, recipient, connection, sections: JSON.parse(sections),
@@ -206,40 +205,42 @@ export function EscalationPanel({client, tenant, role, frozen, agents}: Props) {
   async function loadLedger() {
     setLedger(await client.request<{entries: unknown[]; total: number; truncated: boolean}>(`${base}/${encodeURIComponent(schedule)}/ledger`));
   }
-  return <section style={panel}>
+  return <section className="panel">
     <h2>Eskalatsiya</h2>
-    <p>Haqiqiy odamlar haqida menejerga avtomatik eskalatsiya. Owner bo‘lmagan
+    <p>Haqiqiy odamlar haqida menejerga avtomatik eskalatsiya. Egasi bo‘lmagan
       foydalanuvchi uni boshqa manzilga qarata olmaydi. Cooldown bir hodisaning
       takror yuborilishini to‘xtatadi.</p>
     <Status {...ops}/>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(load)}>Jadvallar ro‘yxati</button>
-    {schedules.map(s => <button key={s.schedule} style={button} disabled={ops.busy}
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(load)}>Jadvallar ro‘yxati</button>
+    {schedules.map(s => <button key={s.schedule} className="btn" disabled={ops.busy}
       onClick={() => { setSchedule(s.schedule); ops.run(loadLedger); }}>
       {s.schedule} · {s.enabled ? 'faol' : 'o‘chirilgan'}
     </button>)}
-    <label>Jadval nomi<input style={control} value={schedule} maxLength={128} onChange={e => setSchedule(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(loadLedger)}>Jurnalni yuklash</button>
+    <label>Jadval nomi<input value={schedule} maxLength={128} onChange={e => setSchedule(e.target.value)}/></label>
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(loadLedger)}>Jurnalni yuklash</button>
     {ledger && <Ledger {...ledger}/>}
     {isOwner && <>
-      <h3>Owner: jadvalni sozlash</h3>
+      <h3>Jadvalni sozlash (egasi)</h3>
       <AgentSelect label="Agent" value={agent} onChange={setAgent} agents={agents}/>
-      <label>Qabul qiluvchi<input style={control} value={recipient} maxLength={128} onChange={e => setRecipient(e.target.value)}/></label>
-      <label>Sarlavha<input style={control} value={title} maxLength={120} onChange={e => setTitle(e.target.value)}/></label>
+      <label>Qabul qiluvchi<input value={recipient} maxLength={128} onChange={e => setRecipient(e.target.value)}/></label>
+      <label>Sarlavha<input value={title} maxLength={120} onChange={e => setTitle(e.target.value)}/></label>
       <NumericField label="Cooldown, soniya" min={300} max={2592000} value={cooldown} onChange={setCooldown}/>
       <NumericField label="Bir siklda maksimal" min={1} max={50} value={perCycle} onChange={setPerCycle}/>
       <NumericField label="Maksimal yosh, kun" min={1} max={365} value={maxAge} onChange={setMaxAge}/>
-      <button style={button} disabled={ops.busy || frozen || !agent || !recipient.trim()}
+      <button className="btn" disabled={ops.busy || frozen || !agent || !recipient.trim()}
         onClick={() => ops.run(async () => {
           await client.request(`${base}/${encodeURIComponent(schedule)}`, {
             agent, recipient, title, cooldown_seconds: num(cooldown),
             max_per_cycle: num(perCycle), max_age_days: num(maxAge), enabled: true}, 'PUT');
           ops.setMessage('Jadval saqlandi.'); await load();
         })}>Saqlash</button>
-      <button style={button} disabled={ops.busy || frozen}
-        onClick={() => ops.run(async () => {
+      <ConfirmButton label="Jadvalni o‘chirish" disabled={ops.busy || frozen}
+        title="Eskalatsiyani o‘chirasizmi?"
+        message={<>“{schedule}” jadvali bo‘yicha menejerga xabar ketmay qo‘yadi. Qayta yoqish uchun uni qaytadan saqlash kerak.</>}
+        confirmLabel="Ha, o‘chirish" onConfirm={() => ops.run(async () => {
           await client.request(`${base}/${encodeURIComponent(schedule)}/disable?reason=operator_disabled`, {});
           ops.setMessage('Jadval o‘chirildi.'); await load();
-        })}>O‘chirish (sabab: operator)</button>
+        })}/>
     </>}
   </section>;
 }
@@ -257,42 +258,45 @@ export function SupervisorPanel({client, tenant, role, frozen, agents}: Props) {
   const [title, setTitle] = useState('');
   const [question, setQuestion] = useState('');
   const [targetSection, setTargetSection] = useState('');
+  const [keys] = useState(() => createIdempotency());
   const isOwner = role === 'owner';
   async function load() { setSections((await client.request<{sections: typeof sections}>(base)).sections); }
-  return <section style={panel}>
+  return <section className="panel">
     <h2>Supervisor yo‘naltirish</h2>
     <p>Menejer savolini bo‘limga yo‘naltiradi. Bo‘lim e’lon qilish — yo‘naltirish
-      vakolatini o‘zgartirish, shuning uchun owner ishi. Yo‘naltirish esa oddiy
+      vakolatini o‘zgartirish, shuning uchun egasining ishi. Yo‘naltirish esa oddiy
       operatsion amal: u haqiqiy agent run sarflaydi.</p>
     <Status {...ops}/>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(load)}>Bo‘limlar ro‘yxati</button>
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(load)}>Bo‘limlar ro‘yxati</button>
     {sections.map(s => <p key={s.section}>{s.section} → {s.agent} · {s.enabled ? 'faol' : 'o‘chirilgan'}</p>)}
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(async () => {
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(async () => {
       setHistory(await client.request<{routes: unknown[]; total: number; truncated: boolean}>(base + '/history'));
     })}>Yo‘naltirish tarixi</button>
     {history && <Ledger entries={history.routes} total={history.total} truncated={history.truncated}/>}
     <h3>Savolni yo‘naltirish</h3>
-    <label>Savol<textarea style={{...control, width: '100%'}} rows={3} maxLength={2000}
+    <label>Savol<textarea rows={3} maxLength={2000}
       value={question} onChange={e => setQuestion(e.target.value)}/></label>
     <label>Bo‘lim (bo‘sh bo‘lsa kalit so‘zlar bo‘yicha tanlanadi)
-      <input style={control} value={targetSection} maxLength={64} onChange={e => setTargetSection(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy || frozen || !question.trim()}
+      <input value={targetSection} maxLength={64} onChange={e => setTargetSection(e.target.value)}/></label>
+    <button className="btn" disabled={ops.busy || frozen || !question.trim()}
       onClick={() => ops.run(async () => {
-        // The route refuses a request without this header; a fresh UUID per click is
-        // what makes a retry after a network failure safe rather than a second run.
-        await client.request(base + '/route',
-          {question, section: targetSection}, 'POST', {'Idempotency-Key': crypto.randomUUID()});
+        // The route refuses a request without this header. The key belongs to this exact
+        // question until it succeeds, so clicking again after a lost response replays
+        // the same run instead of starting a second one.
+        const payload = {question, section: targetSection};
+        await client.request(base + '/route', payload, 'POST', {'Idempotency-Key': keys.key('route', payload)});
+        keys.settle('route', payload);
         ops.setMessage('Yo‘naltirildi.'); setQuestion('');
         setHistory(await client.request<{routes: unknown[]; total: number; truncated: boolean}>(base + '/history'));
       })}>Yo‘naltirish</button>
     {isOwner && <>
-      <h3>Owner: bo‘lim e’lon qilish</h3>
-      <label>Bo‘lim nomi<input style={control} value={section} maxLength={64} onChange={e => setSection(e.target.value)}/></label>
+      <h3>Bo‘lim e’lon qilish (egasi)</h3>
+      <label>Bo‘lim nomi<input value={section} maxLength={64} onChange={e => setSection(e.target.value)}/></label>
       <AgentSelect label="Agent" value={agent} onChange={setAgent} agents={agents}/>
-      <label>Sarlavha<input style={control} value={title} maxLength={120} onChange={e => setTitle(e.target.value)}/></label>
-      <label>Kalit so‘zlar (vergul bilan)<input style={control} value={keywords} maxLength={400}
+      <label>Sarlavha<input value={title} maxLength={120} onChange={e => setTitle(e.target.value)}/></label>
+      <label>Kalit so‘zlar (vergul bilan)<input value={keywords} maxLength={400}
         onChange={e => setKeywords(e.target.value)}/></label>
-      <button style={button} disabled={ops.busy || frozen || !agent || !section.trim()}
+      <button className="btn" disabled={ops.busy || frozen || !agent || !section.trim()}
         onClick={() => ops.run(async () => {
           await client.request(`${base}/${encodeURIComponent(section)}`, {
             agent, title, keywords: keywords.split(',').map(k => k.trim()).filter(Boolean).slice(0, 20), enabled: true}, 'PUT');
@@ -310,20 +314,20 @@ export function SchedulesPanel({client, tenant, role, frozen, agents}: Props) {
   const [key, setKey] = useState('');
   const [interval, setInterval] = useState('3600');
   const [steps, setSteps] = useState(JSON.stringify([{tool: 'reports.summary', args: {}}], null, 2));
-  if (role !== 'owner') return <section style={panel}><h2>Takrorlanuvchi jadval</h2>
-    <p>Bu bo‘lim faqat owner uchun.</p></section>;
-  return <section style={panel}>
+  if (role !== 'owner') return <section className="panel"><h2>Takrorlanuvchi jadval</h2>
+    <p>Bu bo‘lim faqat egasi uchun.</p></section>;
+  return <section className="panel">
     <h2>Takrorlanuvchi jadval</h2>
     <p>Vazifani belgilangan oraliqda qayta yaratadi. Bu <strong>yangi run</strong>
       yaratadi — oldingi run natijasini takrorlamaydi, va har bir ijro baribir approval
       qoidasiga bo‘ysunadi.</p>
     <Status {...ops}/>
     <AgentSelect label="Agent" value={agent} onChange={setAgent} agents={agents}/>
-    <label>Kalit (takrorlanmas)<input style={control} value={key} maxLength={256} onChange={e => setKey(e.target.value)}/></label>
+    <label>Kalit (takrorlanmas)<input value={key} maxLength={256} onChange={e => setKey(e.target.value)}/></label>
     <NumericField label="Oraliq, soniya" min={60} max={31536000} value={interval} onChange={setInterval} hint="60–31536000"/>
-    <label>Qadamlar (JSON)<textarea style={{...control, width: '100%', fontFamily: 'monospace'}} rows={6}
+    <label>Qadamlar (JSON)<textarea style={mono} rows={6}
       value={steps} onChange={e => setSteps(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy || frozen || !agent || !key.trim()}
+    <button className="btn" disabled={ops.busy || frozen || !agent || !key.trim()}
       onClick={() => ops.run(async () => {
         await client.request(`/platform/${encodeURIComponent(tenant)}/schedules`, {
           agent, key, steps: JSON.parse(steps), interval_seconds: num(interval)});
@@ -347,13 +351,13 @@ export function MetricsPanel({client, tenant, role}: {client: SessionClient; ten
   const [health, setHealth] = useState<Health | null>(null);
   const [counts, setCounts] = useState<{tasks: number; failed: number; uncertain: number; waiting: number; inbox: number | null; runs: number} | null>(null);
   const base = `/platform/${encodeURIComponent(tenant)}`;
-  return <section style={panel}>
+  return <section className="panel">
     <h2>Holat va metrikalar</h2>
     <p>Bu <strong>health va navbat</strong> ko‘rinishi. Bu yerda metrika eksporti,
       trace, alerting yoki HA holati <strong>yo‘q</strong> — ular hali qurilmagan, va bu
       panel ular borligini ko‘rsatmaydi.</p>
     <Status {...ops}/>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(async () => {
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(async () => {
       const [t, i, r] = await Promise.all([
         client.request<{tasks: {status: string}[]}>(base + '/tasks'),
         // /inbox is owner/operator only; asking for it as another role would 403
@@ -370,12 +374,12 @@ export function MetricsPanel({client, tenant, role}: {client: SessionClient; ten
         runs: r.runs.length,
       });
     })}>Hisoblarni yig‘ish</button>
-    <button style={button} disabled={ops.busy} onClick={() => ops.run(async () => {
+    <button className="btn" disabled={ops.busy} onClick={() => ops.run(async () => {
       // /health is unauthenticated by design, so it is read through the same client
       // only for transport consistency; it carries no tenant data.
       setHealth(await client.request<Health>('/health'));
     })}>API health</button>
-    {health && <pre style={pre}>{JSON.stringify(health, null, 2)}</pre>}
+    {health && <pre>{JSON.stringify(health, null, 2)}</pre>}
     {counts && <ul>
       <li>Vazifalar: {counts.tasks} (kutayotgan tasdiq: {counts.waiting})</li>
       <li>Yiqilgan: {counts.failed} · noaniq: {counts.uncertain} — noaniq holat operator qarorini kutadi</li>
@@ -413,43 +417,43 @@ export function CustomerResourcesPanel({client, tenant, role, frozen, customer, 
   const [currency, setCurrency] = useState('UZS');
   const [total, setTotal] = useState('0');
   const writable = ['owner', 'operator'].includes(role) && !frozen;
-  return <section style={{...row, borderColor: '#233149'}}>
+  return <section className="row">
     <h3>Aloqa kanallari va buyurtmalar</h3>
     <Status {...ops}/>
     <h4>Kontakt</h4>
-    <label>Turi<select style={control} value={type} onChange={e => setType(e.target.value)}>
+    <label>Turi<select value={type} onChange={e => setType(e.target.value)}>
       {['phone', 'email', 'telegram', 'whatsapp'].map(t => <option key={t} value={t}>{t}</option>)}
     </select></label>
-    <label>Qiymat<input style={control} maxLength={512} value={value} onChange={e => setValue(e.target.value)}/></label>
+    <label>Qiymat<input maxLength={512} value={value} onChange={e => setValue(e.target.value)}/></label>
     <label><input type="checkbox" checked={verified} onChange={e => setVerified(e.target.checked)}/> Tekshirilgan</label>
-    <button style={button} disabled={ops.busy || !writable || !value.trim()}
+    <button className="btn" disabled={ops.busy || !writable || !value.trim()}
       onClick={() => ops.run(async () => {
         await client.request(base + '/contacts', {type, value: value.trim(), verified});
         setValue(''); setVerified(false); ops.setMessage('Kontakt qo‘shildi.'); await onChanged();
       })}>Kontakt qo‘shish</button>
 
     <h4>Kanal identity</h4>
-    <p style={{fontSize: 13}}>Kanal identity — kiruvchi xabarni mijozga bog‘laydigan
+    <p className="muted">Kanal identity — kiruvchi xabarni mijozga bog‘laydigan
       yagona narsa. Tasdiqlanmagan identity bilan birlashtirish xato birlashtirishga olib
       keladi, shuning uchun <code>verified</code> ataylab qo‘lda belgilanadi.</p>
-    <label>Kanal<select style={control} value={channel} onChange={e => setChannel(e.target.value)}>
+    <label>Kanal<select value={channel} onChange={e => setChannel(e.target.value)}>
       {['whatsapp', 'telegram', 'instagram', 'phone', 'email'].map(c => <option key={c} value={c}>{c}</option>)}
     </select></label>
-    <label>Tashqi ID<input style={control} maxLength={256} value={externalId} onChange={e => setExternalId(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy || !writable || !externalId.trim()}
+    <label>Tashqi ID<input maxLength={256} value={externalId} onChange={e => setExternalId(e.target.value)}/></label>
+    <button className="btn" disabled={ops.busy || !writable || !externalId.trim()}
       onClick={() => ops.run(async () => {
         await client.request(base + '/channel-identities', {channel, external_id: externalId.trim(), verified});
         setExternalId(''); ops.setMessage('Kanal identity qo‘shildi.'); await onChanged();
       })}>Identity qo‘shish</button>
 
     <h4>Buyurtma</h4>
-    <p style={{fontSize: 13}}>Summa <strong>minor birlikda</strong> (tiyin). Bu yozuv
+    <p className="muted">Summa <strong>minor birlikda</strong> (tiyin). Bu yozuv
       platformada pul harakatlantirmaydi — u faqat faktni qayd etadi.</p>
-    <label>Tashqi ID<input style={control} maxLength={256} value={orderId} onChange={e => setOrderId(e.target.value)}/></label>
-    <label>Valyuta<input style={control} maxLength={3} value={currency}
+    <label>Tashqi ID<input maxLength={256} value={orderId} onChange={e => setOrderId(e.target.value)}/></label>
+    <label>Valyuta<input maxLength={3} value={currency}
       onChange={e => setCurrency(e.target.value.toUpperCase())}/></label>
-    <label>Jami, minor<input style={control} type="number" min={0} step={1} value={total} onChange={e => setTotal(e.target.value)}/></label>
-    <button style={button} disabled={ops.busy || !writable || !orderId.trim()}
+    <label>Jami, minor<input type="number" min={0} step={1} value={total} onChange={e => setTotal(e.target.value)}/></label>
+    <button className="btn" disabled={ops.busy || !writable || !orderId.trim()}
       onClick={() => ops.run(async () => {
         await client.request(base + '/orders', {external_id: orderId.trim(), currency, total_minor: num(total)});
         setOrderId(''); setTotal('0'); ops.setMessage('Buyurtma qo‘shildi.'); await onChanged();
@@ -474,22 +478,22 @@ export function ReconcileControl({client, tenant, role, step, onDone}: {
   const ops = useOps();
   const [outcome, setOutcome] = useState('succeeded');
   const [evidence, setEvidence] = useState('');
-  if (role !== 'owner') return <p style={{color: '#94a3b8'}}>
-    Noaniq qadamni yakunlash faqat owner uchun. Tashqi tizimni tekshirib, dalil bilan
-    owner yakunlaydi.</p>;
-  return <div style={{...row, borderColor: '#fdba74'}}>
+  if (role !== 'owner') return <p className="muted">
+    Noaniq qadamni yakunlash faqat do‘kon egasi uchun. Tashqi tizimni tekshirib, dalil bilan
+    egasi yakunlaydi.</p>;
+  return <div className="row">
     <h4>Noaniq qadamni dalil bilan yakunlash</h4>
-    <p style={{fontSize: 13}}>Avtomatik qayta ijro bloklangan. Tashqi tizimdagi haqiqiy
+    <p className="muted">Avtomatik qayta ijro bloklangan. Tashqi tizimdagi haqiqiy
       natijani <strong>tekshirib</strong>, keyin shu yerda yozing. Bu yozuv audit
       jurnaliga tushadi.</p>
     <Status {...ops}/>
-    <label>Natija<select style={control} value={outcome} onChange={e => setOutcome(e.target.value)}>
+    <label>Natija<select value={outcome} onChange={e => setOutcome(e.target.value)}>
       <option value="succeeded">Bajarilgan (tashqi tizimda tasdiqlandi)</option>
       <option value="failed">Bajarilmagan</option>
     </select></label>
-    <label>Tashqi dalil<input style={control} maxLength={500} value={evidence}
+    <label>Tashqi dalil<input maxLength={500} value={evidence}
       onChange={e => setEvidence(e.target.value)} placeholder="Buyurtma raqami, hujjat ID, provayder javobi"/></label>
-    <button style={button} disabled={ops.busy || !evidence.trim()}
+    <button className="btn" disabled={ops.busy || !evidence.trim()}
       onClick={() => ops.run(async () => {
         await client.request(`/platform/${encodeURIComponent(tenant)}/steps/${encodeURIComponent(step)}/reconcile`,
           {outcome, evidence: evidence.trim()});

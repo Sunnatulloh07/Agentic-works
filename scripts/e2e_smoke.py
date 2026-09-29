@@ -2,6 +2,7 @@
 
     python scripts/e2e_smoke.py            # PASS/SKIP/FAIL per scenario, exit 1 on any FAIL
     python scripts/e2e_smoke.py --keep     # keep the temp directory (logs, app.db) for inspection
+    python scripts/e2e_smoke.py --protocol tools   # the planner's native tool-use protocol
 
 Nothing in the repository is written. Everything lives in a temp directory:
 the database, an integrations file for demo-retail and the process logs. The
@@ -56,10 +57,51 @@ def free_port() -> int:
 # --- fakes --------------------------------------------------------------------
 
 class FakeModel:
-    """Anthropic Messages API shape; scripted by the customer message and observations."""
+    """Anthropic Messages API shape; scripted by the customer message and observations.
+
+    A request with `tools` (`llm.protocol: tools`) is answered with one `tool_use`
+    block instead of JSON text; `decide` sees the same context either way,
+    rebuilt from the tool_use/tool_result history.
+    """
+
+    DECISION_TOOLS = {'final_answer': 'final', 'ask_customer': 'ask'}
 
     def __init__(self):
         self.requests: list[dict] = []
+
+    @staticmethod
+    def platform_name(wire: str) -> str:
+        return wire.replace('__', '.')  # the platform maps '.' -> '__' on the wire
+
+    @classmethod
+    def tool_context(cls, body: dict) -> dict:
+        """The planner context of a tools-protocol request, as `decide` expects it."""
+        messages = body['messages']
+        context = json.loads(messages[0]['content'][0]['text'])
+        context['tools'] = [{'name': cls.platform_name(t['name'])} for t in body['tools']
+                            if t['name'] not in cls.DECISION_TOOLS]
+        calls, observations = {}, []
+        for message in messages[1:]:
+            for block in message['content']:
+                if block.get('type') == 'tool_use':
+                    calls[block['id']] = block
+                elif block.get('type') == 'tool_result' and not block.get('is_error'):
+                    call, content = calls[block['tool_use_id']], json.loads(block['content'])
+                    observations.append({'evidence_id': content['evidence_id'], 'result': content['result'],
+                                         'tool': cls.platform_name(call['name']), 'arguments': call['input']})
+        context['observations'] = observations
+        return context
+
+    @staticmethod
+    def tool_use(decision: dict) -> dict:
+        action = decision.get('action')
+        if action == 'tool':
+            name, arguments = decision['tool'].replace('.', '__'), decision['args']
+        elif action == 'final':
+            name, arguments = 'final_answer', {'answer': decision['answer'], 'evidence_ids': decision['evidence_ids']}
+        else:
+            name, arguments = 'ask_customer', {'question': decision.get('question', '')}
+        return {'type': 'tool_use', 'id': 'toolu_' + uuid.uuid4().hex, 'name': name, 'input': arguments}
 
     @staticmethod
     def customer_text(context: dict) -> str:
@@ -107,14 +149,18 @@ class FakeModel:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get('content-length') or 0)))
                 model.requests.append(body)
+                tools = 'tools' in body
                 try:
-                    context = json.loads(body['messages'][0]['content'])
+                    context = model.tool_context(body) if tools else json.loads(body['messages'][0]['content'])
                     decision = model.decide(context)
                 except Exception as exc:  # noqa: BLE001 - a broken fake must be visible
                     decision = {'action': 'ask', 'question': f'fake model error {type(exc).__name__}'}
+                if tools:
+                    stop, content = 'tool_use', [model.tool_use(decision)]
+                else:
+                    stop, content = 'end_turn', [{'type': 'text', 'text': json.dumps(decision, ensure_ascii=False)}]
                 reply = {'id': 'msg_' + uuid.uuid4().hex, 'type': 'message', 'role': 'assistant',
-                         'model': body.get('model'), 'stop_reason': 'end_turn',
-                         'content': [{'type': 'text', 'text': json.dumps(decision, ensure_ascii=False)}],
+                         'model': body.get('model'), 'stop_reason': stop, 'content': content,
                          'usage': {'input_tokens': 100, 'output_tokens': 50}}
                 raw = json.dumps(reply, ensure_ascii=False).encode('utf-8')
                 self.send_response(200)
@@ -365,7 +411,7 @@ def stop_tree(process: subprocess.Popen) -> None:
         process.wait()
 
 
-def build_env(tmp: Path, model_port: int, tg_port: int, api_port: int) -> dict:
+def build_env(tmp: Path, model_port: int, tg_port: int, api_port: int, protocol: str = 'json') -> dict:
     integrations = {TENANT: {
         'llm': {'provider': 'anthropic', 'provider_mode': 'local_loopback',
                 'base_url': f'http://127.0.0.1:{model_port}', 'model': 'fake-claude',
@@ -373,6 +419,8 @@ def build_env(tmp: Path, model_port: int, tg_port: int, api_port: int) -> dict:
         'telegram': {'token_env': 'E2E_TG_TOKEN', 'provider_mode': 'local_loopback',
                      'base_url': f'http://127.0.0.1:{tg_port}'},
     }}
+    if protocol != 'json':  # the default configuration stays exactly as it was
+        integrations[TENANT]['llm']['protocol'] = protocol
     (tmp / 'integrations.json').write_text(json.dumps(integrations), encoding='utf-8')
     env = {k: v for k, v in os.environ.items() if k not in (
         'ALLOW_INSECURE_DEV', 'TELEGRAM_DEFAULT_TENANT', 'TENANT_SECRETS', 'HTTPS_PROXY', 'HTTP_PROXY')}
@@ -391,13 +439,15 @@ def build_env(tmp: Path, model_port: int, tg_port: int, api_port: int) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--keep', action='store_true', help='keep the temp directory')
+    parser.add_argument('--protocol', choices=('json', 'tools'), default='json',
+                        help='llm.protocol of the planner (default json)')
     args = parser.parse_args(argv)
     tmp = Path(tempfile.mkdtemp(prefix='agent-platform-e2e-'))
     model, tg = FakeModel(), FakeTelegram()
     model_server, model_port = serve(model.handler())
     tg_server, tg_port = serve(tg.handler())
     api_port = free_port()
-    env = build_env(tmp, model_port, tg_port, api_port)
+    env = build_env(tmp, model_port, tg_port, api_port, protocol=args.protocol)
     none_env = tmp / 'none.env'  # absent on purpose: the process environment is the configuration
     provision = subprocess.run(
         [sys.executable, str(SCRIPTS / 'provision_identity.py'), '--workspace', TENANT, '--workspace-name', 'Demo',

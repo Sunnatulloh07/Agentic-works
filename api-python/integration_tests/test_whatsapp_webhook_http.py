@@ -218,6 +218,162 @@ def test_two_tenants_declaring_the_same_number_are_refused_not_guessed(http):
     assert events(engine) == []
 
 
+SECOND = 'second-shop'
+SECOND_NUMBER = '106540352242933'
+UNKNOWN_NUMBER = '999999999999999'
+
+
+def batch(*numbers):
+    """One Meta app's signed POST carrying a message for each business number."""
+    entries = []
+    for index, number in enumerate(numbers):
+        entries.extend(delivery([text(mid='wamid.B%d' % index, body='Salom %d' % index)],
+                                number=number)['entry'])
+    return {'object': 'whatsapp_business_account', 'entry': entries}
+
+
+def add_tenant(name, number):
+    config = Path(os.environ['PLATFORM_INTEGRATIONS_FILE'])
+    data = json.loads(config.read_text(encoding='utf-8'))
+    data[name] = {'whatsapp': {'registers': {'main': {'connection': 'whatsapp', 'phone_number_id': number}}}}
+    config.write_text(json.dumps(data), encoding='utf-8')
+
+
+def tenant_events(engine, tenant):
+    with engine.read() as c:
+        return [json.loads(r['payload'])['text'] for r in c.execute(
+            "SELECT payload FROM p_events WHERE tenant=? AND channel='whatsapp' ORDER BY rowid", (tenant,))]
+
+
+def test_one_post_for_two_shops_is_split_by_business_number(http):
+    """One Meta app batches several WABAs' numbers: each message goes to its own tenant."""
+    client, engine = http
+    add_tenant(SECOND, SECOND_NUMBER)
+    response = post(client, batch(NUMBER, SECOND_NUMBER))
+    assert response.status_code == 200
+    assert sorted(response.json()['accepted']) == ['wamid.B0', 'wamid.B1']
+    assert tenant_events(engine, TENANT) == ['Salom 0']
+    assert tenant_events(engine, SECOND) == ['Salom 1']
+
+
+def test_a_message_for_an_undeclared_number_is_dropped_not_given_to_the_owner(http):
+    client, engine = http
+    response = post(client, batch(NUMBER, UNKNOWN_NUMBER))
+    assert response.status_code == 200
+    assert response.json()['accepted'] == ['wamid.B0']
+    assert {'reason': 'unknown_business_number'} in response.json()['dropped']
+    assert tenant_events(engine, TENANT) == ['Salom 0']
+
+
+def test_an_unreadable_tenant_configuration_is_503_so_meta_retries(http, caplog):
+    """A typo in one tenant's file used to make its number 'unknown': 200, never retried."""
+    client, engine = http
+    broken = Path(os.environ['PACKS_DIR']) / 'broken-shop'
+    broken.mkdir()
+    (broken / 'integrations.yaml').write_text(
+        'whatsapp:\n  registers:\n    main:\n      connection: whatsapp\n'
+        '      phone_number_id: "not-digits-SECRETVALUE"\n', encoding='utf-8')
+    with caplog.at_level('WARNING'):
+        response = post(client, delivery([text()]))
+    assert response.status_code == 503
+    assert 'broken-shop' not in response.text
+    assert events(engine) == []
+    logged = ' '.join(record.getMessage() for record in caplog.records)
+    assert 'broken-shop' in logged and 'ValueError' in logged
+    assert 'SECRETVALUE' not in logged
+
+
+def test_an_unknown_number_without_any_app_secret_is_acknowledged_not_retried(http, monkeypatch):
+    client, engine = http
+    monkeypatch.delenv('META_APP_SECRET')
+    response = post(client, delivery([text()], number=UNKNOWN_NUMBER))
+    assert response.status_code == 200 and response.json()['ignored'] is True
+    assert events(engine) == []
+
+
+def many_numbers(count):
+    """An unsigned body naming ``count`` distinct business numbers, within the byte cap."""
+    changes = [{'field': 'messages', 'value': {'metadata': {'phone_number_id': str(10 ** 14 + n)}}}
+               for n in range(count)]
+    return {'object': 'whatsapp_business_account',
+            'entry': [{'id': 'W%d' % i, 'changes': changes[i * 50:(i + 1) * 50]}
+                      for i in range(-(-count // 50))]}
+
+
+def test_a_delivery_naming_too_many_business_numbers_is_refused_before_any_lookup(http, monkeypatch):
+    """Measured before the cap: 2,500 ids, each re-reading every tenant's config, 24.9 s."""
+    import time
+    from platform_runtime import tools, whatsapp_inbound as wa
+    client, engine = http
+    calls = []
+    monkeypatch.setattr(tools, 'config', lambda tenant: calls.append(tenant) or {})
+    raw = json.dumps(many_numbers(2500)).encode()
+    assert len(raw) < wa.MAX_BODY_BYTES
+    started = time.perf_counter()
+    response = post(client, None, signature='sha256=' + '0' * 64, raw=raw)
+    assert time.perf_counter() - started < 0.5
+    assert response.status_code == 422
+    assert calls == []
+    assert events(engine) == []
+    # At the cap the delivery is still routed normally (and, unsigned, refused as 401).
+    allowed = many_numbers(wa.MAX_ROUTED_NUMBERS)
+    assert post(client, allowed, signature='sha256=' + '0' * 64).status_code == 401
+
+
+def test_the_tenant_index_is_built_once_per_delivery(http, monkeypatch):
+    from platform_runtime import whatsapp_inbound as wa
+    client, _ = http
+    calls = []
+    real = wa._configured_tenants
+    monkeypatch.setattr(wa, '_configured_tenants', lambda: calls.append(1) or real())
+    payload = many_numbers(wa.MAX_ROUTED_NUMBERS)
+    payload['entry'][0]['changes'][0]['value']['metadata']['phone_number_id'] = NUMBER
+    post(client, payload)
+    assert calls == [1]
+
+
+def test_a_declared_length_over_the_cap_is_413_before_the_body_is_read(http):
+    client, engine = http
+    raw = json.dumps(delivery([text()])).encode()
+    response = client.post(URL, content=raw, headers={
+        'Content-Type': 'application/json', 'X-Hub-Signature-256': sign(raw),
+        'Content-Length': str(1_000_001)})
+    assert response.status_code == 413
+    assert events(engine) == []
+
+
+def test_a_streamed_body_is_cut_at_the_cap_not_buffered_whole():
+    """No Content-Length (chunked): the read stops at MAX_BODY_BYTES + one chunk."""
+    import asyncio
+    from fastapi import HTTPException
+    from app import whatsapp_api
+    from platform_runtime import whatsapp_inbound as wa
+
+    pulled = []
+
+    class Endless:
+        headers = {}
+
+        async def stream(self):
+            while True:
+                pulled.append(65536)
+                yield b' ' * 65536
+
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(whatsapp_api._read_body(Endless()))
+    assert caught.value.status_code == 413
+    assert sum(pulled) <= wa.MAX_BODY_BYTES + 65536
+
+    class Small:
+        headers = {'content-length': '5'}
+
+        async def stream(self):
+            yield b'ab'
+            yield b'cde'
+
+    assert asyncio.run(whatsapp_api._read_body(Small())) == b'abcde'
+
+
 def test_the_handshake_fails_closed_without_a_verify_token(http, monkeypatch):
     client, _ = http
     monkeypatch.delenv('META_VERIFY_TOKEN')

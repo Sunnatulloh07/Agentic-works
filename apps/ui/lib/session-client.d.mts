@@ -8,4 +8,6 @@ export class SessionClient {
   select(workspace:string):Promise<void>;
   logout():Promise<void>;
   clear():void;
+  session:unknown;
+  onExpired:((err:unknown)=>void)|null;
 }

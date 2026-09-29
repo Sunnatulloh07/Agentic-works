@@ -79,7 +79,7 @@ def test_handoffs_newest_first_with_customer_text_and_reason():
     assert [x['event_key'] for x in rows] == ['m2', 'm1']
     assert rows[0] == {'id': 'telegram:m2', 'channel': 'telegram', 'event_key': 'm2', 'conversation_id': '-9',
                        'reason': 'send_uncertain', 'text': 'Yetkazish bormi? O‘zbekcha', 'created': 20.0,
-                       'agent': AGENT}
+                       'agent': AGENT, 'resolved': False, 'resolved_by': '', 'resolved_at': None}
 
 
 def test_handoffs_are_bounded_and_tenant_isolated():
@@ -179,6 +179,16 @@ def reply(c, text='Men javob beraman', key='k-reply-1', tenant=T, role='operator
     return c.post(f'/platform/{tenant}/conversations/telegram/-123/reply', json={'text': text}, headers=headers)
 
 
+def delivered(c, text='Men javob beraman', key='k-reply-1', tenant=T):
+    """POST a reply and let the worker see it delivered: only then is the chat taken over."""
+    from platform_runtime.operator_reply import settle_operator_replies
+    task = reply(c, text=text, key=key, tenant=tenant).json()['task_id']
+    with engine().tx() as db:
+        db.execute("UPDATE p_tasks SET status='succeeded' WHERE id=?", (task,))
+    assert settle_operator_replies(engine(), tenant)
+    return task
+
+
 def release(c, tenant=T, role='operator', key='k-release-1'):
     headers = auth(tenant, role)
     if key:
@@ -186,10 +196,19 @@ def release(c, tenant=T, role='operator', key='k-release-1'):
     return c.post(f'/platform/{tenant}/conversations/telegram/-123/release', headers=headers)
 
 
-def test_an_operator_reply_puts_the_chat_in_operator_mode():
+def test_a_queued_reply_does_not_take_the_chat_over_yet():
+    # It may still fail (a blocked bot, a closed WhatsApp window): until the
+    # customer has the words, the bot keeps answering.
     customer('m1', 'Salom')
     with TestClient(app) as c:
         assert reply(c).status_code == 200
+        assert c.get(f'/platform/{T}/conversations/telegram/-123', headers=auth()).json()['takeover'] is None
+
+
+def test_a_delivered_operator_reply_puts_the_chat_in_operator_mode():
+    customer('m1', 'Salom')
+    with TestClient(app) as c:
+        delivered(c)
         thread = c.get(f'/platform/{T}/conversations/telegram/-123', headers=auth()).json()
         listed = c.get(f'/platform/{T}/conversations', headers=auth()).json()['conversations'][0]
     assert thread['takeover']['actor'] == 'test-user' and thread['takeover']['until'] > 0
@@ -199,7 +218,7 @@ def test_an_operator_reply_puts_the_chat_in_operator_mode():
 def test_release_hands_the_chat_back_to_the_bot():
     customer('m1', 'Salom')
     with TestClient(app) as c:
-        reply(c)
+        delivered(c)
         r = release(c)
         assert r.status_code == 200 and r.json() == {'released': True, 'takeover': None}
         assert release(c, key='k-release-2').json()['released'] is False
@@ -210,7 +229,7 @@ def test_release_hands_the_chat_back_to_the_bot():
 def test_release_requires_a_key_an_operator_and_the_tenant():
     customer('m1', 'Salom')
     with TestClient(app) as c:
-        reply(c)
+        delivered(c)
         assert release(c, key=None).status_code == 422
         for role in ('viewer', 'integrator'):
             assert release(c, role=role).status_code == 403
@@ -223,7 +242,7 @@ def test_takeover_is_tenant_isolated():
     customer('m1', 'Salom')
     customer('o1', 'Boshqa', tenant='other')
     with TestClient(app) as c:
-        reply(c)
+        delivered(c)
         other = c.get('/platform/other/conversations/telegram/-123', headers=auth('other')).json()
     assert other['takeover'] is None
 

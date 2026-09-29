@@ -8,6 +8,10 @@ Anthropic Messages envelope (``content[] | select(.type=="text") | .text``,
 ``curl/examples.md`` -> Parsing the response. Both hand the extracted string to
 ``decision_from_text``, so a bound relaxed for one dialect cannot silently be
 looser in the other.
+
+``parse_anthropic_tool_call`` reads the `tools` protocol (``llm.protocol``),
+where the decision is a ``tool_use`` block rather than text; its input is held
+to the same byte and shape bounds through ``bounded_shape``.
 """
 import json
 
@@ -31,6 +35,19 @@ ANTHROPIC_STOP_REFUSED = {
     'tool_use': 'Alternate tool-call envelope is not a JSON decision',
     'pause_turn': 'Paused model turn is not a complete JSON decision',
 }
+# The `tools` protocol: a decision is a turn that stopped to call a tool. Skill,
+# shared/tool-use-concepts.md: a refusal can cut a tool_use off mid-input and a
+# max_tokens turn may carry a truncated one, so neither is ever executed. An
+# end_turn with only text answered without deciding; tool_choice `auto` allows
+# it, and it is refused here rather than read as an answer or a question.
+ANTHROPIC_TOOL_STOP = 'tool_use'
+ANTHROPIC_TOOL_STOP_REFUSED = {
+    'refusal': 'Model refused the request; no tool call is executed',
+    'max_tokens': 'Truncated model response; a tool call may be incomplete',
+    'pause_turn': 'Paused model turn is not a complete tool call',
+    'end_turn': 'Model answered without a tool call; a decision is a tool call',
+}
+MAX_TOOL_NAME_CHARS = 64
 
 
 def unique_object(pairs):
@@ -53,6 +70,11 @@ def decision_from_text(text, maximum_bytes):
     except (RecursionError,json.JSONDecodeError):
         raise ValueError('Malformed model decision JSON') from None
     if not isinstance(value,dict):raise ValueError('Model decision must be an object')
+    return bounded_shape(value)
+
+
+def bounded_shape(value):
+    """Depth and node bounds on parsed model output, without recursion."""
     # Do not depend on a Python/JSON implementation-specific recursion limit.
     stack=[(value,0)];visited=0
     while stack:
@@ -99,3 +121,36 @@ def parse_anthropic_decision(response, maximum_bytes=MAX_DECISION_BYTES):
         if isinstance(block,dict) and block.get('type')=='text':
             return decision_from_text(block.get('text'),maximum_bytes)
     raise ValueError('Bounded model decision text required')
+
+
+def parse_anthropic_tool_call(response, maximum_bytes=MAX_DECISION_BYTES):
+    """Anthropic Messages envelope of the `tools` protocol -> (tool name, input).
+
+    Skill, curl/examples.md -> Tool Use: a ``tool_use`` block carries ``name``
+    and an object ``input``; ``stop_reason`` is ``tool_use``. Thinking and text
+    blocks before it are skipped. One planner call is one decision: the request
+    sets ``disable_parallel_tool_use``, and should a turn still carry several
+    calls, the FIRST is the decision and the rest are never executed. The input
+    is held to the JSON decision's bounds (bytes, depth, nodes, finite numbers).
+    """
+    if not isinstance(response,dict):raise ValueError('Model response must be an object')
+    if response.get('type')!='message':raise ValueError('Anthropic message envelope required')
+    stop=response.get('stop_reason')
+    if stop in ANTHROPIC_TOOL_STOP_REFUSED:raise ValueError(ANTHROPIC_TOOL_STOP_REFUSED[stop])
+    if stop!=ANTHROPIC_TOOL_STOP:raise ValueError('Complete model response required')
+    content=response.get('content')
+    if not isinstance(content,list) or len(content)>MAX_CONTENT_BLOCKS:
+        raise ValueError('Bounded Anthropic content block list required')
+    for block in content:
+        if isinstance(block,dict) and block.get('type')=='tool_use':
+            name,arguments=block.get('name'),block.get('input')
+            if not isinstance(name,str) or not 1<=len(name)<=MAX_TOOL_NAME_CHARS:
+                raise ValueError('Bounded tool name required')
+            if not isinstance(arguments,dict):raise ValueError('Tool input must be an object')
+            try:
+                size=len(json.dumps(arguments,ensure_ascii=False,allow_nan=False).encode('utf-8'))
+            except (TypeError,ValueError,RecursionError):
+                raise ValueError('Malformed tool input') from None
+            if size>maximum_bytes:raise ValueError('Tool input exceeds byte limit')
+            return name,bounded_shape(arguments)
+    raise ValueError('Tool call required')

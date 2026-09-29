@@ -35,8 +35,10 @@ class VersionTests(unittest.TestCase):
         for package in ('apps/ui/package.json', 'apps/runner/package.json'):
             with self.subTest(package=package):
                 self.assertEqual(number, json.loads((ROOT / package).read_text(encoding='utf-8'))['version'])
-        badge = (ROOT / 'apps/ui/app/platform/page.tsx').read_text(encoding='utf-8')
-        self.assertIn('Development ' + number, badge)
+        # The shop-first UI dropped its "Development x.y.z" badge; it must not carry
+        # a hand-written version of its own that could drift from this one.
+        page = (ROOT / 'apps/ui/app/platform/page.tsx').read_text(encoding='utf-8')
+        self.assertNotRegex(page, r'Development \d+\.\d+\.\d+')
         self.assertTrue((ROOT / 'README.md').read_text(encoding='utf-8').startswith(
             '# Agent Platform — v' + '.'.join(number.split('.')[:2])))
 

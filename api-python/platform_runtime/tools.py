@@ -3,6 +3,7 @@
 No tool takes a caller-supplied URL or secret. Network destinations are operator config.
 Provider failures after writes are uncertain and are NEVER blindly retried.
 """
+import dataclasses
 import functools
 import json
 import os
@@ -30,6 +31,19 @@ PROVIDER_TIMEOUT_SECONDS = 25
 MEMORY_SEARCH_LIMIT = 10
 RECORDS_LIST_LIMIT = 50
 CREDENTIAL_NAME = re.compile(r'[A-Z][A-Z0-9_]*')
+# Upper-snake words joined by single underscores: no leading, trailing or doubled one.
+CREDENTIAL_SEGMENTS = re.compile(r'[A-Z0-9]+(?:_[A-Z0-9]+)*')
+# What the platform itself authenticates with. No integration credential is one
+# of these, so no configuration -- pack-local or operator JSON -- may name one,
+# and secret() refuses them whoever built the block it was handed.
+PLATFORM_SECRET_NAMES = frozenset({'JWT_SECRET', 'ADMIN_TOKEN', 'TELEGRAM_WEBHOOK_SECRET',
+                                   'TENANT_SECRETS', 'META_SECRETS', 'REDIS_URL'})
+PLATFORM_SECRET_PREFIXES = ('PLATFORM_VAULT_',)
+# Deployment-level webhook secrets: the operator JSON names them on purpose
+# (config/whatsapp_webhook.example.json); a tenant's own pack file never may.
+DEPLOYMENT_SECRET_NAMES = frozenset({'META_APP_SECRET', 'META_VERIFY_TOKEN'})
+# Comma list of names outside TENANT_<TENANT>__ that the operator lets every pack use.
+SHARED_SECRET_NAMES_ENV = 'PLATFORM_SHARED_SECRET_NAMES'
 RISK_LEVELS = frozenset({'read', 'write', 'destructive', 'physical'})
 # A tenant's own configuration lives in its pack directory. The charset and the
 # default directory are app/packs.py's, restated rather than imported: the
@@ -86,7 +100,36 @@ class Tool:
     handler:object=None
     external:bool=False
     runner:bool=False
+    # When to call the tool, in one or two sentences, for the model. Last and
+    # defaulted, so every existing positional construction is unchanged.
+    description:str=''
     def validate(self,args):validate_schema(args,self.schema)
+
+
+# Descriptions for the tools a conversation agent is given, keyed by runtime tool
+# name (never a pack agent id). Applied in build_registry to a tool registered
+# without one, so the modules that register these tools stay untouched. Without
+# them the model saw only a name and a schema and had to guess which tool fits.
+TOOL_DESCRIPTIONS = {
+    'products.search': 'Search the catalogue by product name, type or keyword. Returns matching '
+                       'products with id, price and sizes. Use for any question about what is sold, '
+                       'what it costs or which sizes exist.',
+    'shop.info': 'The shop\'s name, FAQ answers (delivery, payment, returns, hours) and branch '
+                 'addresses. Use for questions about the shop rather than about a product.',
+    'orders.draft': 'Check and price an order: product_id from products.search, qty, customer name, '
+                    'phone, delivery address or branch id, optional size. Returns valid and a list of '
+                    'problems; ask the customer for any field reported. It does not place the order.',
+    'records.create': 'Save a structured note of one kind (for example a lead or a request) for the '
+                      'business to follow up.',
+    'records.list': 'List the most recent saved records of one kind.',
+    'memory.put': 'Remember a fact for this agent under a key, optionally with an expiry in seconds.',
+    'memory.search': 'Keyword search over the facts this agent has remembered.',
+    'whatsapp.window': 'Whether the WhatsApp 24-hour customer-service window is open for a contact, '
+                       'that is whether a free-form reply may be sent.',
+    'knowledge.search': 'Search the business\'s uploaded documents in a named collection for passages '
+                        'relevant to a question. Use for policies and information not in the catalogue.',
+    'reports.summary': 'Counts of this business\'s tasks by status and of its saved records.',
+}
 
 
 class Registry:
@@ -107,7 +150,8 @@ class Registry:
         if name not in self.items:raise LookupError('Unknown executable tool')
         return self.items[name]
     def describe(self,names=None):
-        return [{'name':t.name,'risk':t.risk,'schema':t.schema,'runner':t.runner} for t in self.items.values() if names is None or t.name in names]
+        return [{'name':t.name,'risk':t.risk,'schema':t.schema,'runner':t.runner,'description':t.description}
+                for t in self.items.values() if names is None or t.name in names]
 
 
 def register_once(registry, tools):
@@ -194,7 +238,107 @@ class IntegrationNotConfigured(RuntimeError):
     """
 
 
-def config(tenant):
+class CredentialScopeError(RuntimeError):
+    """Configuration names an environment variable it may not read.
+
+    A RuntimeError like every other unusable configuration, so callers that
+    refuse a broken file refuse this too. The message names the key and the
+    rule, never a value -- nor the referenced name, which a mistaken paste can
+    turn into a value.
+    """
+
+
+def platform_secret(name):
+    return name in PLATFORM_SECRET_NAMES or name.startswith(PLATFORM_SECRET_PREFIXES)
+
+
+def tenant_credential_prefix(tenant):
+    """``TENANT_<TENANT>__``: the variables a tenant's own pack file may name, or None.
+
+    The tenant in upper snake case, then a DOUBLE underscore. A tenant part with
+    no doubled or edge underscore, and a suffix with none either, leave exactly
+    one '__' in a reference -- so it has exactly one owning namespace, and
+    'demo' cannot reach 'demo-retail' (TENANT_DEMO__ vs TENANT_DEMO_RETAIL__).
+    A name that cannot form such a part ('a_', 'a--b') gets no namespace. Names
+    differing only by case or by '-' versus '_' share one; the operator names
+    tenants, not the tenant.
+    """
+    scope=tenant.upper().replace('-','_')
+    return 'TENANT_'+scope+'__' if CREDENTIAL_SEGMENTS.fullmatch(scope) else None
+
+
+def shared_secret_names(environ=None):
+    """PLATFORM_SHARED_SECRET_NAMES as a set; refused whole if an entry is not shareable.
+
+    A platform or deployment secret on the list would hand it to every pack, so
+    the list is refused rather than filtered. The message never echoes an entry:
+    a value pasted into the list by mistake must not reach a log.
+    """
+    raw=(os.environ if environ is None else environ).get(SHARED_SECRET_NAMES_ENV,'')
+    names=frozenset(part.strip() for part in raw.split(',') if part.strip())
+    for name in names:
+        if not CREDENTIAL_NAME.fullmatch(name) or platform_secret(name) or name in DEPLOYMENT_SECRET_NAMES:
+            raise CredentialScopeError(SHARED_SECRET_NAMES_ENV+' may list only integration credential '
+                                       'names, never a platform secret')
+    return names
+
+
+def credential_references(value,path=(),named=False,scoped=False,depth=0):
+    """Yield (key path, NAME) for every environment variable a configuration can make the runtime read.
+
+    A reference is a string spelled like CREDENTIAL_NAME that sits under a key
+    ending in ``_env`` or named ``env`` (custom HTTP headers), or anywhere in a
+    ``whatsapp_tokens`` block (register -> kind -> NAME) -- or, so that a reader
+    added later under a new key convention cannot slip past, ANY string naming a
+    variable set in this process: only a set variable can leak.
+    """
+    if depth>MAX_SCHEMA_DEPTH:raise CredentialScopeError('Integration configuration nested too deeply')
+    if isinstance(value,dict):
+        for key,item in value.items():
+            key=str(key)
+            yield from credential_references(item,path+(key,),key.endswith('_env') or key=='env',
+                                             scoped or key=='whatsapp_tokens',depth+1)
+    elif isinstance(value,list):
+        for index,item in enumerate(value):
+            yield from credential_references(item,path+(str(index),),named,scoped,depth+1)
+    elif isinstance(value,str) and CREDENTIAL_NAME.fullmatch(value) and (named or scoped or value in os.environ):
+        yield '.'.join(path),value
+
+
+def credential_scope_violations(tenant,data,*,pack):
+    """Every reference ``data`` may not name, as (key path, NAME, rule); [] when clean.
+
+    Every source: no platform secret. A pack-local file (``pack=True``), which
+    the tenant may author: additionally no deployment webhook secret, and only
+    the tenant's own TENANT_<TENANT>__ namespace or a name the operator shares
+    through PLATFORM_SHARED_SECRET_NAMES. The operator JSON is operator-authored
+    and otherwise trusted.
+    """
+    prefix=tenant_credential_prefix(tenant) if pack else None
+    shared=shared_secret_names() if pack else frozenset()
+    found=[]
+    for path,ref in credential_references(data):
+        if platform_secret(ref) or (pack and ref in DEPLOYMENT_SECRET_NAMES):
+            found.append((path,ref,'a platform secret may not be named here'))
+        elif not pack or ref in shared:
+            continue
+        elif prefix is None:
+            found.append((path,ref,'this tenant name forms no TENANT_<NAME>__ namespace; '
+                                   f'only names in {SHARED_SECRET_NAMES_ENV} may be used'))
+        elif not (ref.startswith(prefix) and CREDENTIAL_SEGMENTS.fullmatch(ref[len(prefix):])):
+            found.append((path,ref,f'a pack may name only {prefix}* variables '
+                                   f'or ones listed in {SHARED_SECRET_NAMES_ENV}'))
+    return found
+
+
+def check_credential_scope(tenant,data,*,pack):
+    """Refuse configuration that names a variable outside what its author may read."""
+    for path,_,rule in credential_scope_violations(tenant,data,pack=pack):
+        raise CredentialScopeError((PACK_INTEGRATIONS_FILE+' ' if pack else '')+path[:120]+': '+rule)
+
+
+def _integration_source(tenant):
+    """(mapping, pack-local?) as config() reads it, BEFORE the credential-scope check."""
     # Credentials are configured per tenant, never sent in pack or API output.
     # The tenant's own pack directory comes FIRST (tamoyil 1: yangi mijoz =
     # yangi YAML). Before this, every module resolved tenant configuration
@@ -203,7 +347,7 @@ def config(tenant):
     # unchanged fallback for tenants that have not moved -- same reads, same
     # messages, so no caller's error path shifted.
     local=pack_integrations_path(tenant)
-    if local.is_file():return read_pack_integrations(local)
+    if local.is_file():return read_pack_integrations(local),True
     path=os.environ.get('PLATFORM_INTEGRATIONS_FILE','')
     if not path:raise IntegrationNotConfigured('Integration configuration missing: set '
         'PLATFORM_INTEGRATIONS_FILE or add packs/<tenant>/'+PACK_INTEGRATIONS_FILE)
@@ -211,12 +355,33 @@ def config(tenant):
     value=data.get(tenant)
     if not isinstance(value,dict):raise IntegrationNotConfigured('Tenant integration not configured: '
         'add it to PLATFORM_INTEGRATIONS_FILE or packs/<tenant>/'+PACK_INTEGRATIONS_FILE)
-    return value
+    return value,False
+
+
+def config(tenant):
+    # Either source is checked for the variables it names on every read, before
+    # any reader can resolve one: one disallowed reference refuses the whole file.
+    data,pack=_integration_source(tenant)
+    check_credential_scope(tenant,data,pack=pack)
+    return data
+
+
+def integration_status(tenant):
+    """(mapping, violations) for a STATUS page, which must say what is wrong per block.
+
+    The mapping is config()'s even when config() would refuse it, so NEVER resolve
+    a credential from it: config() is the only reader for that. ``violations`` is
+    credential_scope_violations(): key paths, names and rules, never a value.
+    """
+    data,pack=_integration_source(tenant)
+    return data,credential_scope_violations(tenant,data,pack=pack)
 
 
 def secret(cfg,name):
     ref=cfg.get(name,'')
     if not isinstance(ref,str) or not CREDENTIAL_NAME.fullmatch(ref):raise RuntimeError('Invalid credential reference')
+    # The floor for blocks a caller built itself, e.g. secret({'value': ref}, 'value').
+    if platform_secret(ref):raise CredentialScopeError(f'{name}: a platform secret may not be named here')
     value=os.environ.get(ref,'')
     if not value:raise RuntimeError('Missing provider credential')
     return value
@@ -436,6 +601,9 @@ def build_registry(catalog=None, shop=None):
     # Only implemented, non-simulated runner operations are enabled.
     r.add(Tool('fs.list','read',obj({'dir':string(1000)}),runner=True))
     r.add(Tool('fs.read_text','read',obj({'file':string(1000)}),runner=True))
+    for name,text in TOOL_DESCRIPTIONS.items():
+        if name in r.items and not r.items[name].description:
+            r.items[name]=dataclasses.replace(r.items[name],description=text)
     return r
 
 

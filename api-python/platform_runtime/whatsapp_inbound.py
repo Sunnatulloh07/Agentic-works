@@ -72,6 +72,7 @@ import re
 from pathlib import Path
 
 from . import cells
+from .display_name import clean_display_name
 from .engine import Conflict, Forbidden, encode
 
 # ------------------------------------------------------------------ constants
@@ -140,6 +141,19 @@ WINDOW_SECONDS = 24 * 60 * 60
 
 class WebhookError(RuntimeError):
     """A refusal about a webhook, not a transport failure."""
+
+
+class RoutingUnavailable(RuntimeError):
+    """A tenant's configuration could not be read, so no business number can be routed.
+
+    Carries the SOURCE (a tenant name, or the integrations file) and the exception
+    TYPE only: a parser message can quote the file, and the file holds references
+    an operator did not mean to publish. The route answers 5xx so Meta retries.
+    """
+
+    def __init__(self, source, error):
+        self.source, self.error = source, type(error).__name__
+        super().__init__(f'{source}: {self.error}')
 
 
 # ------------------------------------------------------------------ signature
@@ -545,6 +559,13 @@ DEFAULT_APP_SECRET_ENV = 'META_APP_SECRET'
 MAX_CUSTOMER_TEXT_CHARS = 4000
 MAX_PROFILE_NAME_CHARS = 256
 PHONE_NUMBER_ID_RE = re.compile(r'^[0-9]{1,32}$')
+# Distinct business numbers one delivery may name before the route refuses it. The
+# numbers are read from UNVERIFIED bytes to pick the signing secret, so each one
+# used to cost a pass over every tenant's configuration: 2,500 ids (MAX_ENTRIES x
+# MAX_CHANGES) measured 24.9 s on the event loop. Meta addresses a delivery to one
+# WABA, whose numbers a tenant declares; three leaves room for a batched delivery
+# and none for a lookup amplifier.
+MAX_ROUTED_NUMBERS = 3
 # Media is not fetched; the placeholder is all the agent sees, so it can ask for a
 # text description or hand off. The words are app/telegram.MEDIA_PLACEHOLDERS'.
 MEDIA_PLACEHOLDERS = {'image': '[rasm]', 'video': '[video]', 'document': '[fayl]',
@@ -575,7 +596,14 @@ def phone_number_ids(payload):
 
 
 def _configured_tenants():
-    """Every tenant with integration configuration, from both sources ``tools.config`` reads."""
+    """Every tenant with integration configuration, from both sources ``tools.config`` reads.
+
+    An integrations file that is set but unreadable, or a packs directory that
+    exists but cannot be listed, is RoutingUnavailable rather than "no tenants":
+    read as empty, every number it declares looked unknown and was acknowledged,
+    so Meta never redelivered. A packs directory that does not exist is simply
+    one source with nothing in it.
+    """
     from .tools import DEFAULT_PACKS_DIR, PACK_INTEGRATIONS_FILE, TENANT_NAME
 
     names = set()
@@ -584,16 +612,18 @@ def _configured_tenants():
         try:
             with open(path, encoding='utf-8') as handle:
                 data = json.load(handle)
-        except (OSError, ValueError):
-            data = {}
+        except (OSError, ValueError) as error:
+            raise RoutingUnavailable('PLATFORM_INTEGRATIONS_FILE', error) from None
         if isinstance(data, dict):
             names.update(name for name, block in data.items()
                          if isinstance(block, dict) and TENANT_NAME.fullmatch(name))
     root = Path(os.environ.get('PACKS_DIR') or DEFAULT_PACKS_DIR)
     try:
         children = list(root.iterdir())
-    except OSError:
+    except FileNotFoundError:
         children = []
+    except OSError as error:
+        raise RoutingUnavailable('PACKS_DIR', error) from None
     for child in children:
         if TENANT_NAME.fullmatch(child.name) and (child / PACK_INTEGRATIONS_FILE).is_file():
             names.add(child.name)
@@ -609,18 +639,45 @@ def tenants_for_phone_number(number):
     but reads each tenant through ``whatsapp_config``, pack-local integrations.yaml
     included, so routing and the send side agree on which register owns the number.
     """
-    if not isinstance(number, str) or not PHONE_NUMBER_ID_RE.match(number):
-        return []
-    from .whatsapp import _registers
+    return tenants_for_phone_numbers([number])
 
-    owners = []
+
+def tenants_for_phone_numbers(numbers):
+    """Tenants declaring ANY of these business numbers, sorted (see ``number_owners``)."""
+    return sorted({tenant for owners in number_owners(numbers).values() for tenant in owners})
+
+
+def number_owners(numbers):
+    """``{number: sorted tenants declaring it}`` for each well-formed number, one pass.
+
+    Every tenant's registers are read once for the whole delivery, not once per
+    number: the per-number form made the pass count a multiple of an attacker's
+    choosing. Malformed numbers are left out; a number nobody declares maps to [].
+
+    Strict where the send side is lenient (``whatsapp._registers`` reads a broken
+    block as "no registers"): a tenant whose configuration cannot be read raises
+    RoutingUnavailable, because read as empty its numbers looked unknown and their
+    deliveries were acknowledged and lost. A tenant with no configuration at all
+    (IntegrationNotConfigured) declares nothing, which is not a fault.
+    """
+    wanted = sorted({number for number in numbers
+                     if isinstance(number, str) and PHONE_NUMBER_ID_RE.match(number)})
+    if not wanted:
+        return {}
+    from . import whatsapp
+    from .tools import IntegrationNotConfigured
+
+    owners = {number: [] for number in wanted}
     for tenant in _configured_tenants():
         try:
-            registers = _registers(tenant)
-        except OSError:
+            registers = whatsapp.whatsapp_config(tenant)
+        except IntegrationNotConfigured:
             continue
-        if any(entry['phone_number_id'] == number for entry in registers.values()):
-            owners.append(tenant)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as error:
+            raise RoutingUnavailable(tenant, error) from None
+        declared = {entry['phone_number_id'] for entry in registers.values()}
+        for number in declared & set(owners):
+            owners[number].append(tenant)
     return owners
 
 
@@ -701,6 +758,9 @@ def _customer_message(message, number, names):
         # Meta's timestamp only, never our clock (see ``unwrap``).
         'received_at': stamp,
         'window_until': stamp + WINDOW_SECONDS if isinstance(stamp, int) else None,
+        # The name again, bounded and stripped of invisible characters, for display
+        # only; absent (not '') when Meta sent none, so nameless events keep their shape.
+        **({'sender_name': shown} if (shown := clean_display_name(names.get(wa_id, ''))) else {}),
     }}, None
 
 

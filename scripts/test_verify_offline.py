@@ -20,6 +20,16 @@ WRAPPED_ID = 'runtime_tests.test_portable_fs.PortableFSTests.test_read_real_file
 
 
 class RecordedSurfaceTests(unittest.TestCase):
+    def test_recorded_blocked_is_a_windows_only_allowance(self):
+        # The record lists Windows platform limits (O_NOFOLLOW, mkfifo, POSIX modes).
+        # On Linux those tests are security checks that must pass, so a failure there
+        # is never "recorded": the job stays FAIL.
+        text = 'FAIL: test_x (runtime_tests.test_portable_fs.PortableFsTests.test_x)\nRan 1 test\n'
+        with unittest.mock.patch.object(verify_offline, 'python_blocked_ids',
+                                        return_value=['runtime_tests.test_portable_fs.PortableFsTests.test_x']):
+            self.assertIsNotNone(verify_offline.recorded_blocked('python_runtime', text, ROOT, platform='nt'))
+            self.assertIsNone(verify_offline.recorded_blocked('python_runtime', text, ROOT, platform='posix'))
+
     def test_the_python_record_is_read_from_the_baseline_module(self):
         ids = verify_offline.python_blocked_ids(ROOT)
         self.assertEqual(len(ids), 13)

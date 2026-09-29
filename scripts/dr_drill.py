@@ -24,7 +24,7 @@ It covers the part that can be proven offline, and says so.
 Run::
 
     python scripts/dr_drill.py
-    python scripts/dr_drill.py --report docs/verification/dr-drill.json
+    python scripts/dr_drill.py --report .verify-offline/dr-drill.json
     python scripts/dr_drill.py --source /path/to/platform.db --keep /tmp/dr
 """
 from __future__ import annotations

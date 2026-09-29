@@ -392,6 +392,23 @@ class OversightTests(unittest.TestCase):
                           'settled': {'calls': 1, 'amount_micro': 8_000}},
                          result['tenant_ledger_by_status'])
 
+    def test_unreconciled_money_is_still_in_flight(self):
+        # usage_budget frees the parallel-call slot of an old 'uncertain' row by
+        # moving it to 'unreconciled', but the money is still held until the owner
+        # reconciles it -- the cost view must keep counting it.
+        from platform_runtime.usage_budget import HELD
+        with self.engine.tx() as c:
+            c.execute('''INSERT INTO p_budget_settings(tenant,currency,limit_micro,
+                max_inflight,generation) VALUES(?,?,?,?,?)''',
+                      (TENANT, 'USD', 1_000_000, 4, 1))
+            for rid, status in (('u1', 'unreconciled'), ('u2', 'uncertain')):
+                c.execute('''INSERT INTO p_budget_reservations(tenant,id,request_key,
+                    fingerprint,period,amount_micro,status,created,updated)
+                    VALUES(?,?,?,?,?,?,?,?,?)''',
+                          (TENANT, rid, 'model:' + rid, 'fp', '2026-09', 5_000, status, 990.0, 990.0))
+        self.assertIn('unreconciled', HELD)
+        self.assertEqual(10_000, cost(self.engine, TENANT, AGENT)['tenant_inflight_micro'])
+
     # -------------------------------------------------------------------- health
 
     def test_health_reports_the_last_run(self):

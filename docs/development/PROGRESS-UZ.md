@@ -3,15 +3,17 @@
 Joriy source **v0.5**. Ish davom etmoqda, **IN_PROGRESS**, production **NO_GO**. To‘liq PRD
 100% tugamagan.
 
-**Holat bloki (2026-09-22 chuqur ko‘rib chiqishi):**
+**Holat bloki (2026-09-27 yangilangan).** Yagona joriy NO_GO blockers/gaps hisoboti:
+`docs/development/PRODUCTION-GO-AUDIT-UZ.md`. Quyidagi raqamlar shu sanada qayta o‘lchangan;
+pastdagi sessiya yozuvlari xronologik va har biri o‘z sanasidagi o‘lchovni saqlaydi.
 
 - API bu mashinada **hech qachon ishga tushirilmagan** — `api-python/.env` yo‘q,
   `config/integrations.json` yo‘q, `api-python/data/app.db` da faqat migratsiya qatori.
   Shuning uchun **hech bir** integratsiya `live_verified` emas; eng yuqorisi
   `LOCAL_CONTRACT_TESTED`.
-- `runtime_tests`: **3 239 sinov**, Windows’da `failures=1, errors=12` — **13 tasi
+- `runtime_tests`: **3 651 sinov**, Windows’da `failures=1, errors=12, skipped=1` — **13 tasi
   Windows-only** (`os.O_NOFOLLOW`, `mkfifo`, `fcntl`, symlink privilegiyasi, POSIX fayl
-  rejimlari). `integration_tests`: **95/95 PASS**
+  rejimlari). `integration_tests`: **357/357 PASS**
   (`ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform IDENTITY_DIRECTORY=false`).
 - `api-python/tests/` (legacy): **nafaqaga chiqarildi (2026-09-22)**. U 33 qizil / 172 pass
   edi va hech bir gate uni yurgizmasdi; tirik kodni sinaydigan 5 fayl
@@ -19,14 +21,16 @@ Joriy source **v0.5**. Ish davom etmoqda, **IN_PROGRESS**, production **NO_GO**.
   `test_lang`, `test_config`, `test_security_helpers`), qolgani o‘chirildi — sabablar
   `api-python/integration_tests/LEGACY-RETIRED.md` da.
 - CI: `http` job endi **yig‘iladi** (`integration_tests/conftest.py`);
-  `ui_dependency_security` **hamon FAIL** (`next@14.2.35`: 1 critical + 1 high; Next 15 +
-  React 19 kerak).
-- Yetib borish: registry’dagi **89** tool’dan **12 tasi** yetkazilgan pack’lardan
-  chaqiriladi; `platform_runtime` kodining **81%** yetib bo‘lmaydi. 17 modul
-  (`erp`, `documents`, `inventory`, `business_graph`, `whatsapp`, `whatsapp_inbound`,
-  `telephony`, `assets`, `vision`, `manufacturing`, `oee`, `workforce`, `supervisor`,
-  `reengagement`, `escalation`, `briefing`, `oversight`) — **muzlatilgan preview**,
-  mahsulot funksiyasi emas.
+  `ui_dependency_security` **PASS** (`next@16.3.6` + `react@19.3.0`; `npm audit` → 0
+  vulnerabilities, 2026-09-25).
+- Yetib borish (2026-09-27, `measure_reachability.py`): registry’dagi **91** tool’dan
+  **20 tasi** yetkazilgan pack’lardan chaqiriladi; tool-owning `platform_runtime` kodining
+  **83.8%** (11 283 / 13 460, **17 / 22** modul) yetib bo‘lmaydi. Yetib boriladigan
+  tool-owning modul **5** ta: `knowledge`, `oversight`, `shop_tools`, `tools`, `whatsapp`.
+  **17** muzlatilgan tool-owning modul: `assets`, `business_graph`, `connectors`,
+  `documents`, `erp`, `escalation`, `google_adapters`, `inventory`, `manufacturing`, `oee`,
+  `sheets`, `speech`, `supervisor`, `telephony`, `vision`, `whatsapp_inbound`, `workforce`
+  — **muzlatilgan preview**, mahsulot funksiyasi emas.
 - First-run: eski `setup_local.py` → `owner_login.py` yo‘li **o‘lik** (410 + 403, UI’da
   token maydoni yo‘q). Yagona ishlaydigan yo‘l — `scripts/provision_identity.py`; qarang
   `docs/ONBOARDING-UZ.md`.

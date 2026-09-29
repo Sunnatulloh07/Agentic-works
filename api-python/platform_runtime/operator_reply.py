@@ -3,7 +3,11 @@
 ``Engine.operator_reply`` creates the send, and every authorisation decision lives
 there and in the claim path. This module only settles what that path produced:
 once an operator reply task has SUCCEEDED, its text is appended to
-``p_conversation_history`` with role ``operator``, exactly once.
+``p_conversation_history`` with role ``operator``, exactly once, and the chat's
+operator takeover starts (or is extended) in the same transaction. Starting it
+when the reply was merely queued let a reply that later failed -- a blocked bot, a
+closed WhatsApp window -- or a replayed request silence the bot for the whole
+takeover while the customer heard nothing.
 
 "Once" is keyed by the task. A ``p_records`` marker (kind OPERATOR_LINE_KIND,
 id = task id, body naming the actor) is inserted with INSERT OR IGNORE in the
@@ -19,7 +23,7 @@ applied to an operator line exactly as to a customer or agent line.
 """
 import json
 
-from .conversation import _append, _next_seq
+from .conversation import _append, _next_seq, takeover_in, takeover_minutes
 from .engine import DIRECT_DESTINATION_FIELD, OPERATOR_CHANNEL, encode
 
 OPERATOR_LINE_KIND = 'conversation.operator_line'
@@ -28,7 +32,7 @@ OPERATOR_ROLE = 'operator'
 # larger than this means the worker was down; the next pass takes the rest.
 MAX_SETTLE_BATCH = 50
 
-_PENDING = '''SELECT t.id,t.actor,s.tool,s.args FROM p_tasks t
+_PENDING = '''SELECT t.id,t.actor,t.agent,s.tool,s.args FROM p_tasks t
   JOIN p_steps s ON s.tenant=t.tenant AND s.task=t.id AND s.position=0
   WHERE t.tenant=? AND t.channel=? AND t.status='succeeded'
   AND NOT EXISTS(SELECT 1 FROM p_records r WHERE r.tenant=t.tenant AND r.kind=? AND r.id=t.id)
@@ -62,5 +66,10 @@ def settle_operator_replies(engine, tenant):
                     _next_seq(c, tenant, channel, conversation_id), OPERATOR_ROLE, step['text'], now)
             engine.audit(c, tenant, row['id'], 'conversation.operator_delivered', row['actor'],
                          {'channel': channel})
+            # The human now holds the chat -- from the moment the customer has their
+            # words, not from when they were queued: a reply that fails, or a replay
+            # of one already sent, takes nothing over.
+            takeover_in(engine, c, tenant, channel, conversation_id, row['actor'],
+                        takeover_minutes(engine, tenant, row['agent']))
             added += 1
     return added > 0

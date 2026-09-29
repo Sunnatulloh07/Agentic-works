@@ -2,6 +2,8 @@
 import {useEffect,useRef,useState} from 'react';
 import {type SessionClient} from '../lib/session-client.mjs';
 import {authorization,acceptCallback} from '../lib/oauth-client.mjs';
+import {statusLabel} from '../lib/format.mjs';
+import {ConfirmButton} from './ui';
 type Connection={id:string;provider:string;status:string;account?:string;generation?:number};
 type Pending={popup:Window;state:string;connection:string;expires:number};
 export default function OAuthConnections({client,tenant,frozen}:{client:SessionClient;tenant:string;frozen:boolean}){
@@ -51,14 +53,18 @@ export default function OAuthConnections({client,tenant,frozen}:{client:SessionC
     }catch{setMessage('Amal tasdiqlanmadi. Holatni yangilang.');}finally{setBusy(false);}
   }
   return <section><h2>Google OAuth ulanishlari</h2>
-    <p>Faqat owner boshqaradi. Provider tokenlari brauzerga berilmaydi. Google oynasi asosiy sahifa bilan bir xil callback originiga qaytishi shart.</p>
-    <button disabled={busy} onClick={()=>void refresh().catch(()=>setMessage('Holat olinmadi.'))}>Yangilash</button>
+    <p className="muted">Faqat do‘kon egasi boshqaradi. Provider tokenlari brauzerga berilmaydi. Google oynasi asosiy sahifa bilan bir xil callback originiga qaytishi shart.</p>
+    <button className="btn" disabled={busy} onClick={()=>void refresh().catch(()=>setMessage('Holat olinmadi.'))}>Yangilash</button>
     {message&&<p role="status">{message}</p>}
-    {rows.map(r=><article key={r.id} style={{borderTop:'1px solid #334155',padding:12}}>
-      <h3>{r.id}</h3><p>{r.status} {r.account&&`· ${r.account}`}</p>
-      <button disabled={busy||frozen} onClick={()=>void begin(r.id)}>Google bilan ulash</button>{' '}
-      <button disabled={busy} onClick={()=>void action(r.id,'revoke',{remote:true})}>Ulanishni bekor qilish</button>{' '}
-      <button disabled={busy} onClick={()=>void action(r.id,'revoke',{remote:false})}>Faqat lokal favqulodda bloklash</button>{' '}
+    {rows.map(r=><article key={r.id} className="row">
+      <h3>{r.id}</h3><p>{statusLabel(r.status)} {r.account&&`· ${r.account}`}</p>
+      <button className="btn primary" disabled={busy||frozen} onClick={()=>void begin(r.id)}>Google bilan ulash</button>
+      <ConfirmButton label="Ulanishni bekor qilish" disabled={busy} title="Google ulanishini bekor qilasizmi?"
+        message="Agentlar bu Google hisobidan foydalana olmaydi, ruxsat Google’da ham qaytarib olinadi. Qayta ulash uchun yana ruxsat berish kerak."
+        confirmLabel="Ha, bekor qilish" onConfirm={()=>action(r.id,'revoke',{remote:true})}/>
+      <ConfirmButton label="Faqat lokal favqulodda bloklash" disabled={busy} title="Ulanishni shu yerda bloklaysizmi?"
+        message="Ulanish darhol ishlatilmay qo‘yadi, lekin Google’dagi ruxsat saqlanib qoladi — uni keyin alohida bekor qiling."
+        confirmLabel="Ha, bloklash" onConfirm={()=>action(r.id,'revoke',{remote:false})}/>
       <button disabled={busy} onClick={()=>void action(r.id,'retry-revocations')}>Remote revoke qayta tekshirish</button>
     </article>)}
   </section>;

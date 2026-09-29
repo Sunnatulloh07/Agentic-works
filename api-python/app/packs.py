@@ -4,6 +4,7 @@ Yangi mijoz = yangi YAML. Validatsiya chegarada (pydantic),
 biznes-mantiq pack mazmuniga tegmaydi (OCP).
 """
 import os
+import threading
 import re
 from pathlib import Path
 from collections.abc import Mapping
@@ -115,7 +116,9 @@ class ConversationPolicy(Strict):
 
     enabled: bool = False
     max_steps: int = Field(default=3, ge=1, le=CONVERSATION_MAX_STEPS)
-    max_seconds: int = Field(default=120, ge=CONVERSATION_MIN_SECONDS, le=CONVERSATION_MAX_SECONDS)
+    # At least agent_loop.PLANNER_LEASE_SECONDS (180): the run deadline must outlast
+    # one planner call's lease, or a model answer still inside its lease arrives late.
+    max_seconds: int = Field(default=180, ge=CONVERSATION_MIN_SECONDS, le=CONVERSATION_MAX_SECONDS)
     history_turns: int = Field(default=6, ge=0, le=CONVERSATION_MAX_HISTORY_TURNS)
     fallback_text: str = Field(default="", max_length=CONVERSATION_MAX_FALLBACK_CHARS)
     # A valid orders.draft in a turn becomes ONE records.create task for this
@@ -225,6 +228,26 @@ class Pack(Strict):
     products: list[Product] = Field(default_factory=list)
 
 
+# Parsed packs, keyed by (packs root, name). load_pack sits on every hot path --
+# policy(), agents(), catalog() and shop_data() call it several times per turn --
+# and a 2 000-product catalogue took ~2.4 s to parse and validate. An entry is
+# served only while every file it was built from keeps its mtime and size, so an
+# edit is seen on the next call. The Pack is SHARED: callers read it, never mutate it.
+_PACK_CACHE: dict = {}
+_PACK_CACHE_LOCK = threading.Lock()
+
+
+def _file_state(files) -> tuple:
+    state = []
+    for path in files:
+        try:
+            st = path.stat()
+            state.append((str(path), st.st_mtime_ns, st.st_size))
+        except OSError:
+            state.append((str(path), None, None))
+    return tuple(state)
+
+
 def load_pack(name: str) -> Pack:
     if not NAME_RE.match(name or ""):
         raise PackError(f"pack nomi noto'g'ri: {name!r}")
@@ -232,6 +255,20 @@ def load_pack(name: str) -> Pack:
     pack_file = (PACKS_DIR / dirname / "pack.yaml").resolve()
     if PACKS_DIR.resolve() not in pack_file.parents:
         raise PackError(f"pack chegaradan tashqarida: {name!r}")
+    key = (str(PACKS_DIR.resolve()), name)
+    with _PACK_CACHE_LOCK:
+        cached = _PACK_CACHE.get(key)
+    if cached and _file_state(cached[0]) == cached[1]:
+        return cached[2]
+    pack, files = _build_pack(name, pack_file)
+    with _PACK_CACHE_LOCK:
+        # The state is read AFTER building: an edit racing the build is seen next call.
+        _PACK_CACHE[key] = (files, _file_state(files), pack)
+    return pack
+
+
+def _build_pack(name: str, pack_file: Path) -> tuple:
+    """Parse and validate one pack. Returns (pack, the files it was built from)."""
     if not pack_file.is_file():
         raise PackError(f"pack topilmadi: {name}")
     try:
@@ -295,7 +332,9 @@ def load_pack(name: str) -> Pack:
         agent.prompt = read_persona(pack_file.parent, agent.persona, agent.id, name)
     for agent in pack.agents:
         check_conversation_routes(agent, pack.agents, name)
-    return pack
+    files = [pack_file, products_file] + [
+        (pack_file.parent / agent.persona).resolve() for agent in pack.agents if agent.persona]
+    return pack, files
 
 
 # The tool an order agent writes with, and the tool a notification is sent with.

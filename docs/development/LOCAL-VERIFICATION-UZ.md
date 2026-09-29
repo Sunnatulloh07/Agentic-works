@@ -5,7 +5,7 @@ Production qarori o‘zgarmaydi: **NO_GO**.
 
 ## Nima uchun bu blok kerak bo‘ldi
 
-v0.3.8 dalillari (`docs/verification/development-v038-final/summary.json`) faqat Linux muhitida
+v0.3.8 dalillari (`docs/verification/development-v038-final/summary.json`, git tarixida) faqat Linux muhitida
 olingan: `/opt/venv/bin/python` (3.11) + `cryptography` + `bun` + `/usr/local/bin/node`. Ishchi
 Windows mashinada `python scripts/verify_offline.py` **bir xil natijani bermadi**:
 
@@ -192,9 +192,16 @@ Yurgizish (boshqariladigan venv bilan):
 
 ```sh
 cd api-python
-PY="$HOME/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-PYTHONPATH=".;$(python -c 'import site;print(site.getsitepackages()[0])')" \
-  "$PY" -m unittest discover -s runtime_tests -t runtime_tests
+PY=python  # requirements.txt o'rnatilgan istalgan venv
+"$PY" -m unittest discover -s runtime_tests -t runtime_tests
+```
+
+Sekin testlarni topish (o‘chirilgan `measure_suite.py`, `time_test_files.py`,
+`measure_kdf_cost.py` o‘rniga):
+
+```sh
+cd api-python
+python -m pytest runtime_tests --durations=25 -q
 ```
 
 
@@ -223,9 +230,8 @@ Natija (birinchi yurish): `5 failed, 72 passed, 11 errors in 36.86s`.
 
 ```sh
 cd api-python
-PY="$HOME/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
+PY=python  # requirements.txt o'rnatilgan istalgan venv
 ENV=test ALLOW_INSECURE_DEV=true PIPELINE_MODE=platform \
-  PYTHONPATH=".;$(python -c 'import site;print(site.getsitepackages()[0])')" \
   "$PY" -m pytest integration_tests -q
 ```
 
@@ -243,7 +249,7 @@ yopilishi kutiladi” — **taxmin** edi; endi **o‘lchangan fakt**.
 ## Ochiq qolgan platforma cheklovlari (yashirilmaydi)
 
 1. **Tizim Python’ida deps yo‘q** → hamma narsa boshqariladigan venv bilan yuriladi
-   (`~/.workbuddy-ai/binaries/python/envs/default`, yuqoridagi buyruqlar). O‘lchandi:
+   (`requirements.txt` o‘rnatilgan venv, yuqoridagi buyruqlar). O‘lchandi:
    `runtime_tests` `errors=149 → 11`, `integration_tests` `95 passed`.
 2. **`bun` yo‘q** → JS/TS syntax guruhi BLOCKED (typecheck/build emas, u baribir alohida gate).
 3. **POSIX-only xavfsizlik testlari.** `apps/runner/test.js` “private single-owner file/dir”
@@ -293,7 +299,7 @@ sonlar) to'plamga **18** sinov qo'shdi. Imzo **o'zgarmadi**:
 | `errors` | **11** — hammasi POSIX-only, yuqoridagi jadval bilan bir xil |
 | `skipped` | **1** — Windows symlink huquqi |
 
-Probe (`scripts/probes/probe_truncation_verdict.py`) ham o'sdi: **334 → 1683** xossa,
+Probe (`scripts/probes/probe_truncation_verdict.py`, endi git tarixida) ham o'sdi: **334 → 1683** xossa,
 **1683/1683** yashil. Bu ikki faza o'zgargan fayllar:
 
 | Fayl | Nima o'zgardi |

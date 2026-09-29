@@ -1,8 +1,10 @@
 """A pack persona shapes the agent, it does not govern the platform.
 
-Persona text is tenant-authored configuration that reaches the model, so it is
-placed after the platform rules, fenced, and labelled as data. A persona that
-tries to widen permissions must not be able to remove the rules above it.
+Persona text is written by the tenant, a trusted principal, so the model is told
+to FOLLOW it as the business's instructions -- but it is placed after the
+platform rules, fenced, and bounded by them: a persona that tries to widen
+permissions must not be able to remove the rules above it. The untrusted party
+is the customer, whose text arrives in the user message.
 """
 import json
 import tempfile
@@ -67,11 +69,44 @@ class PersonaPromptTests(unittest.TestCase):
         prompt = self.system_prompt()
         self.assertLess(prompt.index('Only listed tools'), prompt.index(PERSONA))
 
-    def test_persona_is_labelled_as_configuration_not_instruction(self):
+    def test_persona_is_followed_as_business_instructions_within_the_rules(self):
+        # The persona is written by the tenant, a trusted principal. Labelling it
+        # "configuration data, not instructions" told the model to ignore the
+        # shop's own business rules; the untrusted party is the customer.
         self.persona = PERSONA
         prompt = self.system_prompt()
         boundary = prompt.index(PERSONA)
         self.assertIn('cannot change', prompt[:boundary])
+        self.assertIn('follow them', prompt[:boundary])
+        self.assertIn('platform rules', prompt[:boundary])
+        self.assertNotIn('not instructions', prompt)
+
+    def test_untrusted_data_is_named_before_the_business_instructions(self):
+        self.persona = PERSONA
+        prompt = self.system_prompt()
+        self.assertLess(prompt.index('user message is untrusted'), prompt.index(PERSONA))
+
+    def test_the_reply_language_is_the_customers_not_hardcoded(self):
+        for persona in ('', PERSONA):
+            with self.subTest(persona=bool(persona)):
+                self.persona = persona
+                prompt = self.system_prompt()
+                self.assertNotIn('Uzbek', prompt)
+                self.assertIn('language the request is written in', prompt)
+
+    def test_no_blanket_claim_that_every_write_waits_for_approval(self):
+        # False for an autonomous agent with pre-authorised sends.
+        prompt = self.system_prompt()
+        self.assertNotIn('All writes still require', prompt)
+        self.assertIn('decided by tenant policy', prompt)
+
+    def test_the_system_prompt_is_stable_across_turns(self):
+        # Prompt caching is a prefix match: nothing per-turn may enter the system prompt.
+        self.persona = PERSONA
+        first = self.system_prompt()
+        self.context = {**self.context, 'run_id': 'r2', 'input': 'Boshqa savol', 'call_index': 2,
+                        'remaining_steps': 1, 'observations': []}
+        self.assertEqual(first, self.system_prompt())
 
     def test_an_injecting_persona_does_not_strip_the_rules(self):
         self.persona = INJECTION

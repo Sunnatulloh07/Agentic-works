@@ -8,6 +8,10 @@ Telegram serverga (`telegram.base_url`, proxy’siz) yetib bordi. **Tasdiqlanmag
 (`npm run dev`), haqiqiy Telegram’da `setWebhook`, haqiqiy LLM provayder, Docker varianti.
 Xato bilan uchrashsangiz, pastdagi **Tez-tez uchraydigan xatolar** bo‘limiga qarang.
 
+**2026-09-29 eslatma:** `python scripts/e2e_smoke.py` (15/15) haqiqiy API + workerni vaqtinchalik
+muhitda soxta model va soxta Telegram (loopback) bilan yurgizadi — bu real deploy emas.
+Haqiqiy Telegram va haqiqiy model bilan jonli sinov hali o‘tkazilmagan.
+
 Qisqa yo‘l:
 
 ````sh
@@ -28,7 +32,7 @@ README’ning eski versiyasi shuni taklif qilardi:
 ````sh
 python scripts/setup_local.py
 docker compose up --build -d
-python scripts/owner_login.py     # <- bu yerda to'xtaydi
+python scripts/owner_login.py     # <- bu yerda to'xtardi (skript endi o'chirilgan)
 ````
 
 Sabab zanjiri:
@@ -192,8 +196,8 @@ Tokenlar faqat sahifa xotirasida saqlanadi — sahifa yopilsa qayta kirish kerak
 ## 7. Birinchi vazifa
 
 UI’da `ops.assistant` agentini tanlab standart `reports.summary` planini yuboring.
-Worker alohida jarayon bo‘lgani uchun natija darhol chiqmaydi: **Yangilash** tugmasini
-bosing (UI avtomatik polling qilmaydi).
+Worker alohida jarayon bo‘lgani uchun natija darhol chiqmaydi: **Suhbatlar** ko‘rinishi
+jonli poller bilan yangilanadi, task detail natijasi uchun **Yangilash** tugmasini bosing.
 
 Keyin `records.create` yozuvini yuboring — u task detail ichida **tasdiq kutadi**.
 Approval har bir write uchun sukut.
@@ -222,6 +226,14 @@ testlari bilan qoplangan: **haqiqiy Anthropic endpointiga chaqiruv qilinmagan**.
 Claude Haiku 3 / 3.5 **nafaqaga chiqarilgan** — joriy kichik model
 `claude-haiku-4-5`. `docs/agent-platform-PRD-TZ.md` hali «Haiku 3.5» deb yozadi, bu
 eskirgan.
+
+### 8a. Native tool use (`llm.protocol`)
+
+`llm.protocol: json|tools` (sukut `json`). `tools` faqat `provider: anthropic` bilan ishlaydi va **faqat natija-beriladigan** (suhbat/agent) planner’ga tegadi; bir martalik hodisa planner’i uni e’tiborsiz qoldiradi. Har rad etilgan qaror uchun **bitta tuzatish** urinishi bor (run budjetidan bitta chaqiruv sarflaydi; audit hodisasi `agent_run.planner_repair`). Oddiy matnli javob eskalatsiya qilinadi (`planner_failed_no_retry`). Simda tool nomlari `.` → `__` (masalan `products__search`), qaror tool’lari `final_answer` / `ask_customer`; sxemalar qat’iy (strict). Tavsiya: `json` bilan boshlang, eval’da solishtiring (`EVAL_LLM_PROTOCOL=tools`), yaxshiroq bo‘lsa almashtiring. Tekshiruv: `python scripts/e2e_smoke.py --protocol tools`.
+
+### 8b. Kalit nomlari chegarasi (credential scoping)
+
+Pack-local `packs/<tenant>/integrations.yaml` faqat `TENANT_<TENANT>__NAME` (qo‘sh pastki chiziq; tenant nomi upper-snake) ko‘rinishidagi env nomlarini yoki `PLATFORM_SHARED_SECRET_NAMES` (vergul bilan ro‘yxat) ichidagi nomlarni ko‘rsata oladi. Platforma sirlari — `JWT_SECRET`, `ADMIN_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TENANT_SECRETS`, `META_SECRETS`, `REDIS_URL`, `PLATFORM_VAULT_*` — hech bir tenant konfigida ko‘rsatilishi mumkin emas; umumiy ro‘yxatga ular, shuningdek `META_APP_SECRET` / `META_VERIFY_TOKEN` ham kira olmaydi. Operator JSON’i (`PLATFORM_INTEGRATIONS_FILE`) ishonchli bo‘lib qoladi. Bitta noto‘g‘ri havola shu tenantning **butun konfigini** rad ettiradi: `python scripts/run_local.py --check` va **Kanallar** ekrani qaysi kalit yo‘li ekanini ko‘rsatadi. Faqat registr (katta-kichik harf) yoki `-` / `_` bilan farq qiladigan tenant juftlarini yaratmang.
 
 ## 9. Telegram webhook
 
@@ -299,16 +311,35 @@ Ish jarayoni: mijoz yozadi → agent `products.search` / `shop.info` bilan javob
 (narx va raqamlar faqat natijadan, aks holda operatorga uzatiladi) → hamma ma’lumot
 yig‘ilgach `orders.draft` narxni serverda hisoblaydi → buyurtma **Tasdiqlar** da
 kutadi, tasdiqlangach **Buyurtmalar** da chiqadi. **Suhbatlar** panelida operator
-suhbatni o‘qiydi va o‘zi javob yozadi; shundan keyin bot shu suhbatda
-`conversation.takeover_minutes` (sukut 30) daqiqa jim turadi ("Operator rejimi"),
+suhbatni o‘qiydi va o‘zi javob yozadi; operator javobi **muvaffaqiyatli** yuborilgandan
+keyin bot shu suhbatda `conversation.takeover_minutes` (sukut 30) daqiqa jim turadi
+("Operator rejimi"; takeover paytidagi mijoz xabarlari `operator_takeover` handoff bo‘ladi),
 **Botga qaytarish** tugmasi uni oldinroq tugatadi. **Operatorga uzatilganlar** —
 bot javob bera olmagan xabarlar.
+
+Mijoz ismlari: Telegram ism/familiya (yoki @username) va WhatsApp profil nomi tozalangan ko‘rinish nomi (`sender_name`, ≤64 belgi, control/bidi belgilar olib tashlanadi) sifatida saqlanadi va **Suhbatlar** da ko‘rinadi. Bu faqat ko‘rsatish uchun: autentifikatsiyada ishlatilmaydi va modelga ko‘rsatma sifatida berilmaydi. Customer 360 ga bog‘langan bo‘lsa, uning nomi ustun.
+
+**Hal qilindi.** Operatorga uzatilgan (handoff) suhbatni **Hal qilindi** tugmasi yopadi: `POST /platform/{t}/handoffs/{id}/resolve` (owner/operator, `Idempotency-Key` bilan); `GET /handoffs?status=open|resolved|all` (sukut `open`). Yopish shu chatning eski ochiq handoff’larini ham yopadi; yangi handoff qayta ochadi. **Javob kerak** hisobi faqat ochiq handoff’larni sanaydi.
+
+## Sotuv botini baholash (eval)
+Bot javoblarini o‘lchash uchun: `evals/sales_bot/cases.jsonl` (turkish-baby, 40 ta holat) va `cases.demo-retail.jsonl` (13 ta). Kutilgan narx, qoldiq va FAQ raqamlari holat faylida emas, pack'dan (`packs/<pack>/`) o‘qiladi. Skript haqiqiy API va worker'ni fake Telegram bilan ishga tushiradi.
+Bepul sinov (fake model, pul ketmaydi; bu BOTni emas, HARNESS'ni tekshiradi):
+    python scripts/run_sales_eval.py --dry-run --limit 5
+Haqiqiy model bilan (PUL SARFLANADI):
+    export EVAL_LLM_PROVIDER=anthropic          # yoki openai
+    export EVAL_LLM_MODEL=claude-opus-5
+    export EVAL_LLM_KEY_ENV=PLATFORM_LLM_KEY    # kalit turgan o‘zgaruvchi NOMI (qiymati emas)
+    export EVAL_PRICE_IN=5 EVAL_PRICE_OUT=25    # ixtiyoriy: $/MTok, hisobotga taxminiy narx chiqadi
+    python scripts/run_sales_eval.py --yes-spend
+`--yes-spend`siz skript ishlamaydi: avval taxminiy model chaqiruvlari sonini chiqaradi (40 holat uchun taxminan 90–230 ta chaqiruv; `--judge` har holatga yana bitta qo‘shadi). Avval `--limit 5` bilan sinang. `EVAL_LLM_EFFORT` (low..max, faqat anthropic) va `EVAL_LLM_PROTOCOL=tools` ixtiyoriy; `--pack demo-retail` boshqa pack uchun.
+Hisobotni o‘qish: natija papkasi (`--out`, aks holda vaqtinchalik papka) ichida `report.md` (kategoriyalar bo‘yicha o‘tish foizi, eng ko‘p yiqilgan tekshiruv, p50/p95 kechikish, narx, yiqilgan holatlar va bot javobi) va `results.json`. Skript holatlar yiqilsa ham 0 qaytaradi (bu o‘lchov); 2 = rad etildi, 1 = harness xatosi.
+Yaxshilash sikli: hisobotdagi eng ko‘p yiqilgan tekshiruvni toping → persona (`prompts/sales/responder.md`) yoki pack ma’lumotini tuzating → shu holatlarni qayta yuriting → foizni oldingi natija bilan solishtiring. Yangi xato topilsa, uni holat sifatida cases.jsonl'ga qo‘shing.
 
 ## Tez-tez uchraydigan xatolar
 
 | Belgi | Sabab | Yechim |
 |---|---|---|
-| `410 Use session-bound identity login` | `owner_login.py` yoki `/auth/token` ishlatildi, `IDENTITY_DIRECTORY=true` | `owner_login.py` ni ishlatmang; `provision_identity.py` + UI login |
+| `410 Use session-bound identity login` | `owner_login.py` yoki `/auth/token` ishlatildi, `IDENTITY_DIRECTORY=true` | `/auth/token` ni ishlatmang (`owner_login.py` o‘chirildi); `provision_identity.py` + UI login |
 | `403 Bootstrap disabled` | `IDENTITY_BOOTSTRAP_ENABLED=false` (`setup_local.py` shunday yozadi) | `provision_identity.py` ishlating |
 | `Existing .env preserved. Edit it manually.` | `.env` allaqachon bor | Ataylab. Kerak bo‘lsa qo‘lda tahrirlang |
 | `ConfigError: ENV sozlanmagan` | `uvicorn` to‘g‘ridan-to‘g‘ri ishga tushirildi, `.env` yuklanmadi | `python scripts/run_local.py` |
@@ -320,7 +351,7 @@ bot javob bera olmagan xabarlar.
 | OAuth/Google yuzalari ishlamaydi, AES-GCM testlari yiqiladi | `cryptography` o‘rnatilmagan | `pip install -r api-python/requirements.txt` |
 | UI’da login qilib bo‘ldi, lekin workspace ro‘yxati bo‘sh | Identity boshqa `APP_DB` ga yozilgan (masalan, host vs compose volume) | `APP_DB` ni moslang va 4-qadamni to‘g‘ri baza bilan takrorlang |
 | Task `queued` da qotib qoldi | Worker ishlamayapti | `run_local.py` ni `--no-worker` siz ishga tushiring |
-| Natija yangilanmayapti | UI avtomatik polling qilmaydi | **Yangilash** tugmasi |
+| Task natijasi yangilanmayapti | Task detail avtomatik yangilanmaydi (Suhbatlar poller’i alohida) | **Yangilash** tugmasi |
 | `Start directory is not importable: 'runtime_tests'` | `-t` bayrog‘i berilmagan | `python -m unittest discover -s runtime_tests -t runtime_tests` |
 
 ## Nimani kutmaslik kerak
@@ -328,17 +359,20 @@ bot javob bera olmagan xabarlar.
 - **Live provider integratsiyasi** — hech biri `live_verified` emas. Telegram, Instagram,
   Sheets, Google, MoySklad, 1C: eng yuqorisi `LOCAL_CONTRACT_TESTED`.
 - **Mahsulot funksiyalarining to‘liq to‘plami** — registry’dagi 91 tool’dan **20 tasi**
-  yetkazilgan pack’lardan chaqiriladi (2026-09-25; `whatsapp.*` va `agent.*` endi
+  yetkazilgan pack’lardan chaqiriladi (2026-09-29 o‘lchovi; `whatsapp.*` va `agent.*`
   `turkish-baby`da).
   ERP, hujjatlar, ombor, telefoniya,
   vision, ishlab chiqarish, OEE, xodimlar, supervisor, brifing, eskalatsiya va boshqa
-  modullar **muzlatilgan preview** — birorta pack ularni ishlatmaydi. WhatsApp inbound
-  HTTP route ham bor va 19 test bilan qadalgan (`app/whatsapp_api.py`), ammo
-  `whatsapp_inbound` tool’lari pack’da e’lon qilinmagan va live Meta acceptance yo‘q.
+  modullar **muzlatilgan preview** — birorta pack ularning tool’larini e’lon qilmaydi
+  (bu «o‘lik kod» degani emas: masalan `whatsapp_inbound` webhook route orqali yetib
+  boriladi). WhatsApp inbound HTTP route bor va HTTP testlari bilan qadalgan
+  (`app/whatsapp_api.py`), ammo `whatsapp_inbound` tool’lari pack’da e’lon qilinmagan va
+  live Meta acceptance yo‘q.
 - **Windows runner** — lokal-executor shartnomasi POSIX-only (`O_NOFOLLOW`, `mkfifo`,
   `0600`). Windows’da runner testlari qizil, bu platforma cheklovi.
 - **Production** — `production_release: NO_GO`. HA, observability, DR va live acceptance
-  yo‘q; UI dependency auditi qizil.
+  yo‘q; SQLite faqat bitta host; UI dependency auditi toza (`npm audit` 0), lekin bu
+  jonli sinov o‘rnini bosmaydi.
 
 To‘liq ro‘yxat: [`development/QOLGAN-ISHLAR-INVENTAR-UZ.md`](development/QOLGAN-ISHLAR-INVENTAR-UZ.md)
 va [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md). Operatsion tartiblar:

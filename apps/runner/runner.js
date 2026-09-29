@@ -170,11 +170,17 @@ function tokenExpiry(token) {
   } catch {return null;}
 }
 
-function closeAction({code,authenticated,expiresAt,now=Date.now(),tokenFromFile,rejections=0}) {
+function closeAction({code,authenticated,expiresAt,now=Date.now(),tokenFromFile,tokenChanged=false,rejections=0}) {
   // An authenticated session proves the token was accepted moments ago.
   if(authenticated)rejections=0;
-  if(code===CLOSE_REVOKED)return {action:'exit',rejections,
-    message:'Device revoked or rotated by the server; re-enroll the device in the UI'};
+  if(code===CLOSE_REVOKED) {
+    // Re-issuing a device token bumps its generation, which closes the old session
+    // with 4403. If the token FILE already holds a different token, that was a
+    // rotation, not a revocation: reconnect with it (a revoked device still exits).
+    if(tokenFromFile && tokenChanged)return {action:'retry',rejections:0,
+      message:'Device token rotated; reconnecting with the new token from RUNNER_TOKEN_FILE'};
+    return {action:'exit',rejections,message:'Device revoked or rotated by the server; re-enroll the device in the UI'};
+  }
   if(code!==CLOSE_AUTH)return {action:'retry',rejections,message:''};
   if(expiresAt!==null && expiresAt<=now) {
     // Expired, not revoked: a token FILE can be rotated in place, so keep
@@ -249,8 +255,10 @@ function main() {
     });
     ws.addEventListener('close',event=>{
       clearInterval(timer);
+      let current=token;
+      try{current=loadToken();}catch{}
       const decision=closeAction({code:event.code,authenticated,expiresAt:tokenExpiry(token),
-        tokenFromFile:Boolean(process.env.RUNNER_TOKEN_FILE),rejections});
+        tokenFromFile:Boolean(process.env.RUNNER_TOKEN_FILE),tokenChanged:current!==token,rejections});
       rejections=decision.rejections;
       if(decision.message)console.error(decision.message);
       if(decision.action==='exit'){stopped=true;process.exitCode=4;return;}

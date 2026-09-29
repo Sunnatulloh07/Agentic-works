@@ -92,6 +92,12 @@ def test_the_whatsapp_persona_names_the_window_tools_and_stays_grounded(pack):
     assert ungrounded_numbers(prompt, "") == []
 
 
+def test_every_conversation_turn_outlasts_one_planner_lease(pack):
+    from platform_runtime.agent_loop import PLANNER_LEASE_SECONDS
+    budgets = {a.id: a.conversation.max_seconds for a in pack.agents if a.conversation.enabled}
+    assert budgets and all(seconds >= PLANNER_LEASE_SECONDS for seconds in budgets.values()), budgets
+
+
 def test_orders_go_to_a_human_approved_order_taker():
     conversation = sales_policy()["conversation"]
     assert (conversation["order_agent"], conversation["order_kind"]) == ("sales.order_taker", "order")

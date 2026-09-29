@@ -27,6 +27,11 @@ export function toolChoices(tools, agent) {
     && allowed.has(t.name));
 }
 
+/** Optional one-line catalogue description; '' when absent or not a string. */
+export function toolDescription(tool) {
+  return tool && typeof tool.description === 'string' ? tool.description.trim() : '';
+}
+
 export function argumentFields(schema) {
   const properties = (schema && typeof schema === 'object' && schema.properties) || {};
   const required = new Set((schema && schema.required) || []);

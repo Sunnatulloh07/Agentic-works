@@ -22,6 +22,37 @@ function base(tenant) {
 export function conversationsPath(tenant) { return `${base(tenant)}/conversations`; }
 export function handoffsPath(tenant) { return `${base(tenant)}/handoffs`; }
 
+/** POST target that marks a handoff handled by a person (app/shop_api.py). */
+export function resolveHandoffPath(tenant, handoffId) {
+  return `${base(tenant)}/handoffs/${encodeURIComponent(checkedId(handoffId))}/resolve`;
+}
+
+export function resolveHandoffRequest(key, note = '') {
+  if (typeof key !== 'string' || !KEY.test(key)) throw new Error('Idempotency kaliti yaroqsiz');
+  return {body: {note: String(note).slice(0, 500)}, method: 'POST', headers: {'Idempotency-Key': key}};
+}
+
+/** Handoffs still waiting for a person. The API says so with `resolved`; an absent flag is open. */
+export function openHandoffs(handoffs) {
+  return (Array.isArray(handoffs) ? handoffs : []).filter(h => !h.resolved);
+}
+
+/** The newest OPEN handoff of one conversation, or null. Resolving it closes the chat's older ones too. */
+export function latestOpenHandoff(handoffs, ref) {
+  let latest = null;
+  for (const h of openHandoffs(handoffs))
+    if (h.channel === ref.channel && h.conversation_id === ref.conversation_id && (!latest || h.created > latest.created)) latest = h;
+  return latest;
+}
+
+/** The customer's name as text (never markup): the linked Customer 360 name, else the
+ * name the customer gave the channel, else ''. The caller falls back to the id. */
+export function customerName(c) {
+  for (const v of [c?.customer_name, c?.sender_name])
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  return '';
+}
+
 export function threadPath(tenant, channel, conversationId) {
   if (typeof channel !== 'string' || !CHANNEL.test(channel)) throw new Error('Noto‘g‘ri kanal');
   return `${base(tenant)}/conversations/${channel}/${encodeURIComponent(checkedId(conversationId))}`;
@@ -81,14 +112,16 @@ export function threadLines(thread) {
 
 const TURN_STATUS = {queued: 'navbatda', open: 'agent javob tayyorlamoqda',
   delivering: 'yuborilmoqda yoki tasdiq kutmoqda', delivered: 'yetkazildi', failed: 'yuborilmadi',
-  uncertain: 'yetgani noma’lum', operator: 'operator javob bermoqda'};
+  uncertain: 'yetgani noma’lum', operator: 'operator javob bermoqda',
+  throttled: 'ko‘p xabar — navbatda emas'};
 export function turnStatusLabel(status) { return TURN_STATUS[status] ?? String(status ?? ''); }
 
 // Mirrors platform_runtime/conversation.HANDOFF_REASONS; unknown codes are shown as is.
 const REASONS = {ungrounded_number: 'javobdagi son tasdiqlanmadi', llm_unavailable: 'model yoqilmagan',
   conversation_disabled: 'suhbat o‘chirilgan', empty_reply: 'agent javob bermadi',
   run_rejected: 'agent ishga tushmadi', send_uncertain: 'javob mijozga yetgani noma’lum',
-  order_rejected: 'buyurtma yozilmadi'};
+  order_rejected: 'buyurtma yozilmadi', operator_takeover: 'operator suhbatida yozdi',
+  order_pending: 'buyurtma allaqachon kutilmoqda'};
 export function reasonLabel(reason) { return REASONS[reason] ?? String(reason ?? ''); }
 
 /** An order record body written by a conversation turn, or null for any other body. */

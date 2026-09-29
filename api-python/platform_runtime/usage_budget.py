@@ -1,15 +1,44 @@
 """Atomic integer-microunit reservations, dispatch fencing and usage settlement.
 
 This is a local spending guard, not subscription billing or a provider invoice.
-Unknown outcomes retain their reservation until an owner reconciles with evidence.
+
+The rule for a failed call:
+
+* never left, or answered with an HTTP error status -> ``released``: settled at
+  zero. A request that never left cannot be billed, and an error status is the
+  provider saying it refused (4xx, including 429) or failed (5xx) the request.
+  The one case this under-counts is a gateway 5xx in front of a provider that
+  did finish; that costs at most one call's receipt per such error, where the
+  old rule cost a parallel-call slot per error until an owner stepped in.
+* left, and no complete answer came back (read timeout, reset), or the answer
+  had no readable usage receipt -> ``uncertain``: the money stays reserved until
+  an owner reconciles with evidence.
+
+An uncertain call also held a parallel-call slot forever, so after
+``max_inflight`` of them every later call was refused. A slot is a statement
+about a call IN FLIGHT, and no call is in flight for UNCERTAIN_SLOT_SECONDS
+(four times the whole model-call deadline). After that the reservation moves to
+``unreconciled``: the slot is freed, the money is still held, it is still in
+``pending()`` and ``reconcile()`` still settles it, and the move is audited. A
+``dispatching`` row that old is a call orphaned by a crash and moves the same way.
 """
 import datetime
 import re
+import time
 import uuid
 
 from .engine import Conflict, Forbidden, NotFound, RateLimited, digest
 
 MAX_AMOUNT = 10**15
+UNCERTAIN_SLOT_SECONDS = 600
+RELEASE_REASONS = frozenset({'not_sent', 'rejected'})
+# Money still held and awaiting an owner, whether or not it holds a slot.
+HELD = ('reserved', 'dispatching', 'uncertain', 'unreconciled')
+_HELD_PLACEHOLDERS = ','.join('?' * len(HELD))
+# The parallel-call count: undispatched reservations, and dispatched or uncertain
+# calls younger than the slot lease.
+_SLOTS = ("SELECT count(*) FROM p_budget_reservations WHERE tenant=? AND "
+          "(status='reserved' OR (status IN ('dispatching','uncertain') AND updated>?))")
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS p_budget_settings(
  tenant TEXT PRIMARY KEY, currency TEXT NOT NULL, limit_micro INTEGER NOT NULL,
@@ -78,14 +107,26 @@ class UsageBudget:
             e.audit(db, tenant, '', 'budget.configured', actor, {'currency': currency, 'limit_micro': limit_micro, 'generation': generation})
         return self.summary(tenant)
 
+    def _slots(self, db, tenant):
+        """Parallel calls counted against max_inflight. Prior months count too."""
+        return db.execute(_SLOTS, (tenant, self.engine.clock() - UNCERTAIN_SLOT_SECONDS)).fetchone()[0]
+
+    def _expire_slots(self, db, tenant):
+        cutoff = self.engine.clock() - UNCERTAIN_SLOT_SECONDS
+        for row in db.execute("SELECT id FROM p_budget_reservations WHERE tenant=? "
+                              "AND status IN ('dispatching','uncertain') AND updated<=?", (tenant, cutoff)).fetchall():
+            db.execute("UPDATE p_budget_reservations SET status='unreconciled',updated=? WHERE tenant=? AND id=?",
+                       (self.engine.clock(), tenant, row['id']))
+            self.engine.audit(db, tenant, '', 'budget.uncertain_slot_expired', 'budget',
+                              {'id': row['id'], 'after_seconds': UNCERTAIN_SLOT_SECONDS})
+
     def summary(self, tenant):
         bounded(tenant)
         with self.engine.read() as db:
             settings = db.execute('SELECT * FROM p_budget_settings WHERE tenant=?', (tenant,)).fetchone()
             if not settings: raise NotFound('Budget not configured')
             account = db.execute('SELECT * FROM p_budget_accounts WHERE tenant=? AND period=?', (tenant, self._period())).fetchone()
-            # Reservations from prior months still count against concurrent calls.
-            inflight = db.execute("SELECT count(*) FROM p_budget_reservations WHERE tenant=? AND status IN ('reserved','dispatching','uncertain')", (tenant,)).fetchone()[0]
+            inflight = self._slots(db, tenant)
             out = dict(settings)
             out.update(period=self._period(), spent_micro=account['spent_micro'] if account else 0,
                        reserved_micro=account['reserved_micro'] if account else 0, inflight=inflight)
@@ -99,7 +140,8 @@ class UsageBudget:
         if type(limit) is not int or not 1 <= limit <= 100: raise ValueError('Invalid limit')
         with self.engine.read() as db:
             return [dict(row) for row in db.execute('SELECT id,request_key,period,amount_micro,status,created,updated '
-                "FROM p_budget_reservations WHERE tenant=? AND status IN ('reserved','dispatching','uncertain') ORDER BY created,id LIMIT ?", (tenant, limit))]
+                'FROM p_budget_reservations WHERE tenant=? AND status IN (' + _HELD_PLACEHOLDERS + ') '
+                'ORDER BY created,id LIMIT ?', (tenant, *HELD, limit))]
 
     def _row(self, db, tenant, reservation):
         row = db.execute('SELECT * FROM p_budget_reservations WHERE tenant=? AND id=?', (tenant, reservation)).fetchone()
@@ -121,8 +163,8 @@ class UsageBudget:
             if old:
                 if old['fingerprint'] != full: raise Conflict('Budget key reused with different request')
                 return old['id']
-            count = db.execute("SELECT count(*) FROM p_budget_reservations WHERE tenant=? AND status IN ('reserved','dispatching','uncertain')", (tenant,)).fetchone()[0]
-            if count >= settings['max_inflight']: raise RateLimited('Budget parallel call limit reached')
+            self._expire_slots(db, tenant)
+            if self._slots(db, tenant) >= settings['max_inflight']: raise RateLimited('Budget parallel call limit reached')
             period = self._period()
             db.execute('INSERT OR IGNORE INTO p_budget_accounts(tenant,period) VALUES(?,?)', (tenant, period))
             updated = db.execute('UPDATE p_budget_accounts SET reserved_micro=reserved_micro+?,inflight=inflight+1 '
@@ -144,7 +186,8 @@ class UsageBudget:
                 raise Conflict('Undispatched reservation expired at period boundary; cancel and reserve again')
             settings = db.execute('SELECT * FROM p_budget_settings WHERE tenant=?', (tenant,)).fetchone()
             account = db.execute('SELECT * FROM p_budget_accounts WHERE tenant=? AND period=?', (tenant, row['period'])).fetchone()
-            count = db.execute("SELECT count(*) FROM p_budget_reservations WHERE tenant=? AND status IN ('reserved','dispatching','uncertain')", (tenant,)).fetchone()[0]
+            self._expire_slots(db, tenant)
+            count = self._slots(db, tenant)
             if not settings or account['spent_micro'] + account['reserved_micro'] > settings['limit_micro'] or count > settings['max_inflight']:
                 raise RateLimited('Budget policy changed before dispatch')
             db.execute("UPDATE p_budget_reservations SET status='dispatching',updated=? WHERE tenant=? AND id=?", (self.engine.clock(), tenant, reservation))
@@ -165,13 +208,28 @@ class UsageBudget:
             if row['status'] != 'reserved': raise Conflict('A dispatched charge cannot be cancelled')
             self._settle(db, tenant, row, 0, 'cancelled', 'budget')
 
-    def _settle(self, db, tenant, row, actual, status, actor):
+    def release(self, tenant, reservation, reason):
+        """A dispatched call the provider cannot have billed: settle it at zero.
+
+        ``reason`` is ``not_sent`` (the request never left) or ``rejected`` (the
+        provider answered with an HTTP error status) -- model_transport.NOT_SENT
+        and REJECTED. An unknown outcome is ``uncertain()``, never this.
+        """
+        if reason not in RELEASE_REASONS: raise ValueError('Release reason must be not_sent or rejected')
+        with self.engine.tx() as db:
+            row = self._row(db, tenant, reservation)
+            if row['status'] == 'released': return
+            if row['status'] != 'dispatching': raise Conflict('Only a dispatched call can be released')
+            self._settle(db, tenant, row, 0, 'released', 'budget', reason=reason)
+
+    def _settle(self, db, tenant, row, actual, status, actor, **detail):
         db.execute('UPDATE p_budget_accounts SET reserved_micro=reserved_micro-?,spent_micro=spent_micro+?,inflight=inflight-1 '
                    'WHERE tenant=? AND period=?', (row['amount_micro'], actual, tenant, row['period']))
         db.execute('UPDATE p_budget_reservations SET status=?,actual_micro=?,updated=? WHERE tenant=? AND id=?',
                    (status, actual, self.engine.clock(), tenant, row['id']))
         self.engine.audit(db, tenant, '', 'budget.' + status, actor,
-                          {'id': row['id'], 'actual_micro': actual, 'reservation_exceeded': actual > row['amount_micro']})
+                          {'id': row['id'], 'actual_micro': actual, 'reservation_exceeded': actual > row['amount_micro'],
+                           **detail})
 
     def settle(self, tenant, reservation, actual_micro):
         amount(actual_micro)
@@ -188,7 +246,7 @@ class UsageBudget:
         with self.engine.tx() as db:
             self.engine.require_authority(db, tenant, 'web', actor, ('owner',))
             row = self._row(db, tenant, reservation)
-            if row['status'] not in {'reserved', 'dispatching', 'uncertain'}:
+            if row['status'] not in HELD:
                 raise Conflict('Reservation has already been reconciled')
             self._settle(db, tenant, row, actual_micro, 'reconciled', actor)
             self.engine.audit(db, tenant, '', 'budget.reconciliation_evidence', actor, {'id': reservation, 'evidence': evidence})
@@ -233,40 +291,75 @@ def provider_tokens(usage, name):
     return usage['prompt_tokens'], usage['completion_tokens']
 
 
-def metered_completion(engine, tenant, cfg, transport, url, body, headers, request_key=None):
-    """Optional pricing configuration enables mandatory ledger reservation.
+def metered_completion(engine, tenant, cfg, transport, url, body, headers, request_key=None, *,
+                       timeout=None, deadline=None, sleep=time.sleep, clock=time.monotonic):
+    """One model decision: up to three provider attempts, each metered on its own.
 
-    Missing/malformed usage keeps the full reservation; no automatic refund.
-    Model JSON validity is separate from whether the provider incurred a charge.
+    Optional pricing configuration enables mandatory ledger reservation, per
+    ATTEMPT: the first under ``request_key``, a retry under ``request_key#retryN``.
+    A released attempt (never left / HTTP error status) is settled at zero before
+    the retry reserves, so a retried decision is charged once. An unknown outcome
+    stays ``uncertain`` -- that attempt may have been billed -- and its retry is a
+    second, separately metered request. A missing or malformed usage receipt on a
+    200 is ``uncertain`` and is not retried: the provider did answer.
+
+    ``timeout`` is the per-attempt timeout the transport was built with (default
+    model_timeout(cfg)); ``deadline`` bounds all attempts and waits (default
+    MODEL_CALL_DEADLINE_SECONDS). Model JSON validity is the caller's concern.
     """
     from .engine import encode
-    from .model_transport import provider, validate_url
+    from .model_transport import (MODEL_CALL_DEADLINE_SECONDS, NOT_SENT, REJECTED, classify,
+                                  model_timeout, provider, validate_url, with_retries)
     validate_url(cfg, url)  # Configuration errors must not consume a reservation.
     name = provider(cfg)    # An unknown dialect must not reserve either.
     if 'usage_budget_required' in cfg and type(cfg['usage_budget_required']) is not bool:
         raise ValueError('usage_budget_required must be boolean')
+    seconds = model_timeout(cfg) if timeout is None else timeout
+    def retrying(attempt):
+        return with_retries(attempt, timeout=seconds, sleep=sleep, clock=clock,
+                            deadline=MODEL_CALL_DEADLINE_SECONDS if deadline is None else deadline)
     pricing = cfg.get('usage_budget')
     if pricing is None:
         if cfg.get('usage_budget_required') is True:
             raise Forbidden('Model usage budget configuration required')
-        return transport(url, body, headers)
+        return retrying(lambda index: transport(url, body, headers))
     if not isinstance(pricing, dict) or set(pricing) != {'currency', 'input_micro_per_million', 'output_micro_per_million'}:
         raise ValueError('Explicit model pricing required')
     budget = UsageBudget(engine)
-    # Conservative byte-based input estimate plus message/token framing allowance.
-    # Tokenizers/provider hidden input may differ: overruns are recorded, never hidden.
+    # A deliberately high hold. Input is estimated as one token per BYTE of the
+    # request plus 4096 of framing (real tokens are several bytes each), and
+    # output as the full max_tokens -- 16000 on the Anthropic dialect for a
+    # decision of a few hundred tokens -- so the hold is typically ten times the
+    # settled cost or more. It only gates admission (a tenant near its limit is
+    # refused early, never overspent); settlement records the receipt, and an
+    # overrun is recorded, never hidden.
     estimate = token_cost(len(encode(body).encode('utf-8')) + 4096, body['max_tokens'], pricing)
     key = request_key or 'model:' + uuid.uuid4().hex
-    rid = budget.reserve(tenant, key, digest({'url': url, 'body': body, 'pricing': pricing}), estimate, pricing['currency'])
-    budget.dispatch(tenant, rid)
-    try:
-        response = transport(url, body, headers)
-        usage = response.get('usage') if isinstance(response, dict) else None
-        if not isinstance(usage, dict):
-            raise ValueError('Model usage receipt missing')
-        actual = token_cost(*provider_tokens(usage, name), pricing)
-    except Exception:
-        budget.uncertain(tenant, rid)
-        raise RuntimeError('Metered model call failed or usage unavailable; reconciliation required') from None
-    budget.settle(tenant, rid, actual)
-    return response
+    fingerprint = digest({'url': url, 'body': body, 'pricing': pricing})
+
+    def attempt(index):
+        rid = budget.reserve(tenant, key if index == 0 else '%s#retry%d' % (key, index),
+                             fingerprint, estimate, pricing['currency'])
+        budget.dispatch(tenant, rid)
+        try:
+            response = transport(url, body, headers)
+        except Exception as exc:
+            failure = classify(exc)
+            if failure is not None and failure.outcome in (NOT_SENT, REJECTED):
+                budget.release(tenant, rid, failure.outcome)
+                raise
+            budget.uncertain(tenant, rid)
+            if failure is not None:
+                raise
+            raise RuntimeError('Metered model call failed or usage unavailable; reconciliation required') from None
+        try:
+            usage = response.get('usage') if isinstance(response, dict) else None
+            if not isinstance(usage, dict):
+                raise ValueError('Model usage receipt missing')
+            actual = token_cost(*provider_tokens(usage, name), pricing)
+        except Exception:
+            budget.uncertain(tenant, rid)
+            raise RuntimeError('Metered model call failed or usage unavailable; reconciliation required') from None
+        budget.settle(tenant, rid, actual)
+        return response
+    return retrying(attempt)

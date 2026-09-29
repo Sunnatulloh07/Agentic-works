@@ -14,9 +14,20 @@
 # qolardi va tenant eski operator konfigida ishlayverardi.
 #
 # SIR SAQLASH QOIDASI (buzilmaydi): bu yerda faqat env o'zgaruvchi NOMI yoziladi,
-# hech qachon qiymati. `token_env: DEMO_TELEGRAM_TOKEN` -- to'g'ri;
+# hech qachon qiymati. `token_env: TENANT_DEMO_RETAIL__TELEGRAM_TOKEN` -- to'g'ri;
 # `token: 123456:AA...` -- noto'g'ri. Qiymatlar env/vault'da qoladi, bu fayl esa
 # git'ga tushadi. Nom [A-Z][A-Z0-9_]* shaklida bo'lishi shart.
+#
+# NOM MAYDONI QOIDASI: bu faylni tenant o'zi yozishi mumkin, shuning uchun u faqat
+# O'Z env nomlarini o'qiy oladi: TENANT_<TENANT>__<NOM> (tenant nomi katta harfda,
+# '-' o'rniga '_', keyin IKKITA pastki chiziq). Quyidagi misollar `demo-retail`
+# tenant'i uchun; boshqa tenant'da prefiksni almashtiring (acme-shop ->
+# TENANT_ACME_SHOP__...). Boshqa nom (masalan umumiy PLATFORM_LLM_KEY) faqat
+# operator uni PLATFORM_SHARED_SECRET_NAMES ro'yxatiga qo'shsa ishlaydi.
+# Platforma sirlari (JWT_SECRET, ADMIN_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+# TENANT_SECRETS, META_APP_SECRET, META_VERIFY_TOKEN, PLATFORM_VAULT_* ...) hech
+# qachon -- ro'yxat orqali ham -- nomlanmaydi. Buzilgan nom butun faylni rad
+# ettiradi; `python scripts/run_local.py --check` qaysi kalit ekanini aytadi.
 #
 # ESLATMA (ma'lum cheklov): Instagram'dan KIRUVCHI xabar account_id bo'yicha
 # tenant'ni topadi (tenant_for_instagram_account), va u hali faqat operator
@@ -24,21 +35,21 @@
 # JSON'da ham ro'yxatda turishi shart.
 
 telegram:
-  token_env: DEMO_TELEGRAM_TOKEN
+  token_env: TENANT_DEMO_RETAIL__TELEGRAM_TOKEN
 
 instagram:
   account_id: "17841400000000000"
   graph_version: v21.0
-  token_env: DEMO_INSTAGRAM_TOKEN
+  token_env: TENANT_DEMO_RETAIL__INSTAGRAM_TOKEN
 
 sheets:
   spreadsheet_id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
   range: Sheet1!A:D
-  token_env: DEMO_SHEETS_TOKEN
+  token_env: TENANT_DEMO_RETAIL__SHEETS_TOKEN
 
 mcp:
   url: https://mcp.example.com/rpc
-  token_env: DEMO_MCP_TOKEN
+  token_env: TENANT_DEMO_RETAIL__MCP_TOKEN
   allowed_tools: [crm.lookup]
   tool_schemas:
     crm.lookup:

@@ -206,6 +206,29 @@ class OperatorReplyTests(unittest.TestCase):
         self.assertTrue(self.e.tick(T))
         self.assertEqual('succeeded', self.task(tid)['status'])
 
+    def test_independent_approval_makes_the_reply_wait_for_a_second_person(self):
+        # The pack asked for four eyes on this agent's sends. The author of a reply
+        # is its creator, so their own decision cannot be the approval.
+        self.policies['bot']['independent_approval'] = True
+        self.inbound()
+        tid = self.reply()
+        step = self.task(tid)['steps'][0]
+        self.assertEqual((1, 'pending', ''), (step['approval_needed'], step['approval_status'],
+                                              step['approver']))
+        self.assertEqual([], [r for r in self.rows(
+            "SELECT action FROM p_audit WHERE task=? AND action='approval.approved'", tid)])
+        self.assertFalse(self.e.tick(T))
+        self.assertEqual('waiting_approval', self.task(tid)['status'])
+        self.assertEqual([], self.sent)
+        with self.assertRaises(Forbidden):
+            self.e.approve(T, step['id'], OPERATOR, 'approved', 'operator')
+        self.e.approve(T, step['id'], 'boss', 'approved', 'owner')
+        self.assertTrue(self.e.tick(T))
+        self.assertEqual('succeeded', self.task(tid)['status'])
+        self.assertEqual(1, len(self.sent))
+        # The same key and text is still the same task.
+        self.assertEqual(tid, self.reply())
+
     def test_an_agent_without_the_send_tool_is_refused(self):
         self.inbound()
         with self.assertRaises(Forbidden):
@@ -367,6 +390,46 @@ class OperatorReplyTests(unittest.TestCase):
         self.assertEqual('failed', self.task(tid)['status'])
         self.assertFalse(settle_operator_replies(self.e, T))
         self.assertEqual([], self.history())
+
+    def takeover(self, chat=CHAT, channel='telegram'):
+        from platform_runtime.conversation import takeover_state
+        with self.e.read() as c:
+            return takeover_state(c, T, channel, chat, self.now)
+
+    def test_only_a_delivered_reply_takes_the_chat_over(self):
+        """Queued is not said: a reply that later fails must not silence the bot."""
+        self.policies['bot']['conversation'] = {'takeover_minutes': 10}
+        self.inbound()
+        self.reply()
+        self.assertIsNone(self.takeover())
+        self.assertTrue(self.e.tick(T))
+        self.now += 5
+        self.assertTrue(settle_operator_replies(self.e, T))
+        self.assertEqual({'actor': OPERATOR, 'until': self.now + 600}, self.takeover())
+        self.assertEqual(1, len(self.rows("SELECT 1 FROM p_audit WHERE action='conversation.takeover_started'")))
+        # Replaying the same request (same key, same text) extends nothing.
+        until = self.takeover()['until']
+        self.now += 60
+        self.reply()
+        self.assertFalse(settle_operator_replies(self.e, T))
+        self.assertEqual(until, self.takeover()['until'])
+        # A new reply that is delivered does extend it.
+        self.reply(text='Yana savol bormi?', key='k2', actor='boris')
+        self.assertTrue(self.e.tick(T))
+        self.assertTrue(settle_operator_replies(self.e, T))
+        self.assertEqual({'actor': 'boris', 'until': self.now + 600}, self.takeover())
+
+    def test_a_failed_reply_never_takes_the_chat_over(self):
+        from platform_runtime.engine import DeliveryRejected
+        self.inbound()
+        real = self.registry.items['telegram.send']
+        self.registry.items['telegram.send'] = Tool(real.name, real.risk, real.schema,
+                                                    lambda *a: (_ for _ in ()).throw(DeliveryRejected('http_403')),
+                                                    external=True)
+        self.reply()
+        self.assertTrue(self.e.tick(T))
+        self.assertFalse(settle_operator_replies(self.e, T))
+        self.assertIsNone(self.takeover())
 
     def test_the_settle_only_touches_operator_tasks_of_this_tenant(self):
         self.inbound()

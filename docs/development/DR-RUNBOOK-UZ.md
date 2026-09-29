@@ -7,7 +7,7 @@
 ## 0. Drill nima isbotlaydi (o‘lchandi)
 
 ```
-python scripts/dr_drill.py --report docs/verification/dr-drill.json
+python scripts/dr_drill.py --report .verify-offline/dr-drill.json
 ```
 
 Oxirgi o‘lchov (Windows, 2026-09-21): **42 jadval, 16 satr, 0.295 s**, hamma qadam `ok`.
@@ -73,7 +73,7 @@ o‘zgartirmaydi va hech narsa chop etmaydi.
 
 | Ko‘rsatkich | Qiymat | Manba |
 |---|---|---|
-| Drill davomiyligi (sintetik) | **0.295 s** | `docs/verification/dr-drill.json` |
+| Drill davomiyligi (sintetik) | **0.295 s** | `dr-drill.json` (git tarixida) |
 | RTO (haqiqiy baza) | **o‘lchanmagan** | Hajmga bog‘liq |
 | RPO | **o‘lchanmagan** | WAL arxivi yo‘q |
 

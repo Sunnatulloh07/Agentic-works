@@ -201,7 +201,7 @@ class AgentLoopTests(unittest.TestCase):
     def test_planner_lease_expiry_has_no_automatic_retry(self):
         run_id = self.create()
         self.loop._reserve('tenant', run_id)
-        self.now += 61
+        self.now += PLANNER_LEASE_SECONDS + 1
         calls = []
         self.loop.tick('tenant', lambda *args: calls.append(args))
         self.assertEqual([], calls)
@@ -211,7 +211,7 @@ class AgentLoopTests(unittest.TestCase):
     def test_late_model_response_cannot_submit(self):
         run_id = self.create()
         def planner(*args):
-            self.now += 61
+            self.now += PLANNER_LEASE_SECONDS + 1
             return self.tool()
         self.loop.tick('tenant', planner)
         self.assertEqual('escalated', self.current(run_id)['status'])
@@ -320,6 +320,29 @@ class AgentLoopTests(unittest.TestCase):
         self.assertFalse(changed)
         self.assertIsNone(second)
         self.assertEqual(1, self.current(run_id)['calls'])
+
+    def test_reserve_next_skips_held_runs_and_passes_over_a_retired_one(self):
+        """The worker pool's entry point: a retirement is not the pass's one unit of work.
+
+        `tick` stops after any change; `reserve_next` keeps looking for a run to
+        plan, and never touches a run the caller already holds.
+        """
+        expired = self.create(key='old', max_seconds=60)
+        self.now += 1
+        held = self.create(key='held')
+        self.now += 1
+        free = self.create(key='free')
+        self.now += 60  # only 'old' is past its wall deadline
+        changed, run_id, reservation = self.loop.reserve_next('tenant', skip={held})
+        self.assertTrue(changed)
+        self.assertEqual(free, run_id)
+        self.assertEqual('escalated', self.current(expired)['status'])
+        self.assertEqual('pending', self.current(held)['status'])
+        self.assertEqual('planning', self.current(free)['status'])
+        ask = {'action': 'ask', 'question': 'Qaysi mijoz?'}
+        self.assertTrue(self.loop.plan('tenant', run_id, reservation, lambda tenant, context: ask))
+        self.assertEqual('needs_input', self.current(free)['status'])
+        self.assertEqual((False, None, None), self.loop.reserve_next('tenant', skip={held}))
 
     def test_multiprocess_planner_reservation_at_most_once(self):
         run_id = self.create()
@@ -497,12 +520,12 @@ class AgentLoopTests(unittest.TestCase):
         lines = set(source.splitlines())
         for literal in ('MAX_STEPS = 12', 'MAX_SECONDS = 86400',
                         'MAX_OBSERVATION_BYTES = 12000', 'MAX_HISTORY_BYTES = 48000',
-                        'PLANNER_LEASE_SECONDS = 60'):
+                        'PLANNER_LEASE_SECONDS = 180'):
             with self.subTest(literal=literal):
                 self.assertIn(literal, lines)
         self.assertEqual(12000, MAX_OBSERVATION_BYTES)
         self.assertEqual(48000, MAX_HISTORY_BYTES)
-        self.assertEqual(60, PLANNER_LEASE_SECONDS)
+        self.assertEqual(180, PLANNER_LEASE_SECONDS)
 
     def test_the_active_status_set_is_stated_once(self):
         """One fact, three readers -- the fix was to stop restating it.

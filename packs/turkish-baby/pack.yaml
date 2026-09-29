@@ -39,7 +39,7 @@ agents:
     conversation:
       enabled: true
       max_steps: 4
-      max_seconds: 120
+      max_seconds: 180
       history_turns: 8
       fallback_text: "Rahmat! Savolingizni menejerimizga uzatdim, tez orada shu yerda javob beramiz."
       # To‘g‘ri orders.draft -> sales.order_taker uchun BITTA "order" yozuvi. U
@@ -71,7 +71,7 @@ agents:
     conversation:
       enabled: true
       max_steps: 4
-      max_seconds: 120
+      max_seconds: 180
       history_turns: 8
       fallback_text: "Rahmat! Savolingizni menejerimizga uzatdim, tez orada shu yerda javob beramiz."
       order_agent: sales.order_taker
